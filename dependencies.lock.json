@@ -1,0 +1,28 @@
+{
+  "language": "C++17",
+  "gui": {
+    "name": "EUI-NEO",
+    "version": "0.6.1",
+    "repository": "https://github.com/sudoevolve/EUI-NEO",
+    "commit": "1647709068e36834ab26da5a97ef4ad98aa34c9d",
+    "local_patch": "patches/EUI-NEO-windows-integration.patch",
+    "distribution": "Vendored build/runtime subset; upstream demos, docs, optional modules and Git metadata omitted. See third_party/README.md.",
+    "license": "Apache-2.0"
+  },
+  "json": {
+    "name": "nlohmann/json", "version": "3.12.0", "license": "MIT",
+    "source": "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp",
+    "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63"
+  },
+  "font": {
+    "name": "Noto Sans CJK SC Regular", "version": "2.004", "license": "OFL-1.1",
+    "commit": "523d033d6cb47f4a80c58a35753646f5c3608a78",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
+  },
+  "eui_bundled_dependencies": {
+    "GLFW": "3.4", "FreeType": "2.13.3", "libpng": "1.6.43", "zlib": "1.3.1",
+    "glad_generator": "0.1.34", "stb_image": "2.30", "yyjson": "0.12.0",
+    "note": "Exact source bytes, including miniaudio and tray, are locked by the EUI commit above."
+  }
+}

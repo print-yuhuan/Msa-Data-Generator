@@ -1,0 +1,4 @@
+#pragma code_page(65001)
+// The numeric group is used by Explorer; GLFW_ICON is used by GLFW windows.
+1 ICON "@MSA_APP_ICON_FILE@"
+GLFW_ICON ICON "@MSA_APP_ICON_FILE@"
