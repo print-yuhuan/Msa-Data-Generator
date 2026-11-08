@@ -1,0 +1,5065 @@
+{
+  "description": "27组共用CSV在本机五软件实测。方差分量及ndc来自Minitab Gage R&R存储列；最终随机效应ANOVA表来自JMP EMS；完整模型SS/DF及交互P来自MATLAB anovan。原始逐软件结果及对照脚本见tests/anova。",
+  "software": {
+    "Minitab": "22.6",
+    "SPSS": "32.0",
+    "JMP": "19",
+    "Origin": "2026b / 10.3.5 (COM worksheet + native ocMath API)",
+    "MATLAB": "R2026b"
+  },
+  "cases": [
+    {
+      "id": "o2_r2_p5",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 5,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 128,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.569349,
+          9.946023,
+          10.508926,
+          10.085201,
+          9.973255
+        ],
+        [
+          9.597633,
+          9.974308,
+          10.480642,
+          10.113486,
+          9.944971
+        ],
+        [
+          9.514438,
+          9.924929,
+          10.456982,
+          10.019956,
+          9.944373
+        ],
+        [
+          9.542722,
+          9.953213,
+          10.485266,
+          10.04824,
+          9.916089
+        ]
+      ],
+      "csv_sha256": "f9200b157eff2f04752456dab4aa70194e2b666918dce845a8ce6b345f5cb25f",
+      "interaction_included": false,
+      "interaction_p": 0.45155523828433985,
+      "variance_components": {
+        "AV": 0.0007111147432321097,
+        "EV": 0.0003999979374787213,
+        "GRR": 0.0011111126807108308,
+        "Operator": 0.0007111147432321097,
+        "OperatorPart": 0.0,
+        "PV": 0.11000005305908638,
+        "TV": 0.11111116573979721
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 1.7616008406953,
+          "df": 4,
+          "ms": 0.440400210173825,
+          "f": 1101.00620260814,
+          "p": 2.5596661718986e-17
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00751114536980051,
+          "df": 1,
+          "ms": 0.00751114536980051,
+          "f": 18.7779602502408,
+          "p": 0.000687741405750026
+        }
+      ],
+      "full_ss_df": [
+        [
+          1.7616008406952983,
+          4,
+          0.4404002101738246
+        ],
+        [
+          0.007511145369800021,
+          1,
+          0.007511145369800021
+        ],
+        [
+          0.0015999912757000967,
+          4,
+          0.0003999978189250242
+        ],
+        [
+          0.003999979849000468,
+          10,
+          0.0003999979849000468
+        ]
+      ]
+    },
+    {
+      "id": "o2_r2_p6",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 6,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 129,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.822354,
+          10.3443,
+          10.194171,
+          9.526495,
+          9.715155,
+          10.253483
+        ],
+        [
+          9.850638,
+          10.372584,
+          10.165887,
+          9.554779,
+          9.743439,
+          10.225198
+        ],
+        [
+          9.85639,
+          10.381445,
+          10.207769,
+          9.5399,
+          9.77424,
+          10.299445
+        ],
+        [
+          9.884674,
+          10.409729,
+          10.236053,
+          9.568185,
+          9.745956,
+          10.32773
+        ]
+      ],
+      "csv_sha256": "bdc61bbe1a6a6eb929ca51306234be527ba604901ff0cb4fa979222376e5acd6",
+      "interaction_included": false,
+      "interaction_p": 0.45819253116529557,
+      "variance_components": {
+        "AV": 0.0007111095502058201,
+        "EV": 0.00040000035957111406,
+        "GRR": 0.001111109909776934,
+        "Operator": 0.0007111095502058201,
+        "OperatorPart": 0.0,
+        "PV": 0.11000000671781772,
+        "TV": 0.11111111662759462
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 2.20200013615421,
+          "df": 5,
+          "ms": 0.440400027230842,
+          "f": 1100.99907830085,
+          "p": 1.02027311700068e-20
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00893331496204164,
+          "df": 1,
+          "ms": 0.00893331496204164,
+          "f": 22.3332673279414,
+          "p": 0.000195223506629716
+        }
+      ],
+      "full_ss_df": [
+        [
+          2.2020001361542105,
+          5,
+          0.4404000272308421
+        ],
+        [
+          0.008933314962042527,
+          1,
+          0.008933314962042527
+        ],
+        [
+          0.00200001332320765,
+          5,
+          0.00040000266464153
+        ],
+        [
+          0.0047999927894992744,
+          12,
+          0.00039999939912493954
+        ]
+      ]
+    },
+    {
+      "id": "o2_r2_p7",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 7,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 130,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.612761,
+          9.740403,
+          10.595085,
+          9.867906,
+          9.808614,
+          10.152291,
+          10.102463
+        ],
+        [
+          9.584477,
+          9.768687,
+          10.566801,
+          9.89619,
+          9.78033,
+          10.180576,
+          10.074178
+        ],
+        [
+          9.643645,
+          9.774071,
+          10.626423,
+          9.930515,
+          9.79128,
+          10.235193,
+          10.11935
+        ],
+        [
+          9.671929,
+          9.802356,
+          10.654707,
+          9.902231,
+          9.819564,
+          10.206908,
+          10.091065
+        ]
+      ],
+      "csv_sha256": "071a0f5043cc5e3221355f6ed3ac0123cf39dacfe464d1725be92309eadfaae7",
+      "interaction_included": false,
+      "interaction_p": 0.46284595394268657,
+      "variance_components": {
+        "AV": 0.0007111105772178593,
+        "EV": 0.0003999992626997671,
+        "GRR": 0.0011111098399176264,
+        "Operator": 0.0007111105772178593,
+        "OperatorPart": 0.0,
+        "PV": 0.10999997775679254,
+        "TV": 0.11111108759671018
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 2.64239946173922,
+          "df": 6,
+          "ms": 0.440399910289869,
+          "f": 1101.00180496597,
+          "p": 4.1203661993106e-24
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0103555473437503,
+          "df": 1,
+          "ms": 0.0103555473437503,
+          "f": 25.8889160748812,
+          "p": 5.61469655256571e-05
+        }
+      ],
+      "full_ss_df": [
+        [
+          2.642399461739215,
+          6,
+          0.4403999102898692
+        ],
+        [
+          0.01035554734374955,
+          1,
+          0.01035554734374955
+        ],
+        [
+          0.002399951239500542,
+          6,
+          0.0003999918732500903
+        ],
+        [
+          0.005600034014500377,
+          14,
+          0.00040000242960716977
+        ]
+      ]
+    },
+    {
+      "id": "o2_r2_p8",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 8,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 131,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.100823,
+          10.169569,
+          10.289174,
+          10.237645,
+          10.214741,
+          9.538038,
+          9.951907,
+          9.413641
+        ],
+        [
+          10.072538,
+          10.197853,
+          10.26089,
+          10.209361,
+          10.186457,
+          9.566322,
+          9.923622,
+          9.441925
+        ],
+        [
+          10.078595,
+          10.261393,
+          10.322701,
+          10.200572,
+          10.257049,
+          9.524082,
+          9.986843,
+          9.424943
+        ],
+        [
+          10.106879,
+          10.233108,
+          10.294417,
+          10.228857,
+          10.285333,
+          9.552366,
+          10.015127,
+          9.453227
+        ]
+      ],
+      "csv_sha256": "9ae1f28c7d77dd4a1806106494d527ed261536c39d08366d9781193c4ab5d0b2",
+      "interaction_included": true,
+      "interaction_p": 0.035236407186900756,
+      "variance_components": {
+        "AV": 0.0007111136715625864,
+        "EV": 0.00039999939912494626,
+        "GRR": 0.0011111130706875324,
+        "Operator": 0.0003238328492054066,
+        "OperatorPart": 0.00038728082235717985,
+        "PV": 0.10999999998425,
+        "TV": 0.11111111305493754
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.08822192686587,
+          "df": 7,
+          "ms": 0.441174560980839,
+          "f": 375.608031012821,
+          "p": 1.78753311614894e-08
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00635588663112571,
+          "df": 1,
+          "ms": 0.00635588663112571,
+          "f": 5.41128676492642,
+          "p": 0.0529077879964825
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.00822192730687502,
+          "df": 7,
+          "ms": 0.00117456104383929,
+          "f": 2.93640702074954,
+          "p": 0.0352364071818448
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.088221926865875,
+          7,
+          0.4411745609808393
+        ],
+        [
+          0.00635588663112463,
+          1,
+          0.00635588663112463
+        ],
+        [
+          0.008221927306875543,
+          7,
+          0.0011745610438393633
+        ],
+        [
+          0.006399990385998144,
+          16,
+          0.000399999399124884
+        ]
+      ]
+    },
+    {
+      "id": "o2_r2_p9",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 9,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 132,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.715649,
+          10.23828,
+          9.979754,
+          10.288865,
+          10.171102,
+          9.78848,
+          9.526758,
+          10.544583,
+          9.952732
+        ],
+        [
+          9.687365,
+          10.266564,
+          9.95147,
+          10.260581,
+          10.199387,
+          9.760195,
+          9.498473,
+          10.516299,
+          9.924448
+        ],
+        [
+          9.684136,
+          10.231503,
+          9.881055,
+          10.218602,
+          10.224643,
+          9.708538,
+          9.427761,
+          10.498998,
+          9.918563
+        ],
+        [
+          9.655852,
+          10.259787,
+          9.909339,
+          10.246886,
+          10.196358,
+          9.736822,
+          9.456046,
+          10.527282,
+          9.946847
+        ]
+      ],
+      "csv_sha256": "54a23ab38f4df7e5dd666e91bc32a3407e4c61cd8aa0ea06aa7a7329cd4a8b15",
+      "interaction_included": true,
+      "interaction_p": 0.04554809612303624,
+      "variance_components": {
+        "AV": 0.0007111117507223837,
+        "EV": 0.00040000018480541123,
+        "GRR": 0.0011111119355277953,
+        "Operator": 0.0003960558617778663,
+        "OperatorPart": 0.0003150558889445176,
+        "PV": 0.11000000083238885,
+        "TV": 0.11111111276791664
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.528240922338,
+          "df": 8,
+          "ms": 0.44103011529225,
+          "f": 428.138038644512,
+          "p": 1.02624033791473e-09
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00815911747469433,
+          "df": 1,
+          "ms": 0.00815911747469433,
+          "f": 7.92061229281585,
+          "p": 0.0226901964245351
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0082408957015556,
+          "df": 8,
+          "ms": 0.00103011196269445,
+          "f": 2.57527871667111,
+          "p": 0.0455480961393044
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.5282409223379982,
+          8,
+          0.4410301152922498
+        ],
+        [
+          0.008159117474695332,
+          1,
+          0.008159117474695332
+        ],
+        [
+          0.008240895701555395,
+          8,
+          0.0010301119626944244
+        ],
+        [
+          0.007200003326500504,
+          18,
+          0.00040000018480558356
+        ]
+      ]
+    },
+    {
+      "id": "o2_r2_p10",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 10,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 133,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.025451,
+          10.475478,
+          9.829788,
+          9.48843,
+          10.098662,
+          10.172456,
+          10.371329,
+          10.315269,
+          9.800911,
+          9.613421
+        ],
+        [
+          10.053736,
+          10.503762,
+          9.801504,
+          9.516714,
+          10.126946,
+          10.144171,
+          10.399613,
+          10.286985,
+          9.772627,
+          9.585137
+        ],
+        [
+          9.981339,
+          10.442693,
+          9.798189,
+          9.453788,
+          10.091024,
+          10.101446,
+          10.300916,
+          10.236835,
+          9.746096,
+          9.571626
+        ],
+        [
+          10.009624,
+          10.470977,
+          9.769905,
+          9.425503,
+          10.119309,
+          10.12973,
+          10.3292,
+          10.265119,
+          9.774381,
+          9.59991
+        ]
+      ],
+      "csv_sha256": "1b557cfc43e0428b42bbb142dd5f47c0034cc1733490aa7521d8405857aa8046",
+      "interaction_included": false,
+      "interaction_p": 0.4711050154983606,
+      "variance_components": {
+        "AV": 0.0007111105632481542,
+        "EV": 0.00039999994503481077,
+        "GRR": 0.0011111105082829648,
+        "Operator": 0.0007111105632481542,
+        "OperatorPart": 0.0,
+        "PV": 0.11000000858874115,
+        "TV": 0.1111111190970241
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.9636003087,
+          "df": 9,
+          "ms": 0.4404000343,
+          "f": 1101.00023703969,
+          "p": 2.85522560063705e-34
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0146222112100001,
+          "df": 1,
+          "ms": 0.0146222112100001,
+          "f": 36.5555330481372,
+          "p": 1.40359994085239e-06
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.9636003087000002,
+          9,
+          0.4404000343
+        ],
+        [
+          0.01462221121000118,
+          1,
+          0.01462221121000118
+        ],
+        [
+          0.0035999821389998132,
+          9,
+          0.00039999801544442367
+        ],
+        [
+          0.008000016267000643,
+          20,
+          0.00040000081335003215
+        ]
+      ]
+    },
+    {
+      "id": "o2_r3_p5",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 5,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 128,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.907126,
+          10.277774,
+          9.913845,
+          10.30818,
+          9.486762
+        ],
+        [
+          9.903242,
+          10.264755,
+          9.951823,
+          10.275701,
+          9.472641
+        ],
+        [
+          9.941219,
+          10.302732,
+          9.943828,
+          10.313679,
+          9.510618
+        ],
+        [
+          9.955527,
+          10.307294,
+          9.937738,
+          10.360461,
+          9.533165
+        ],
+        [
+          9.942404,
+          10.273794,
+          9.949396,
+          10.357216,
+          9.507396
+        ],
+        [
+          9.980382,
+          10.269317,
+          9.911418,
+          10.395193,
+          9.545373
+        ]
+      ],
+      "csv_sha256": "6d728f9b186519ad552478372d57a309d9bef77bae221a1ce337386a5c113730",
+      "interaction_included": true,
+      "interaction_p": 0.021568814631780318,
+      "variance_components": {
+        "AV": 0.000711110190222242,
+        "EV": 0.00040000044990009284,
+        "GRR": 0.001111110640122335,
+        "Operator": 0.0003567744099555973,
+        "OperatorPart": 0.0003543357802666446,
+        "PV": 0.1100000078042222,
+        "TV": 0.11111111844434454
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 2.64585221846414,
+          "df": 4,
+          "ms": 0.661463054616034,
+          "f": 452.125449242851,
+          "p": 1.45896513576829e-05
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00681462394003382,
+          "df": 1,
+          "ms": 0.00681462394003382,
+          "f": 4.65795464887662,
+          "p": 0.097081532248727
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.00585203116280004,
+          "df": 4,
+          "ms": 0.00146300779070001,
+          "f": 3.65751536293883,
+          "p": 0.0215688146322144
+        }
+      ],
+      "full_ss_df": [
+        [
+          2.6458522184641358,
+          4,
+          0.6614630546160339
+        ],
+        [
+          0.006814623940032405,
+          1,
+          0.006814623940032405
+        ],
+        [
+          0.005852031162798532,
+          4,
+          0.001463007790699633
+        ],
+        [
+          0.008000008998000574,
+          20,
+          0.0004000004499000287
+        ]
+      ]
+    },
+    {
+      "id": "o2_r3_p6",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 6,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 129,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.619267,
+          9.749281,
+          10.43838,
+          10.368409,
+          9.985993,
+          9.900941
+        ],
+        [
+          9.580591,
+          9.780454,
+          10.447953,
+          10.378055,
+          10.008715,
+          9.862266
+        ],
+        [
+          9.607618,
+          9.787956,
+          10.409277,
+          10.407085,
+          10.024669,
+          9.87866
+        ],
+        [
+          9.579332,
+          9.78204,
+          10.468701,
+          10.306098,
+          9.973363,
+          9.816423
+        ],
+        [
+          9.604006,
+          9.743364,
+          10.46387,
+          10.296739,
+          9.934687,
+          9.855098
+        ],
+        [
+          9.618007,
+          9.753247,
+          10.430025,
+          10.335415,
+          9.961289,
+          9.842726
+        ]
+      ],
+      "csv_sha256": "f1d505e67418bf1ca6a202e54cc296313594d8522564216f43280985300c49dd",
+      "interaction_included": true,
+      "interaction_p": 0.00482390220624183,
+      "variance_components": {
+        "AV": 0.0007111095937683376,
+        "EV": 0.00040000174675043306,
+        "GRR": 0.0011111113405187709,
+        "Operator": 0.00024217222331478203,
+        "OperatorPart": 0.0004689373704535556,
+        "PV": 0.1100000369275033,
+        "TV": 0.11111114826802206
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.30903517711566,
+          "df": 5,
+          "ms": 0.661807035423133,
+          "f": 366.284015617972,
+          "p": 2.09520091767121e-06
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00616591387777769,
+          "df": 1,
+          "ms": 0.00616591387777769,
+          "f": 3.41258943199812,
+          "p": 0.123975235762574
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.00903406929055548,
+          "df": 5,
+          "ms": 0.0018068138581111,
+          "f": 4.5170149206573,
+          "p": 0.00482390220282995
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.309035177115664,
+          5,
+          0.6618070354231328
+        ],
+        [
+          0.006165913877777207,
+          1,
+          0.006165913877777207
+        ],
+        [
+          0.009034069290554836,
+          5,
+          0.0018068138581109673
+        ],
+        [
+          0.009600041921999036,
+          24,
+          0.00040000174674995986
+        ]
+      ]
+    },
+    {
+      "id": "o2_r3_p7",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 7,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 130,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.445597,
+          10.077205,
+          9.696381,
+          10.391421,
+          10.199087,
+          9.886344,
+          10.077458
+        ],
+        [
+          9.484228,
+          10.115837,
+          9.735013,
+          10.430052,
+          10.237719,
+          9.913525,
+          10.064494
+        ],
+        [
+          9.45294,
+          10.095877,
+          9.704412,
+          10.423285,
+          10.228851,
+          9.924975,
+          10.103126
+        ],
+        [
+          9.429599,
+          10.170957,
+          9.707315,
+          10.462262,
+          10.244775,
+          9.961518,
+          10.11339
+        ],
+        [
+          9.446804,
+          10.15636,
+          9.736962,
+          10.43858,
+          10.27504,
+          9.966827,
+          10.128087
+        ],
+        [
+          9.408172,
+          10.132325,
+          9.745946,
+          10.423631,
+          10.283406,
+          9.928196,
+          10.152022
+        ]
+      ],
+      "csv_sha256": "34e6f21cc30dce59eb07908b621218520aed158fa00e1bbe6a6fa46e29c53f2b",
+      "interaction_included": true,
+      "interaction_p": 0.01008390118653571,
+      "variance_components": {
+        "AV": 0.0007111114781747804,
+        "EV": 0.0004000002580711375,
+        "GRR": 0.001111111736245918,
+        "Operator": 0.0003748797874603983,
+        "OperatorPart": 0.00033623169071438205,
+        "PV": 0.1100000080401537,
+        "TV": 0.1111111197763996
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.96845246142681,
+          "df": 6,
+          "ms": 0.661408743571134,
+          "f": 469.518659844295,
+          "p": 9.56938211421444e-08
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00928117086688133,
+          "df": 1,
+          "ms": 0.00928117086688133,
+          "f": 6.58848699773103,
+          "p": 0.042517417444686
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.00845217198128579,
+          "df": 6,
+          "ms": 0.0014086953302143,
+          "f": 3.52173605313646,
+          "p": 0.0100839011901528
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.9684524614268097,
+          6,
+          0.661408743571135
+        ],
+        [
+          0.009281170866882515,
+          1,
+          0.009281170866882515
+        ],
+        [
+          0.008452171981285339,
+          6,
+          0.0014086953302142231
+        ],
+        [
+          0.011200007226001674,
+          28,
+          0.00040000025807148835
+        ]
+      ]
+    },
+    {
+      "id": "o2_r3_p8",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 8,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 131,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.986239,
+          10.164813,
+          9.686738,
+          10.650304,
+          9.582406,
+          10.110614,
+          9.883627,
+          10.133604
+        ],
+        [
+          10.003523,
+          10.126824,
+          9.648749,
+          10.612314,
+          9.599384,
+          10.075192,
+          9.845638,
+          10.11738
+        ],
+        [
+          10.024229,
+          10.134579,
+          9.67832,
+          10.646512,
+          9.561394,
+          10.113182,
+          9.857705,
+          10.095614
+        ],
+        [
+          9.94071,
+          10.080945,
+          9.622202,
+          10.627416,
+          9.56661,
+          10.122129,
+          9.834844,
+          10.148119
+        ],
+        [
+          9.90272,
+          10.118935,
+          9.588418,
+          10.595895,
+          9.56892,
+          10.117004,
+          9.866721,
+          10.110129
+        ],
+        [
+          9.923258,
+          10.100916,
+          9.626408,
+          10.633884,
+          9.53093,
+          10.084139,
+          9.828731,
+          10.121134
+        ]
+      ],
+      "csv_sha256": "13e788fb34b8bc6535208f0c9b29cd80b1559b13c3b20256ea0b239e5d8dca01",
+      "interaction_included": true,
+      "interaction_p": 0.004004949152264003,
+      "variance_components": {
+        "AV": 0.0007111113175068633,
+        "EV": 0.0003999999441252485,
+        "GRR": 0.001111111261632112,
+        "Operator": 0.00033508738020831787,
+        "OperatorPart": 0.00037602393729854554,
+        "PV": 0.11000000526894421,
+        "TV": 0.1111111165305763
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 4.63069672358781,
+          "df": 7,
+          "ms": 0.661528103369687,
+          "f": 432.916910323859,
+          "p": 1.08953522268845e-08
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00957016888102071,
+          "df": 1,
+          "ms": 0.00957016888102071,
+          "f": 6.2629054187494,
+          "p": 0.0408377847344555
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0106965022921458,
+          "df": 7,
+          "ms": 0.00152807175602082,
+          "f": 3.82017992309695,
+          "p": 0.00400494915601392
+        }
+      ],
+      "full_ss_df": [
+        [
+          4.630696723587812,
+          7,
+          0.6615281033696875
+        ],
+        [
+          0.009570168881023022,
+          1,
+          0.009570168881023022
+        ],
+        [
+          0.010696502292145027,
+          7,
+          0.0015280717560207182
+        ],
+        [
+          0.012799998211999508,
+          32,
+          0.00039999994412498463
+        ]
+      ]
+    },
+    {
+      "id": "o2_r3_p9",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 9,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 132,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.249051,
+          9.784181,
+          9.893408,
+          9.495669,
+          9.67023,
+          10.306439,
+          10.131975,
+          10.201675,
+          10.431677
+        ],
+        [
+          10.210749,
+          9.766818,
+          9.925012,
+          9.500995,
+          9.631928,
+          10.286197,
+          10.113612,
+          10.172212,
+          10.469978
+        ],
+        [
+          10.24411,
+          9.805119,
+          9.931709,
+          9.462693,
+          9.646617,
+          10.324499,
+          10.093674,
+          10.163373,
+          10.466136
+        ],
+        [
+          10.220116,
+          9.777975,
+          9.902521,
+          9.388677,
+          9.616431,
+          10.328648,
+          10.042219,
+          10.138617,
+          10.432158
+        ],
+        [
+          10.235796,
+          9.805796,
+          9.870124,
+          9.424732,
+          9.626446,
+          10.302303,
+          10.053331,
+          10.130599,
+          10.416107
+        ],
+        [
+          10.258418,
+          9.816276,
+          9.86422,
+          9.386431,
+          9.588145,
+          10.290347,
+          10.080521,
+          10.1689,
+          10.454408
+        ]
+      ],
+      "csv_sha256": "627c729d368f51e27bcb7076f5469654dddefe5fecf3d38e025b090bdb1a7b2b",
+      "interaction_included": true,
+      "interaction_p": 0.0025906133769538196,
+      "variance_components": {
+        "AV": 0.0007111115066788685,
+        "EV": 0.0004000007163336681,
+        "GRR": 0.0011111122230125364,
+        "Operator": 0.0003395066774012042,
+        "OperatorPart": 0.0003716048292776643,
+        "PV": 0.11000000263702597,
+        "TV": 0.11111111486003852
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 5.29211864821059,
+          "df": 8,
+          "ms": 0.661514831026323,
+          "f": 436.69671997399,
+          "p": 9.48399976236003e-10
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0106814954939999,
+          "df": 1,
+          "ms": 0.0106814954939999,
+          "f": 7.05135218118956,
+          "p": 0.0290100188508589
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0121185216333335,
+          "df": 8,
+          "ms": 0.00151481520416669,
+          "f": 3.78703122845628,
+          "p": 0.0025906133770397
+        }
+      ],
+      "full_ss_df": [
+        [
+          5.29211864821059,
+          8,
+          0.6615148310263238
+        ],
+        [
+          0.010681495493999549,
+          1,
+          0.010681495493999549
+        ],
+        [
+          0.012118521633333934,
+          8,
+          0.0015148152041667418
+        ],
+        [
+          0.014400025788001258,
+          36,
+          0.0004000007163333683
+        ]
+      ]
+    },
+    {
+      "id": "o2_r3_p10",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 10,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 133,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.639772,
+          10.488245,
+          9.881547,
+          10.558229,
+          9.93754,
+          9.62462,
+          9.932664,
+          9.966502,
+          10.338605,
+          9.76524
+        ],
+        [
+          9.678116,
+          10.490547,
+          9.843202,
+          10.58832,
+          9.912396,
+          9.586275,
+          9.913529,
+          9.951033,
+          10.332011,
+          9.792842
+        ],
+        [
+          9.643051,
+          10.452202,
+          9.876738,
+          10.596574,
+          9.950741,
+          9.593606,
+          9.951874,
+          9.989378,
+          10.370355,
+          9.754497
+        ],
+        [
+          9.634881,
+          10.482715,
+          9.85446,
+          10.486703,
+          9.916712,
+          9.548318,
+          9.901664,
+          9.998305,
+          10.246798,
+          9.764914
+        ],
+        [
+          9.598502,
+          10.44437,
+          9.87447,
+          10.525048,
+          9.899813,
+          9.576215,
+          9.925244,
+          9.991472,
+          10.256367,
+          9.803259
+        ],
+        [
+          9.636846,
+          10.462281,
+          9.836126,
+          10.501741,
+          9.878368,
+          9.586663,
+          9.940009,
+          9.95996,
+          10.285143,
+          9.782384
+        ]
+      ],
+      "csv_sha256": "3d86a03f34540149ab4da292da31dcd4b80a10ece36f47ba5bee6aef73d260e4",
+      "interaction_included": true,
+      "interaction_p": 0.0009139773040748106,
+      "variance_components": {
+        "AV": 0.0007111115221888,
+        "EV": 0.00039999916036701324,
+        "GRR": 0.0011111106825558135,
+        "Operator": 0.00030172853480497,
+        "OperatorPart": 0.0004093829873838301,
+        "PV": 0.11000000241383794,
+        "TV": 0.11111111309639375
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 5.95465346344992,
+          "df": 9,
+          "ms": 0.661628162605547,
+          "f": 406.368532110026,
+          "p": 1.18309639452426e-10
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0106800041666667,
+          "df": 1,
+          "ms": 0.0106800041666667,
+          "f": 6.55960229843593,
+          "p": 0.0306281768430598
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0146533331026667,
+          "df": 9,
+          "ms": 0.00162814812251852,
+          "f": 4.07037885077186,
+          "p": 0.000913977303342533
+        }
+      ],
+      "full_ss_df": [
+        [
+          5.954653463449934,
+          9,
+          0.6616281626055482
+        ],
+        [
+          0.010680004166668589,
+          1,
+          0.010680004166668589
+        ],
+        [
+          0.01465333310266459,
+          9,
+          0.0016281481225182877
+        ],
+        [
+          0.0159999664146655,
+          40,
+          0.0003999991603666375
+        ]
+      ]
+    },
+    {
+      "id": "o3_r2_p5",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 5,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 128,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.497456,
+          9.905541,
+          10.253937,
+          10.383809,
+          9.935747
+        ],
+        [
+          9.52574,
+          9.877256,
+          10.282221,
+          10.355525,
+          9.907463
+        ],
+        [
+          9.508943,
+          9.89904,
+          10.22044,
+          10.317624,
+          9.962999
+        ],
+        [
+          9.480659,
+          9.927324,
+          10.248724,
+          10.345909,
+          9.934715
+        ],
+        [
+          9.522856,
+          9.977403,
+          10.300365,
+          10.35351,
+          9.917905
+        ],
+        [
+          9.551141,
+          10.005688,
+          10.272081,
+          10.381794,
+          9.946189
+        ]
+      ],
+      "csv_sha256": "796c6122cba6cda1a0bdc3f249331f927c835320249623a17b7c146fdf702875",
+      "interaction_included": true,
+      "interaction_p": 0.02676766784091,
+      "variance_components": {
+        "AV": 0.0007111114333496208,
+        "EV": 0.0003999998705341397,
+        "GRR": 0.0011111113038837607,
+        "Operator": 0.000282726718925011,
+        "OperatorPart": 0.00042838471442460983,
+        "PV": 0.10999998060923277,
+        "TV": 0.11111109191311651
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 2.64502661181913,
+          "df": 4,
+          "ms": 0.661256652954783,
+          "f": 526.155956609726,
+          "p": 1.02499938809594e-09
+        },
+        {
+          "source": "Operator",
+          "ss": 0.00816807297726662,
+          "df": 2,
+          "ms": 0.00408403648863331,
+          "f": 3.2496310107489,
+          "p": 0.0926779363997562
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0100541543950668,
+          "df": 8,
+          "ms": 0.00125676929938335,
+          "f": 3.14192426651634,
+          "p": 0.0267676678046833
+        }
+      ],
+      "full_ss_df": [
+        [
+          2.6450266118191332,
+          4,
+          0.6612566529547833
+        ],
+        [
+          0.00816807297726685,
+          2,
+          0.004084036488633425
+        ],
+        [
+          0.010054154395066739,
+          8,
+          0.0012567692993833424
+        ],
+        [
+          0.005999998057999001,
+          15,
+          0.00039999987053326673
+        ]
+      ]
+    },
+    {
+      "id": "o3_r2_p6",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 6,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 129,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.315437,
+          9.652979,
+          9.575897,
+          10.205838,
+          10.268017,
+          10.166462
+        ],
+        [
+          10.343721,
+          9.624695,
+          9.547613,
+          10.177554,
+          10.296301,
+          10.194747
+        ],
+        [
+          10.25789,
+          9.577367,
+          9.514225,
+          10.13849,
+          10.224048,
+          10.103972
+        ],
+        [
+          10.286174,
+          9.605652,
+          9.54251,
+          10.166774,
+          10.195764,
+          10.132257
+        ],
+        [
+          10.275868,
+          9.574903,
+          9.537852,
+          10.162704,
+          10.226562,
+          10.164918
+        ],
+        [
+          10.247584,
+          9.603188,
+          9.566136,
+          10.190988,
+          10.198278,
+          10.136634
+        ]
+      ],
+      "csv_sha256": "1feb86786cfb75194eff820af39408270ffb95540d97e69e9386f2a4ab989dab",
+      "interaction_included": false,
+      "interaction_p": 0.4786055008562321,
+      "variance_components": {
+        "AV": 0.0007111107965371698,
+        "EV": 0.000399999586331668,
+        "GRR": 0.001111110382868838,
+        "Operator": 0.0007111107965371698,
+        "OperatorPart": 0.0,
+        "PV": 0.1100000185874157,
+        "TV": 0.11111112897028455
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.30200055555413,
+          "df": 5,
+          "ms": 0.660400111110827,
+          "f": 1651.00198502239,
+          "p": 1.13407557230204e-33
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0178666582895554,
+          "df": 2,
+          "ms": 0.00893332914477771,
+          "f": 22.3333459561021,
+          "p": 1.59043887300791e-06
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.3020005555541383,
+          5,
+          0.6604001111108276
+        ],
+        [
+          0.01786665828955547,
+          2,
+          0.008933329144777735
+        ],
+        [
+          0.003999985090777258,
+          10,
+          0.0003999985090777258
+        ],
+        [
+          0.007200003326500504,
+          18,
+          0.00040000018480558356
+        ]
+      ]
+    },
+    {
+      "id": "o3_r2_p7",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 7,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 130,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.328653,
+          10.268226,
+          10.391533,
+          9.943783,
+          9.514484,
+          9.934699,
+          9.695349
+        ],
+        [
+          10.356937,
+          10.29651,
+          10.419817,
+          9.972068,
+          9.542768,
+          9.962983,
+          9.723633
+        ],
+        [
+          10.323576,
+          10.205202,
+          10.356331,
+          9.988799,
+          9.496664,
+          9.950202,
+          9.640521
+        ],
+        [
+          10.295292,
+          10.233486,
+          10.384615,
+          9.960515,
+          9.46838,
+          9.921918,
+          9.668805
+        ],
+        [
+          10.266363,
+          10.254936,
+          10.341221,
+          9.960916,
+          9.541299,
+          9.933182,
+          9.593351
+        ],
+        [
+          10.294648,
+          10.226651,
+          10.369506,
+          9.932631,
+          9.513014,
+          9.904898,
+          9.621635
+        ]
+      ],
+      "csv_sha256": "d72120f78ca2056662e46bbd0848d6b8dcaa7804ded5a8a4b424dc2bbb4ee313",
+      "interaction_included": true,
+      "interaction_p": 0.03730863325430253,
+      "variance_components": {
+        "AV": 0.000711111385869125,
+        "EV": 0.0004000004092855834,
+        "GRR": 0.001111111795154708,
+        "Operator": 0.00042873132683730485,
+        "OperatorPart": 0.00028238005903182,
+        "PV": 0.11000002274912707,
+        "TV": 0.11111113454428177
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.96578938213266,
+          "df": 6,
+          "ms": 0.660964897022111,
+          "f": 685.107732214325,
+          "p": 1.69441298345733e-14
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0139339982061428,
+          "df": 2,
+          "ms": 0.0069669991030714,
+          "f": 7.22148025916241,
+          "p": 0.00873427812295267
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0115771263281905,
+          "df": 12,
+          "ms": 0.000964760527349207,
+          "f": 2.41189885054268,
+          "p": 0.0373086332503652
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.965789382132667,
+          6,
+          0.6609648970221111
+        ],
+        [
+          0.013933998206143272,
+          2,
+          0.006966999103071636
+        ],
+        [
+          0.011577126328191412,
+          12,
+          0.0009647605273492843
+        ],
+        [
+          0.008400008594999342,
+          21,
+          0.00040000040928568295
+        ]
+      ]
+    },
+    {
+      "id": "o3_r2_p8",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 8,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 131,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.202789,
+          9.602354,
+          10.115845,
+          9.895199,
+          10.552269,
+          9.690738,
+          10.07081,
+          9.65879
+        ],
+        [
+          10.231074,
+          9.57407,
+          10.144129,
+          9.866915,
+          10.580554,
+          9.662454,
+          10.099095,
+          9.630506
+        ],
+        [
+          10.249377,
+          9.658462,
+          10.179426,
+          9.919648,
+          10.585342,
+          9.759167,
+          10.132165,
+          9.710589
+        ],
+        [
+          10.277661,
+          9.686746,
+          10.20771,
+          9.891364,
+          10.613626,
+          9.730883,
+          10.10388,
+          9.738873
+        ],
+        [
+          10.23732,
+          9.625854,
+          10.122876,
+          9.879018,
+          10.56901,
+          9.68979,
+          10.132764,
+          9.675546
+        ],
+        [
+          10.265604,
+          9.59757,
+          10.151161,
+          9.907302,
+          10.597294,
+          9.718074,
+          10.104479,
+          9.70383
+        ]
+      ],
+      "csv_sha256": "7922200981d6a78634b7e93b07c89e7b831c2155aa79443760d73ba75d9d01e4",
+      "interaction_included": false,
+      "interaction_p": 0.4832278850807089,
+      "variance_components": {
+        "AV": 0.0007111110828983122,
+        "EV": 0.0004000004831482119,
+        "GRR": 0.0011111115660465238,
+        "Operator": 0.0007111110828983122,
+        "OperatorPart": 0.0,
+        "PV": 0.10999997224388589,
+        "TV": 0.11111108380993243
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 4.62279883762525,
+          "df": 7,
+          "ms": 0.660399833946464,
+          "f": 1650.99759087474,
+          "p": 3.64575501331699e-45
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0235555556190417,
+          "df": 2,
+          "ms": 0.0117777778095208,
+          "f": 29.4444089623335,
+          "p": 1.89098831431615e-08
+        }
+      ],
+      "full_ss_df": [
+        [
+          4.6227988376252505,
+          7,
+          0.6603998339464644
+        ],
+        [
+          0.023555555619042323,
+          2,
+          0.011777777809521162
+        ],
+        [
+          0.005600032780625597,
+          14,
+          0.0004000023414732569
+        ],
+        [
+          0.009599985579000325,
+          24,
+          0.00039999939912501353
+        ]
+      ]
+    },
+    {
+      "id": "o3_r2_p9",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 9,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 132,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.260002,
+          9.611639,
+          10.386635,
+          10.018234,
+          9.661631,
+          9.48096,
+          10.209739,
+          9.867912,
+          10.279641
+        ],
+        [
+          10.231718,
+          9.639923,
+          10.414919,
+          10.046518,
+          9.633346,
+          9.509245,
+          10.238023,
+          9.896196,
+          10.251357
+        ],
+        [
+          10.285839,
+          9.666792,
+          10.420419,
+          10.010652,
+          9.651275,
+          9.553272,
+          10.230324,
+          9.980304,
+          10.297985
+        ],
+        [
+          10.314123,
+          9.638508,
+          10.448703,
+          9.982368,
+          9.679559,
+          9.524987,
+          10.202039,
+          9.952019,
+          10.2697
+        ],
+        [
+          10.276637,
+          9.630633,
+          10.450613,
+          10.046374,
+          9.744209,
+          9.469768,
+          10.251055,
+          9.971115,
+          10.328771
+        ],
+        [
+          10.304921,
+          9.602348,
+          10.422329,
+          10.01809,
+          9.715925,
+          9.498052,
+          10.279339,
+          9.94283,
+          10.300487
+        ]
+      ],
+      "csv_sha256": "523d8304d4a73ea7a52db900c02f66b3fec74bc2b3e6f598d3e2f65281106d9d",
+      "interaction_included": true,
+      "interaction_p": 0.002903136724140755,
+      "variance_components": {
+        "AV": 0.000711111134518686,
+        "EV": 0.0004000007085923844,
+        "GRR": 0.0011111118431110707,
+        "Operator": 0.00024621294320840113,
+        "OperatorPart": 0.00046489819131028494,
+        "PV": 0.10999999949093538,
+        "TV": 0.11111111133404644
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 5.2906383522946,
+          "df": 8,
+          "ms": 0.661329794036826,
+          "f": 497.316318712651,
+          "p": 1.08161061983308e-17
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0115232601379258,
+          "df": 2,
+          "ms": 0.00576163006896291,
+          "f": 4.33271369522056,
+          "p": 0.0313509496389387
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0212767534594075,
+          "df": 16,
+          "ms": 0.00132979709121297,
+          "f": 3.32448683845516,
+          "p": 0.00290313672600834
+        }
+      ],
+      "full_ss_df": [
+        [
+          5.290638352294598,
+          8,
+          0.6613297940368248
+        ],
+        [
+          0.011523260137927593,
+          2,
+          0.005761630068963797
+        ],
+        [
+          0.02127675345940805,
+          16,
+          0.001329797091213003
+        ],
+        [
+          0.010800019131998795,
+          27,
+          0.00040000070859254794
+        ]
+      ]
+    },
+    {
+      "id": "o3_r2_p10",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 10,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 133,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.789605,
+          9.694437,
+          10.20756,
+          9.978871,
+          10.404738,
+          10.258033,
+          9.512914,
+          10.465252,
+          9.905564,
+          9.693136
+        ],
+        [
+          9.81789,
+          9.722722,
+          10.235844,
+          10.007155,
+          10.376454,
+          10.286317,
+          9.484629,
+          10.436968,
+          9.87728,
+          9.72142
+        ],
+        [
+          9.83978,
+          9.698551,
+          10.255747,
+          10.003899,
+          10.421089,
+          10.268194,
+          9.486337,
+          10.457476,
+          9.824299,
+          9.656903
+        ],
+        [
+          9.811495,
+          9.670267,
+          10.227462,
+          9.975615,
+          10.392805,
+          10.23991,
+          9.514621,
+          10.48576,
+          9.852583,
+          9.628619
+        ],
+        [
+          9.827461,
+          9.733335,
+          10.208059,
+          10.018798,
+          10.472901,
+          10.323299,
+          9.512233,
+          10.470663,
+          9.868054,
+          9.771097
+        ],
+        [
+          9.855745,
+          9.70505,
+          10.179775,
+          9.990514,
+          10.444617,
+          10.351584,
+          9.540517,
+          10.498948,
+          9.896338,
+          9.742813
+        ]
+      ],
+      "csv_sha256": "e1637125ed9ec68f3bab5549864e979224744a305f89a116d03c5640018010b9",
+      "interaction_included": true,
+      "interaction_p": 0.0023756242720594325,
+      "variance_components": {
+        "AV": 0.0007111112925999728,
+        "EV": 0.00039999987053338697,
+        "GRR": 0.0011111111631333598,
+        "Operator": 0.0002710488189379622,
+        "OperatorPart": 0.0004400624736620108,
+        "PV": 0.11000002556515831,
+        "TV": 0.11111113672829166
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 5.95152250387926,
+          "df": 9,
+          "ms": 0.661280278208807,
+          "f": 516.57484409655,
+          "p": 7.55802589885859e-20
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0134022023932332,
+          "df": 2,
+          "ms": 0.00670110119661659,
+          "f": 5.23472485115361,
+          "p": 0.0161451057056183
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0230422467214331,
+          "df": 18,
+          "ms": 0.0012801248178574,
+          "f": 3.20031308049281,
+          "p": 0.00237562427198007
+        }
+      ],
+      "full_ss_df": [
+        [
+          5.951522503879265,
+          9,
+          0.6612802782088072
+        ],
+        [
+          0.013402202393234752,
+          2,
+          0.006701101196617376
+        ],
+        [
+          0.023042246721434623,
+          18,
+          0.0012801248178574791
+        ],
+        [
+          0.011999996115999778,
+          30,
+          0.00039999987053332593
+        ]
+      ]
+    },
+    {
+      "id": "o3_r3_p5",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 5,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 128,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.231488,
+          9.438334,
+          10.077031,
+          10.249583,
+          10.075591
+        ],
+        [
+          10.219096,
+          9.477155,
+          10.061546,
+          10.288403,
+          10.054389
+        ],
+        [
+          10.257917,
+          9.474035,
+          10.100367,
+          10.2792,
+          10.09321
+        ],
+        [
+          10.211175,
+          9.448714,
+          10.109157,
+          10.23236,
+          9.981888
+        ],
+        [
+          10.185983,
+          9.442589,
+          10.096153,
+          10.223715,
+          10.020709
+        ],
+        [
+          10.172354,
+          9.409893,
+          10.070337,
+          10.262536,
+          10.004076
+        ],
+        [
+          10.202354,
+          9.378704,
+          10.106922,
+          10.239582,
+          10.044415
+        ],
+        [
+          10.163534,
+          9.366467,
+          10.086168,
+          10.2504,
+          10.029838
+        ],
+        [
+          10.192068,
+          9.405288,
+          10.068101,
+          10.211579,
+          10.005595
+        ]
+      ],
+      "csv_sha256": "cc8221d01a9a8646da3e4b7802fb278ae7d396571ad19ec5f044761dbb1b90c8",
+      "interaction_included": true,
+      "interaction_p": 0.00782414866315339,
+      "variance_components": {
+        "AV": 0.0007111103472445308,
+        "EV": 0.0004000005476217418,
+        "GRR": 0.0011111108948662722,
+        "Operator": 0.00040238716080545807,
+        "OperatorPart": 0.0003087231864390727,
+        "PV": 0.11000001108136155,
+        "TV": 0.11111112197622784
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 3.96530507935675,
+          "df": 4,
+          "ms": 0.991326269839189,
+          "f": 747.51064335736,
+          "p": 2.52959316241776e-10
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0147239550380439,
+          "df": 2,
+          "ms": 0.00736197751902194,
+          "f": 5.55130709137692,
+          "p": 0.0307601699644825
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0106093608555111,
+          "df": 8,
+          "ms": 0.00132617010693889,
+          "f": 3.31542072807458,
+          "p": 0.00782414866686603
+        }
+      ],
+      "full_ss_df": [
+        [
+          3.965305079356756,
+          4,
+          0.991326269839189
+        ],
+        [
+          0.014723955038044245,
+          2,
+          0.007361977519022123
+        ],
+        [
+          0.01060936085551134,
+          8,
+          0.0013261701069389176
+        ],
+        [
+          0.012000016428666438,
+          30,
+          0.0004000005476222146
+        ]
+      ]
+    },
+    {
+      "id": "o3_r3_p6",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 6,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 129,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.235587,
+          10.156835,
+          9.947292,
+          9.561372,
+          10.388816,
+          9.661838
+        ],
+        [
+          10.273502,
+          10.19475,
+          9.909377,
+          9.523457,
+          10.42673,
+          9.699753
+        ],
+        [
+          10.253483,
+          10.166058,
+          9.94462,
+          9.538073,
+          10.415404,
+          9.671934
+        ],
+        [
+          10.217926,
+          10.189664,
+          9.905416,
+          9.5843,
+          10.342011,
+          9.662349
+        ],
+        [
+          10.180011,
+          10.214264,
+          9.896101,
+          9.552865,
+          10.379925,
+          9.654606
+        ],
+        [
+          10.18399,
+          10.17635,
+          9.934016,
+          9.546385,
+          10.375516,
+          9.692521
+        ],
+        [
+          10.312621,
+          10.186216,
+          9.899059,
+          9.626388,
+          10.394946,
+          9.699419
+        ],
+        [
+          10.28098,
+          10.221081,
+          9.883568,
+          9.588473,
+          10.425176,
+          9.661505
+        ],
+        [
+          10.274706,
+          10.224131,
+          9.921483,
+          9.61472,
+          10.432861,
+          9.695567
+        ]
+      ],
+      "csv_sha256": "4b5f0072e28b394ff3c083f251e15e6a910edf30b770405c5aaf79be4316514e",
+      "interaction_included": true,
+      "interaction_p": 0.00031333341119865293,
+      "variance_components": {
+        "AV": 0.000711112108919732,
+        "EV": 0.00039999906072239326,
+        "GRR": 0.0011111111696421251,
+        "Operator": 0.0002306629460457075,
+        "OperatorPart": 0.00048044916287402463,
+        "PV": 0.10999997072769602,
+        "TV": 0.11111108189733813
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 4.95920541549304,
+          "df": 5,
+          "ms": 0.991841083098608,
+          "f": 538.649871992715,
+          "p": 8.08860373588119e-12
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0119865591563334,
+          "df": 2,
+          "ms": 0.00599327957816669,
+          "f": 3.25483520758243,
+          "p": 0.0815282241583968
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0184134654934444,
+          "df": 10,
+          "ms": 0.00184134654934444,
+          "f": 4.6033771837137,
+          "p": 0.000313333410776244
+        }
+      ],
+      "full_ss_df": [
+        [
+          4.9592054154930505,
+          5,
+          0.9918410830986101
+        ],
+        [
+          0.011986559156334842,
+          2,
+          0.005993279578167421
+        ],
+        [
+          0.01841346549344447,
+          10,
+          0.0018413465493444469
+        ],
+        [
+          0.014399966186001478,
+          36,
+          0.00039999906072226327
+        ]
+      ]
+    },
+    {
+      "id": "o3_r3_p7",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 7,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 130,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.129206,
+          10.408976,
+          9.8255,
+          10.212905,
+          9.734865,
+          9.535598,
+          10.241928
+        ],
+        [
+          10.167851,
+          10.375876,
+          9.856866,
+          10.200748,
+          9.69622,
+          9.574243,
+          10.265619
+        ],
+        [
+          10.138031,
+          10.414521,
+          9.818221,
+          10.239393,
+          9.701631,
+          9.559104,
+          10.226975
+        ],
+        [
+          10.150486,
+          10.422087,
+          9.827132,
+          10.205008,
+          9.661628,
+          9.514376,
+          10.261929
+        ],
+        [
+          10.116046,
+          10.460732,
+          9.793873,
+          10.243653,
+          9.678759,
+          9.531608,
+          10.234266
+        ],
+        [
+          10.15469,
+          10.439472,
+          9.832518,
+          10.228327,
+          9.640115,
+          9.553021,
+          10.272911
+        ],
+        [
+          10.110778,
+          10.412173,
+          9.744288,
+          10.159079,
+          9.628196,
+          9.52908,
+          10.242366
+        ],
+        [
+          10.072133,
+          10.437312,
+          9.763224,
+          10.197723,
+          9.608141,
+          9.51557,
+          10.25294
+        ],
+        [
+          10.076533,
+          10.398667,
+          9.782932,
+          10.170434,
+          9.646785,
+          9.490435,
+          10.214296
+        ]
+      ],
+      "csv_sha256": "5b7ed886af3e6d9759c7a3114f106c313cdc08d961580cce660d3e18a877b7ca",
+      "interaction_included": true,
+      "interaction_p": 0.005454184570417786,
+      "variance_components": {
+        "AV": 0.0007111105162647765,
+        "EV": 0.0003999994251739355,
+        "GRR": 0.001111109941438712,
+        "Operator": 0.0004595752947301609,
+        "OperatorPart": 0.0002515352215346154,
+        "PV": 0.10999997765239733,
+        "TV": 0.11111108759383607
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 5.94692642376809,
+          "df": 6,
+          "ms": 0.991154403961349,
+          "f": 858.435851995156,
+          "p": 4.39840076423487e-15
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0216113725582222,
+          "df": 2,
+          "ms": 0.0108056862791111,
+          "f": 9.35877242771433,
+          "p": 0.00355441775420308
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0138552610773336,
+          "df": 12,
+          "ms": 0.0011546050897778,
+          "f": 2.88651687289988,
+          "p": 0.00545418456578453
+        }
+      ],
+      "full_ss_df": [
+        [
+          5.946926423768096,
+          6,
+          0.9911544039613492
+        ],
+        [
+          0.021611372558220765,
+          2,
+          0.010805686279110382
+        ],
+        [
+          0.013855261077334369,
+          12,
+          0.0011546050897778641
+        ],
+        [
+          0.016799975857332505,
+          42,
+          0.0003999994251745835
+        ]
+      ]
+    },
+    {
+      "id": "o3_r3_p8",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 8,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 131,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "within_operator",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          9.820967,
+          9.506672,
+          10.386288,
+          9.58319,
+          10.153601,
+          10.1165,
+          10.340799,
+          10.173906
+        ],
+        [
+          9.859006,
+          9.499741,
+          10.390375,
+          9.586651,
+          10.180674,
+          10.085752,
+          10.327571,
+          10.211944
+        ],
+        [
+          9.855642,
+          9.53778,
+          10.424327,
+          9.548613,
+          10.19164,
+          10.123791,
+          10.30276,
+          10.194456
+        ],
+        [
+          9.836455,
+          9.531645,
+          10.42539,
+          9.57333,
+          10.163206,
+          10.093544,
+          10.294235,
+          10.171029
+        ],
+        [
+          9.816328,
+          9.534388,
+          10.43116,
+          9.608203,
+          10.125167,
+          10.061701,
+          10.30689,
+          10.209068
+        ],
+        [
+          9.798416,
+          9.569683,
+          10.393121,
+          9.570164,
+          10.13511,
+          10.09974,
+          10.332274,
+          10.205001
+        ],
+        [
+          9.757392,
+          9.452326,
+          10.362369,
+          9.547855,
+          10.138251,
+          10.067995,
+          10.260232,
+          10.16383
+        ],
+        [
+          9.79543,
+          9.490365,
+          10.324331,
+          9.550993,
+          10.157657,
+          10.08045,
+          10.298271,
+          10.146235
+        ],
+        [
+          9.769455,
+          9.465683,
+          10.34728,
+          9.512954,
+          10.119618,
+          10.106034,
+          10.271313,
+          10.125791
+        ]
+      ],
+      "csv_sha256": "b640b752e99bcea5b0460c348fd951767b840d4e7f289f461091cf0279b5d662",
+      "interaction_included": true,
+      "interaction_p": 0.049727917418451624,
+      "variance_components": {
+        "AV": 0.0007111105875277696,
+        "EV": 0.0003999998320139927,
+        "GRR": 0.0011111104195417629,
+        "Operator": 0.0005903600777520159,
+        "OperatorPart": 0.00012075050977575383,
+        "PV": 0.10999996319425656,
+        "TV": 0.11111107361379831
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 6.93533344076755,
+          "df": 7,
+          "ms": 0.990761920109651,
+          "f": 1299.78373323767,
+          "p": 1.36240875320179e-18
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0298617864547784,
+          "df": 2,
+          "ms": 0.0149308932273892,
+          "f": 19.5878866009718,
+          "p": 8.76798009910152e-05
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0106715190587778,
+          "df": 14,
+          "ms": 0.00076225136134127,
+          "f": 1.90562920343342,
+          "p": 0.0497279174483137
+        }
+      ],
+      "full_ss_df": [
+        [
+          6.9353334407675575,
+          7,
+          0.990761920109651
+        ],
+        [
+          0.029861786454778994,
+          2,
+          0.014930893227389497
+        ],
+        [
+          0.010671519058775836,
+          14,
+          0.0007622513613411311
+        ],
+        [
+          0.01919999193666655,
+          48,
+          0.00039999983201388645
+        ]
+      ]
+    },
+    {
+      "id": "o3_r3_p9",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 9,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 132,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.446645,
+          10.39376,
+          10.161076,
+          9.897084,
+          9.730774,
+          9.87304,
+          9.402648,
+          9.995622,
+          9.965925
+        ],
+        [
+          10.454539,
+          10.36575,
+          10.199165,
+          9.911066,
+          9.743551,
+          9.911129,
+          9.389067,
+          10.008464,
+          10.004014
+        ],
+        [
+          10.41645,
+          10.403839,
+          10.194099,
+          9.872977,
+          9.705462,
+          9.881771,
+          9.364559,
+          9.970375,
+          9.989134
+        ],
+        [
+          10.492619,
+          10.353211,
+          10.24259,
+          9.878337,
+          9.76554,
+          9.945859,
+          9.35639,
+          10.006242,
+          10.086662
+        ],
+        [
+          10.512832,
+          10.3913,
+          10.244531,
+          9.916426,
+          9.73474,
+          9.973925,
+          9.375694,
+          9.968153,
+          10.054314
+        ],
+        [
+          10.474743,
+          10.385984,
+          10.280679,
+          9.88175,
+          9.772829,
+          9.983948,
+          9.39448,
+          9.992054,
+          10.092403
+        ],
+        [
+          10.500641,
+          10.345054,
+          10.202876,
+          9.861887,
+          9.738899,
+          9.94348,
+          9.342439,
+          9.992366,
+          10.000538
+        ],
+        [
+          10.497415,
+          10.359031,
+          10.164787,
+          9.885669,
+          9.70081,
+          9.905391,
+          9.369103,
+          9.997018,
+          10.038627
+        ],
+        [
+          10.462551,
+          10.320942,
+          10.168479,
+          9.899976,
+          9.729143,
+          9.915955,
+          9.380528,
+          10.030455,
+          10.035717
+        ]
+      ],
+      "csv_sha256": "ed25d6f0c23eeef1cbe1b8f0de99231f26e422925d9dcd3c8bf667aa9c7f818e",
+      "interaction_included": true,
+      "interaction_p": 2.2197933174448563e-05,
+      "variance_components": {
+        "AV": 0.0007111108592389123,
+        "EV": 0.0004000000959376711,
+        "GRR": 0.0011111109551765837,
+        "Operator": 0.0002624494604928372,
+        "OperatorPart": 0.00044866139874607505,
+        "PV": 0.11000000129701473,
+        "TV": 0.11111111225219134
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 7.93396796772245,
+          "df": 8,
+          "ms": 0.991745995965306,
+          "f": 568.015417097106,
+          "p": 3.7545806540377e-18
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0176642394509627,
+          "df": 2,
+          "ms": 0.00883211972548133,
+          "f": 5.05853332418834,
+          "p": 0.0198410514167396
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0279357486748148,
+          "df": 16,
+          "ms": 0.00174598429217593,
+          "f": 4.36495968518733,
+          "p": 2.21979330695461e-05
+        }
+      ],
+      "full_ss_df": [
+        [
+          7.93396796772244,
+          8,
+          0.991745995965305
+        ],
+        [
+          0.01766423945096207,
+          2,
+          0.008832119725481036
+        ],
+        [
+          0.027935748674814853,
+          16,
+          0.0017459842921759283
+        ],
+        [
+          0.021600005180667736,
+          54,
+          0.0004000000959382914
+        ]
+      ]
+    },
+    {
+      "id": "o3_r3_p10",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 3,
+          "parts": 10,
+          "replicates": 3
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 6,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": 133,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "all",
+            "randomize_operators": true,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 9,
+          "usl": 11
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": {
+            "mode": "target",
+            "value": 8
+          },
+          "EV_pct": {
+            "mode": "target",
+            "value": 6
+          },
+          "GRR_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "PT_pct": {
+            "mode": "target",
+            "value": 10
+          },
+          "ndc": {
+            "mode": "target",
+            "value": 14
+          }
+        }
+      },
+      "matrix": [
+        [
+          10.612389,
+          9.87682,
+          9.892405,
+          9.72249,
+          9.756405,
+          9.582111,
+          9.800309,
+          10.311724,
+          10.26479,
+          10.305134
+        ],
+        [
+          10.573734,
+          9.86556,
+          9.85927,
+          9.711568,
+          9.725062,
+          9.620765,
+          9.824587,
+          10.279044,
+          10.271272,
+          10.326286
+        ],
+        [
+          10.578151,
+          9.838165,
+          9.897925,
+          9.750223,
+          9.763717,
+          9.602927,
+          9.838964,
+          10.273069,
+          10.303445,
+          10.343789
+        ],
+        [
+          10.54943,
+          9.883787,
+          9.870398,
+          9.717427,
+          9.705131,
+          9.570616,
+          9.809522,
+          10.33364,
+          10.277863,
+          10.292172
+        ],
+        [
+          10.584877,
+          9.86571,
+          9.88088,
+          9.678772,
+          9.69897,
+          9.609271,
+          9.836882,
+          10.31016,
+          10.26054,
+          10.323086
+        ],
+        [
+          10.588085,
+          9.904365,
+          9.909053,
+          9.703283,
+          9.737625,
+          9.596426,
+          9.798227,
+          10.348815,
+          10.299195,
+          10.330827
+        ],
+        [
+          10.555098,
+          9.867721,
+          9.923191,
+          9.694737,
+          9.664991,
+          9.605109,
+          9.710842,
+          10.253167,
+          10.274357,
+          10.299478
+        ],
+        [
+          10.532122,
+          9.843287,
+          9.884536,
+          9.709852,
+          9.685812,
+          9.588062,
+          9.729186,
+          10.229342,
+          10.252048,
+          10.338133
+        ],
+        [
+          10.516444,
+          9.829066,
+          9.891609,
+          9.671197,
+          9.647157,
+          9.566454,
+          9.749497,
+          10.214512,
+          10.290703,
+          10.335153
+        ]
+      ],
+      "csv_sha256": "8aee4d38319262342853dc4ee6692cae70979126081f44519bda78f7b788d6c7",
+      "interaction_included": true,
+      "interaction_p": 1.8251200713499507e-05,
+      "variance_components": {
+        "AV": 0.0007111112355186029,
+        "EV": 0.0004000000430665028,
+        "GRR": 0.0011111112785851059,
+        "Operator": 0.0002968450203798573,
+        "OperatorPart": 0.00041426621513874573,
+        "PV": 0.11000003363221204,
+        "TV": 0.11111114491079717
+      },
+      "ndc": 14.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 8.92478791240551,
+          "df": 9,
+          "ms": 0.99164310137839,
+          "f": 603.630322041631,
+          "p": 1.87328425373652e-20
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0210962985997555,
+          "df": 2,
+          "ms": 0.0105481492998778,
+          "f": 6.42084107677246,
+          "p": 0.00785615479054625
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 0.0295703763926889,
+          "df": 18,
+          "ms": 0.00164279868848272,
+          "f": 4.10699627983775,
+          "p": 1.82512006654791e-05
+        }
+      ],
+      "full_ss_df": [
+        [
+          8.92478791240551,
+          9,
+          0.99164310137839
+        ],
+        [
+          0.021096298599754704,
+          2,
+          0.010548149299877352
+        ],
+        [
+          0.02957037639269089,
+          18,
+          0.0016427986884828272
+        ],
+        [
+          0.02400000258400148,
+          60,
+          0.0004000000430666913
+        ]
+      ]
+    },
+    {
+      "id": "pooled",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 5,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 4,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": null,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": false,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 0,
+          "usl": 200
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": null,
+          "EV_pct": null,
+          "GRR_pct": null,
+          "PT_pct": null,
+          "ndc": null
+        }
+      },
+      "matrix": [
+        [
+          92.0,
+          95.0,
+          98.0,
+          101.0,
+          104.0
+        ],
+        [
+          94.0,
+          97.0,
+          100.0,
+          103.0,
+          106.0
+        ],
+        [
+          94.0,
+          97.0,
+          100.0,
+          103.0,
+          106.0
+        ],
+        [
+          96.0,
+          99.0,
+          102.0,
+          105.0,
+          108.0
+        ]
+      ],
+      "csv_sha256": "7b475686c191aae9489a4b47093fd103de4b2a97b908da5bb8e99abd87ba83f6",
+      "interaction_included": false,
+      "interaction_p": 1,
+      "variance_components": {
+        "AV": 1.857142857142857,
+        "EV": 1.4285714285714284,
+        "GRR": 3.2857142857142856,
+        "Operator": 1.857142857142857,
+        "OperatorPart": 0.0,
+        "PV": 22.142857142857142,
+        "TV": 25.428571428571427
+      },
+      "ndc": 3.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 360.0,
+          "df": 4,
+          "ms": 90.0,
+          "f": 63.0,
+          "p": 8.53766666334707e-09
+        },
+        {
+          "source": "Operator",
+          "ss": 20.0,
+          "df": 1,
+          "ms": 20.0,
+          "f": 14.0,
+          "p": 0.00218920871962389
+        }
+      ],
+      "full_ss_df": [
+        [
+          359.99999999999983,
+          4,
+          89.99999999999996
+        ],
+        [
+          19.999999999999886,
+          1,
+          19.999999999999886
+        ],
+        [
+          0,
+          4,
+          0
+        ],
+        [
+          20.000000000000227,
+          10,
+          2.0000000000000226
+        ]
+      ]
+    },
+    {
+      "id": "interaction",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 5,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 4,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": null,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": false,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 0,
+          "usl": 200
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": null,
+          "EV_pct": null,
+          "GRR_pct": null,
+          "PT_pct": null,
+          "ndc": null
+        }
+      },
+      "matrix": [
+        [
+          94.0,
+          96.0,
+          98.0,
+          100.0,
+          102.0
+        ],
+        [
+          96.0,
+          98.0,
+          100.0,
+          102.0,
+          104.0
+        ],
+        [
+          92.0,
+          96.0,
+          100.0,
+          104.0,
+          108.0
+        ],
+        [
+          94.0,
+          98.0,
+          102.0,
+          106.0,
+          110.0
+        ]
+      ],
+      "csv_sha256": "ac0cc337b93f4375ab04f88f4e95915015ada0a169a9d156d0613c4c140eb656",
+      "interaction_included": true,
+      "interaction_p": 0.017832647462277855,
+      "variance_components": {
+        "AV": 5.000000000000001,
+        "EV": 2.0000000000000004,
+        "GRR": 7.000000000000001,
+        "Operator": 1.0,
+        "OperatorPart": 4.0,
+        "PV": 20.000000000000004,
+        "TV": 27.0
+      },
+      "ndc": 2.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 360.0,
+          "df": 4,
+          "ms": 90.0,
+          "f": 9.0,
+          "p": 0.028
+        },
+        {
+          "source": "Operator",
+          "ss": 20.0,
+          "df": 1,
+          "ms": 20.0,
+          "f": 2.0,
+          "p": 0.230199641080499
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 40.0,
+          "df": 4,
+          "ms": 10.0,
+          "f": 5.0,
+          "p": 0.0178326474622771
+        }
+      ],
+      "full_ss_df": [
+        [
+          359.9999999999999,
+          4,
+          89.99999999999997
+        ],
+        [
+          19.99999999999983,
+          1,
+          19.99999999999983
+        ],
+        [
+          39.99999999999977,
+          4,
+          9.999999999999943
+        ],
+        [
+          20.00000000000017,
+          10,
+          2.000000000000017
+        ]
+      ]
+    },
+    {
+      "id": "negative_operator",
+      "config": {
+        "analysis": {
+          "interaction": "auto",
+          "interaction_alpha": 0.05,
+          "method": "crossed_anova",
+          "percentage_basis": "sd_over_tv",
+          "study_multiplier": 6
+        },
+        "design": {
+          "operators": 2,
+          "parts": 5,
+          "replicates": 2
+        },
+        "generation": {
+          "center": null,
+          "decimal_places": 4,
+          "max_attempts": 5000,
+          "priority": "center",
+          "reference_tv_sd": null,
+          "scale_mode": "auto",
+          "seed": null,
+          "timeout_seconds": 30
+        },
+        "output": {
+          "directory": "",
+          "encoding": "utf-8",
+          "existing_file": "number",
+          "filename": "msa_data.csv",
+          "format": "minitab",
+          "run_order": {
+            "mode": "standard",
+            "randomize_operators": false,
+            "seed": 321,
+            "store_standard_order": true
+          }
+        },
+        "schema_version": 1,
+        "specification": {
+          "compliance": "strict",
+          "lsl": 0,
+          "usl": 200
+        },
+        "target_defaults": {
+          "ndc_tolerance": 0,
+          "percentage_tolerance_pp": 0.1
+        },
+        "targets": {
+          "AV_pct": null,
+          "EV_pct": null,
+          "GRR_pct": null,
+          "PT_pct": null,
+          "ndc": null
+        }
+      },
+      "matrix": [
+        [
+          95.0,
+          97.0,
+          99.0,
+          101.0,
+          103.0
+        ],
+        [
+          97.0,
+          99.0,
+          101.0,
+          103.0,
+          105.0
+        ],
+        [
+          91.0,
+          95.0,
+          99.0,
+          103.0,
+          107.0
+        ],
+        [
+          93.0,
+          97.0,
+          101.0,
+          105.0,
+          109.0
+        ]
+      ],
+      "csv_sha256": "a354f1406eb7264d21d338dd0ea18ed361f572260d230fac374d312008d33961",
+      "interaction_included": true,
+      "interaction_p": 0.017832647462277387,
+      "variance_components": {
+        "AV": 4.0,
+        "EV": 2.0000000000000004,
+        "GRR": 5.999999999999999,
+        "Operator": 0.0,
+        "OperatorPart": 4.0,
+        "PV": 20.000000000000004,
+        "TV": 25.999999999999996
+      },
+      "ndc": 2.0,
+      "final_table": [
+        {
+          "source": "Part",
+          "ss": 360.0,
+          "df": 4,
+          "ms": 90.0,
+          "f": 9.0,
+          "p": 0.028
+        },
+        {
+          "source": "Operator",
+          "ss": 0.0,
+          "df": 1,
+          "ms": 0.0,
+          "f": 0.0,
+          "p": 1.0
+        },
+        {
+          "source": "Part*Operator",
+          "ss": 40.0,
+          "df": 4,
+          "ms": 10.0,
+          "f": 5.0,
+          "p": 0.0178326474622771
+        }
+      ],
+      "full_ss_df": [
+        [
+          359.9999999999999,
+          4,
+          89.99999999999997
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          40,
+          4,
+          10
+        ],
+        [
+          20.000000000000114,
+          10,
+          2.0000000000000115
+        ]
+      ]
+    }
+  ]
+}

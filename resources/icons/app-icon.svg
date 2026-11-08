@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>MSA 数据生成器</title>
+  <desc>三列测量数据与一枚新增数据块；蓝色底、白色数据柱、青色新增样本。</desc>
+  <rect width="64" height="64" rx="14" fill="#3B65E8"/>
+  <rect x="12" y="36" width="8" height="16" rx="2" fill="#FFFFFF"/>
+  <rect x="28" y="24" width="8" height="28" rx="2" fill="#FFFFFF"/>
+  <rect x="44" y="28" width="8" height="24" rx="2" fill="#FFFFFF"/>
+  <rect x="44" y="12" width="8" height="8" rx="2" fill="#71F0D2"/>
+</svg>

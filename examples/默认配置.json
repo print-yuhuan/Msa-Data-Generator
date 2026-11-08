@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "design": {
+    "operators": 3,
+    "replicates": 3,
+    "parts": 10
+  },
+  "analysis": {
+    "method": "crossed_xbarr",
+    "percentage_basis": "sd_over_tv",
+    "study_multiplier": 6,
+    "interaction": "auto",
+    "interaction_alpha": 0.05
+  },
+  "specification": {
+    "lsl": null,
+    "usl": null,
+    "compliance": "strict"
+  },
+  "generation": {
+    "center": null,
+    "priority": "center",
+    "scale_mode": "auto",
+    "reference_tv_sd": null,
+    "decimal_places": 4,
+    "seed": null,
+    "max_attempts": 5000,
+    "timeout_seconds": 30
+  },
+  "target_defaults": {
+    "percentage_tolerance_pp": 0.1,
+    "ndc_tolerance": 0
+  },
+  "targets": {
+    "EV_pct": null,
+    "AV_pct": null,
+    "GRR_pct": null,
+    "PT_pct": null,
+    "ndc": null
+  },
+  "output": {
+    "directory": "",
+    "filename": "msa_data.csv",
+    "encoding": "utf-8-sig",
+    "existing_file": "number",
+    "format": "default",
+    "run_order": {
+      "mode": "standard",
+      "randomize_operators": false,
+      "seed": null,
+      "store_standard_order": false
+    }
+  }
+}

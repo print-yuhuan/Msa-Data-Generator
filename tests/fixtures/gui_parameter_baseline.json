@@ -1,0 +1,6000 @@
+{
+  "description": "2026-10-25 通过 Minitab、SPSS、JMP、Origin 和 MATLAB 原生 GUI 导入、设定并计算的报告；按原生显示末位精度判断，差异另列。",
+  "matrix_case": "o3_r3_p10",
+  "matrix_fixture": "anova_software_baseline.json",
+  "csv_sha256": "8aee4d38319262342853dc4ee6692cae70979126081f44519bda78f7b788d6c7",
+  "excludes": "尚未实现的 %Contribution/%StudyVar/ndc 比值置信区间不计入通过项。",
+  "cases": [
+    {
+      "id": "minitab-anova-ci",
+      "analysis": {
+        "method": "crossed_anova",
+        "study_multiplier": 6,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": true
+        },
+        "misclassification": true
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.92479",
+          "expected": 8.92479,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.991643",
+          "expected": 0.991643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "603.630",
+          "expected": 603.63,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/0/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.02110",
+          "expected": 0.0211,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.010548",
+          "expected": 0.010548,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "6.421",
+          "expected": 6.421,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.008",
+          "expected": 0.008,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.02957",
+          "expected": 0.02957,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.001643",
+          "expected": 0.001643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/2/f",
+          "displayed": "4.107",
+          "expected": 4.107,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "0.02400",
+          "expected": 0.024,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.99945",
+          "expected": 8.99945,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.001111",
+          "expected": 0.001111,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/GRR/lower",
+          "displayed": "0.001",
+          "expected": 0.001,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/GRR/upper",
+          "displayed": "0.015",
+          "expected": 0.015,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "1.00",
+          "expected": 1.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/EV/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/EV/upper",
+          "displayed": "0.001",
+          "expected": 0.001,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "0.000711",
+          "expected": 0.000711,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/AV/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/AV/upper",
+          "displayed": "0.014",
+          "expected": 0.014,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.64",
+          "expected": 0.64,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "0.000297",
+          "expected": 0.000297,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/Operator/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/Operator/upper",
+          "displayed": "0.014",
+          "expected": 0.014,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.27",
+          "expected": 0.27,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/variance",
+          "displayed": "0.000414",
+          "expected": 0.000414,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/upper",
+          "displayed": "0.001",
+          "expected": 0.001,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/OperatorPart/contribution_pct",
+          "displayed": "0.37",
+          "expected": 0.37,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.110000",
+          "expected": 0.11,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/PV/lower",
+          "displayed": "0.052",
+          "expected": 0.052,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/PV/upper",
+          "displayed": "0.367",
+          "expected": 0.367,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.00",
+          "expected": 99.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.111111",
+          "expected": 0.111111,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/TV/lower",
+          "displayed": "0.053",
+          "expected": 0.053,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/variance_components/TV/upper",
+          "displayed": "0.369",
+          "expected": 0.369,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.033333",
+          "expected": 0.033333,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/GRR/lower",
+          "displayed": "0.028",
+          "expected": 0.028,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/GRR/upper",
+          "displayed": "0.121",
+          "expected": 0.121,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.20000",
+          "expected": 0.2,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/GRR/lower",
+          "displayed": "0.167",
+          "expected": 0.167,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/GRR/upper",
+          "displayed": "0.726",
+          "expected": 0.726,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "10.00",
+          "expected": 10.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.020000",
+          "expected": 0.02,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/EV/lower",
+          "displayed": "0.017",
+          "expected": 0.017,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/EV/upper",
+          "displayed": "0.024",
+          "expected": 0.024,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.12000",
+          "expected": 0.12,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/EV/lower",
+          "displayed": "0.102",
+          "expected": 0.102,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/EV/upper",
+          "displayed": "0.146",
+          "expected": 0.146,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "6.00",
+          "expected": 6.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.026667",
+          "expected": 0.026667,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/AV/lower",
+          "displayed": "0.018",
+          "expected": 0.018,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/AV/upper",
+          "displayed": "0.119",
+          "expected": 0.119,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.16000",
+          "expected": 0.16,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/AV/lower",
+          "displayed": "0.108",
+          "expected": 0.108,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/AV/upper",
+          "displayed": "0.716",
+          "expected": 0.716,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "8.00",
+          "expected": 8.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.017229",
+          "expected": 0.017229,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/Operator/lower",
+          "displayed": "0.006",
+          "expected": 0.006,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/Operator/upper",
+          "displayed": "0.118",
+          "expected": 0.118,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.10338",
+          "expected": 0.10338,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/Operator/lower",
+          "displayed": "0.033",
+          "expected": 0.033,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/Operator/upper",
+          "displayed": "0.706",
+          "expected": 0.706,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "5.17",
+          "expected": 5.17,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/sd",
+          "displayed": "0.020354",
+          "expected": 0.020354,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/OperatorPart/lower",
+          "displayed": "0.013",
+          "expected": 0.013,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/OperatorPart/upper",
+          "displayed": "0.033",
+          "expected": 0.033,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.12212",
+          "expected": 0.12212,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/OperatorPart/lower",
+          "displayed": "0.078",
+          "expected": 0.078,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/OperatorPart/upper",
+          "displayed": "0.196",
+          "expected": 0.196,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation_pct",
+          "displayed": "6.11",
+          "expected": 6.11,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.331663",
+          "expected": 0.331663,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/PV/lower",
+          "displayed": "0.228",
+          "expected": 0.228,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/PV/upper",
+          "displayed": "0.606",
+          "expected": 0.606,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.98998",
+          "expected": 1.98998,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/PV/lower",
+          "displayed": "1.368",
+          "expected": 1.368,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/PV/upper",
+          "displayed": "3.635",
+          "expected": 3.635,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.50",
+          "expected": 99.5,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.333333",
+          "expected": 0.333333,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/TV/lower",
+          "displayed": "0.230",
+          "expected": 0.23,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/stddev/TV/upper",
+          "displayed": "0.607",
+          "expected": 0.607,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "2.00000",
+          "expected": 2.0,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/TV/lower",
+          "displayed": "1.382",
+          "expected": 1.382,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/confidence/study_variation/TV/upper",
+          "displayed": "3.642",
+          "expected": 3.642,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "10.00",
+          "expected": 10.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/lower",
+          "displayed": "8.33",
+          "expected": 8.33,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/upper",
+          "displayed": "36.32",
+          "expected": 36.32,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "6.00",
+          "expected": 6.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/lower",
+          "displayed": "5.09",
+          "expected": 5.09,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/upper",
+          "displayed": "7.30",
+          "expected": 7.3,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "8.00",
+          "expected": 8.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/lower",
+          "displayed": "5.39",
+          "expected": 5.39,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/upper",
+          "displayed": "35.82",
+          "expected": 35.82,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "5.17",
+          "expected": 5.17,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/lower",
+          "displayed": "1.66",
+          "expected": 1.66,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/upper",
+          "displayed": "35.28",
+          "expected": 35.28,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "6.11",
+          "expected": 6.11,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/OperatorPart/lower",
+          "displayed": "3.91",
+          "expected": 3.91,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/OperatorPart/upper",
+          "displayed": "9.78",
+          "expected": 9.78,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "99.50",
+          "expected": 99.5,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/lower",
+          "displayed": "68.38",
+          "expected": 68.38,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/upper",
+          "displayed": "181.75",
+          "expected": 181.75,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/lower",
+          "displayed": "69.10",
+          "expected": 69.1,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/upper",
+          "displayed": "182.11",
+          "expected": 182.11,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/misclassification/bad_accepted",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/misclassification/good_rejected",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/misclassification/accept_given_bad",
+          "displayed": "0.110",
+          "expected": 0.11,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/misclassification/reject_given_good",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "expected": 14.0,
+          "tolerance": 0.500000000001
+        }
+      ]
+    },
+    {
+      "id": "minitab-xbarr",
+      "analysis": {
+        "method": "crossed_xbarr",
+        "study_multiplier": 6,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": null
+      },
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.0008201",
+          "expected": 0.0008201,
+          "tolerance": 5.0001e-08
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.87",
+          "expected": 0.87,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "0.0005216",
+          "expected": 0.0005216,
+          "tolerance": 5.0001e-08
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.55",
+          "expected": 0.55,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "0.0002985",
+          "expected": 0.0002985,
+          "tolerance": 5.0001e-08
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.32",
+          "expected": 0.32,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.0934967",
+          "expected": 0.0934967,
+          "tolerance": 5.0001e-08
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.13",
+          "expected": 99.13,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.0943168",
+          "expected": 0.0943168,
+          "tolerance": 5.0001e-08
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.028637",
+          "expected": 0.028637,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.17182",
+          "expected": 0.17182,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "9.32",
+          "expected": 9.32,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.022838",
+          "expected": 0.022838,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.13703",
+          "expected": 0.13703,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "7.44",
+          "expected": 7.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.017277",
+          "expected": 0.017277,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.10366",
+          "expected": 0.10366,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "5.63",
+          "expected": 5.63,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.305772",
+          "expected": 0.305772,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.83463",
+          "expected": 1.83463,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.56",
+          "expected": 99.56,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.307110",
+          "expected": 0.30711,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "1.84266",
+          "expected": 1.84266,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/ndc",
+          "displayed": "15",
+          "expected": 15.0,
+          "tolerance": 0.500000000001
+        }
+      ]
+    },
+    {
+      "id": "minitab-xbarr-historical-one-sided",
+      "analysis": {
+        "method": "crossed_xbarr",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": 10.5
+      },
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.000820",
+          "expected": 0.00082,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.33",
+          "expected": 0.33,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "0.000522",
+          "expected": 0.000522,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.21",
+          "expected": 0.21,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "0.000299",
+          "expected": 0.000299,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.12",
+          "expected": 0.12,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.249180",
+          "expected": 0.24918,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.67",
+          "expected": 99.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.250000",
+          "expected": 0.25,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.028637",
+          "expected": 0.028637,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.14748",
+          "expected": 0.14748,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "5.73",
+          "expected": 5.73,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "14.75",
+          "expected": 14.75,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.022838",
+          "expected": 0.022838,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.11762",
+          "expected": 0.11762,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "4.57",
+          "expected": 4.57,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "11.76",
+          "expected": 11.76,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.017277",
+          "expected": 0.017277,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.08898",
+          "expected": 0.08898,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "3.46",
+          "expected": 3.46,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "8.90",
+          "expected": 8.9,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.499179",
+          "expected": 0.499179,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "2.57077",
+          "expected": 2.57077,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.84",
+          "expected": 99.84,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "257.08",
+          "expected": 257.08,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.500000",
+          "expected": 0.5,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "2.57500",
+          "expected": 2.575,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "257.50",
+          "expected": 257.5,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/ndc",
+          "displayed": "24",
+          "expected": 24.0,
+          "tolerance": 0.500000000001
+        }
+      ]
+    },
+    {
+      "id": "spss-anova-type-iii",
+      "source": "原生 GUI：一般线性模型→方差成分；Operator、Part 均为随机因子，全因子含截距；ANOVA、III 类平方和。",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "historical_sd": null,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/anova/variance_components/Operator",
+          "displayed": ".00029684502",
+          "expected": 0.00029684502,
+          "tolerance": 5e-12
+        },
+        {
+          "path": "/anova/variance_components/PV",
+          "displayed": ".11000003363",
+          "expected": 0.11000003363,
+          "tolerance": 5e-12
+        },
+        {
+          "path": "/anova/variance_components/OperatorPart",
+          "displayed": ".00041426622",
+          "expected": 0.00041426622,
+          "tolerance": 5e-12
+        },
+        {
+          "path": "/anova/variance_components/EV",
+          "displayed": ".00040000004",
+          "expected": 0.00040000004,
+          "tolerance": 5e-12
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.925",
+          "expected": 8.925,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": ".992",
+          "expected": 0.992,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": ".021",
+          "expected": 0.021,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": ".011",
+          "expected": 0.011,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": ".030",
+          "expected": 0.03,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": ".002",
+          "expected": 0.002,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": ".024",
+          "expected": 0.024,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": ".000",
+          "expected": 0.0,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.999",
+          "expected": 8.999,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        }
+      ]
+    },
+    {
+      "id": "jmp-crossed-grr",
+      "source": "JMP 19 原生 GUI：Operator、Part 为名义型，交叉模型，EMS/REML 策略，Sigma=6，Alpha=0.05，容差下限9、上限11；变异性量具→量具研究→量具R&R。",
+      "evidence": "本地 build/gui-audit-20261025/common - 变异性图- Operator - Measurement.txt，由 JMP 原生另存为文本生成；另有 jmp-anova-grr-ui.jpg、jmp-anova-components-ui.jpg。",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "study_multiplier": 6,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/anova/study_variation/EV",
+          "displayed": "0.1200000",
+          "expected": 0.12,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/study_variation/AV",
+          "displayed": "0.1600000",
+          "expected": 0.16,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/study_variation/Operator",
+          "displayed": "0.1033751",
+          "expected": 0.1033751,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/study_variation/OperatorPart",
+          "displayed": "0.1221212",
+          "expected": 0.1221212,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/study_variation/GRR",
+          "displayed": "0.2000000",
+          "expected": 0.2,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/study_variation/PV",
+          "displayed": "1.9899752",
+          "expected": 1.9899752,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/study_variation/TV",
+          "displayed": "2.0000003",
+          "expected": 2.0000003,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/anova/tolerance_pct/EV",
+          "displayed": "6.00",
+          "expected": 6.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/tolerance_pct/AV",
+          "displayed": "8.00",
+          "expected": 8.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/tolerance_pct/Operator",
+          "displayed": "5.17",
+          "expected": 5.17,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/tolerance_pct/OperatorPart",
+          "displayed": "6.11",
+          "expected": 6.11,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/tolerance_pct/GRR",
+          "displayed": "10.00",
+          "expected": 10.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/tolerance_pct/PV",
+          "displayed": "99.50",
+          "expected": 99.5,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/tolerance_pct/TV",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/GRR",
+          "displayed": "0.00111111",
+          "expected": 0.00111111,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/GRR",
+          "displayed": "1.00",
+          "expected": 1.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/EV",
+          "displayed": "0.00040000",
+          "expected": 0.0004,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/EV",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/AV",
+          "displayed": "0.00071111",
+          "expected": 0.00071111,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/AV",
+          "displayed": "0.64",
+          "expected": 0.64,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/PV",
+          "displayed": "0.11000003",
+          "expected": 0.11000003,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/PV",
+          "displayed": "99.00",
+          "expected": 99.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/GRR_pct",
+          "displayed": "10",
+          "expected": 10.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "expected": 14.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.021096",
+          "expected": 0.021096,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.01055",
+          "expected": 0.01055,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "6.421",
+          "expected": 6.421,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.924788",
+          "expected": 8.924788,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.99164",
+          "expected": 0.99164,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "603.630",
+          "expected": 603.63,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.02957",
+          "expected": 0.02957,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.00164",
+          "expected": 0.00164,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/2/f",
+          "displayed": "4.107",
+          "expected": 4.107,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "0.024",
+          "expected": 0.024,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": "0.0004",
+          "expected": 0.0004,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.999455",
+          "expected": 8.999455,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.0079",
+          "expected": 0.0079,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/variance_components/Operator",
+          "displayed": "0.00029685",
+          "expected": 0.00029685,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/Operator",
+          "displayed": "0.2672",
+          "expected": 0.2672,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/stddev/Operator",
+          "displayed": "0.01723",
+          "expected": 0.01723,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/PV",
+          "displayed": "0.11000003",
+          "expected": 0.11000003,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/PV",
+          "displayed": "99.0",
+          "expected": 99.0,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/anova/stddev/PV",
+          "displayed": "0.33166",
+          "expected": 0.33166,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/OperatorPart",
+          "displayed": "0.00041427",
+          "expected": 0.00041427,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/OperatorPart",
+          "displayed": "0.3728",
+          "expected": 0.3728,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/stddev/OperatorPart",
+          "displayed": "0.02035",
+          "expected": 0.02035,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/EV",
+          "displayed": "0.00040000",
+          "expected": 0.0004,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/EV",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/stddev/EV",
+          "displayed": "0.02000",
+          "expected": 0.02,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/TV",
+          "displayed": "0.11111114",
+          "expected": 0.11111114,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/TV",
+          "displayed": "100.0",
+          "expected": 100.0,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/anova/stddev/TV",
+          "displayed": "0.33333",
+          "expected": 0.33333,
+          "tolerance": 5e-06
+        }
+      ]
+    },
+    {
+      "id": "origin-anova-ci",
+      "source": "OriginPro 2026b Gage Study 原生 GUI，共同90条数据，k=6，双侧过程公差2，无历史SD。",
+      "evidence": "本地 build/gui-audit-20261025/origin-anova-baseline-ui.jpg",
+      "analysis": {
+        "method": "crossed_anova",
+        "study_multiplier": 6,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": true
+        }
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.00111",
+          "expected": 0.00111,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "1",
+          "expected": 1.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/confidence/variance_components/GRR/lower",
+          "displayed": "7.70583E-4",
+          "expected": 0.000770583,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/confidence/variance_components/GRR/upper",
+          "displayed": "0.01466",
+          "expected": 0.01466,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "4E-4",
+          "expected": 0.0004,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/confidence/variance_components/EV/lower",
+          "displayed": "2.88123E-4",
+          "expected": 0.000288123,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/confidence/variance_components/EV/upper",
+          "displayed": "5.9286E-4",
+          "expected": 0.00059286,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "7.11111E-4",
+          "expected": 0.000711111,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.64",
+          "expected": 0.64,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/confidence/variance_components/AV/lower",
+          "displayed": "3.23359E-4",
+          "expected": 0.000323359,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/confidence/variance_components/AV/upper",
+          "displayed": "0.01425",
+          "expected": 0.01425,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "2.96845E-4",
+          "expected": 0.000296845,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.26716",
+          "expected": 0.26716,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/Operator/lower",
+          "displayed": "3.07219E-5",
+          "expected": 3.07219e-05,
+          "tolerance": 5e-11
+        },
+        {
+          "path": "/confidence/variance_components/Operator/upper",
+          "displayed": "0.01383",
+          "expected": 0.01383,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/variance",
+          "displayed": "4.14266E-4",
+          "expected": 0.000414266,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/OperatorPart/contribution_pct",
+          "displayed": "0.37284",
+          "expected": 0.37284,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/lower",
+          "displayed": "1.69785E-4",
+          "expected": 0.000169785,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/upper",
+          "displayed": "0.00106",
+          "expected": 0.00106,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.11",
+          "expected": 0.11,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99",
+          "expected": 99.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/confidence/variance_components/PV/lower",
+          "displayed": "0.05195",
+          "expected": 0.05195,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/PV/upper",
+          "displayed": "0.36703",
+          "expected": 0.36703,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.11111",
+          "expected": 0.11111,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/confidence/variance_components/TV/lower",
+          "displayed": "0.05306",
+          "expected": 0.05306,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/TV/upper",
+          "displayed": "0.36851",
+          "expected": 0.36851,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.03333",
+          "expected": 0.03333,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.2",
+          "expected": 0.2,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "10",
+          "expected": 10.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "10",
+          "expected": 10.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/confidence/stddev/GRR/lower",
+          "displayed": "0.02776",
+          "expected": 0.02776,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/GRR/upper",
+          "displayed": "0.12108",
+          "expected": 0.12108,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/GRR/lower",
+          "displayed": "0.16656",
+          "expected": 0.16656,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/GRR/upper",
+          "displayed": "0.72648",
+          "expected": 0.72648,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/lower",
+          "displayed": "8.32781",
+          "expected": 8.32781,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/upper",
+          "displayed": "36.32405",
+          "expected": 36.32405,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.02",
+          "expected": 0.02,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.12",
+          "expected": 0.12,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "6",
+          "expected": 6.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "6",
+          "expected": 6.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/confidence/stddev/EV/lower",
+          "displayed": "0.01697",
+          "expected": 0.01697,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/EV/upper",
+          "displayed": "0.02435",
+          "expected": 0.02435,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/EV/lower",
+          "displayed": "0.10185",
+          "expected": 0.10185,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/EV/upper",
+          "displayed": "0.14609",
+          "expected": 0.14609,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/lower",
+          "displayed": "5.09226",
+          "expected": 5.09226,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/upper",
+          "displayed": "7.30461",
+          "expected": 7.30461,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.02667",
+          "expected": 0.02667,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.16",
+          "expected": 0.16,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "8",
+          "expected": 8.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "8",
+          "expected": 8.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/confidence/stddev/AV/lower",
+          "displayed": "0.01798",
+          "expected": 0.01798,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/AV/upper",
+          "displayed": "0.11939",
+          "expected": 0.11939,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/AV/lower",
+          "displayed": "0.10789",
+          "expected": 0.10789,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/AV/upper",
+          "displayed": "0.71635",
+          "expected": 0.71635,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/lower",
+          "displayed": "5.39465",
+          "expected": 5.39465,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/upper",
+          "displayed": "35.81748",
+          "expected": 35.81748,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.01723",
+          "expected": 0.01723,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.10338",
+          "expected": 0.10338,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "5.16876",
+          "expected": 5.16876,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "5.16876",
+          "expected": 5.16876,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/Operator/lower",
+          "displayed": "0.00554",
+          "expected": 0.00554,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/Operator/upper",
+          "displayed": "0.11759",
+          "expected": 0.11759,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/Operator/lower",
+          "displayed": "0.03326",
+          "expected": 0.03326,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/lower",
+          "displayed": "1.66282",
+          "expected": 1.66282,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/upper",
+          "displayed": "35.27734",
+          "expected": 35.27734,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/sd",
+          "displayed": "0.02035",
+          "expected": 0.02035,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.12212",
+          "expected": 0.12212,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation_pct",
+          "displayed": "6.10606",
+          "expected": 6.10606,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "6.10606",
+          "expected": 6.10606,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/OperatorPart/lower",
+          "displayed": "0.01303",
+          "expected": 0.01303,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/OperatorPart/upper",
+          "displayed": "0.03261",
+          "expected": 0.03261,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/OperatorPart/lower",
+          "displayed": "0.07818",
+          "expected": 0.07818,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/OperatorPart/upper",
+          "displayed": "0.19565",
+          "expected": 0.19565,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/OperatorPart/lower",
+          "displayed": "3.90904",
+          "expected": 3.90904,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/OperatorPart/upper",
+          "displayed": "9.78228",
+          "expected": 9.78228,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.33166",
+          "expected": 0.33166,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.98998",
+          "expected": 1.98998,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.49874",
+          "expected": 99.49874,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "99.49876",
+          "expected": 99.49876,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/PV/lower",
+          "displayed": "0.22793",
+          "expected": 0.22793,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/PV/upper",
+          "displayed": "0.60583",
+          "expected": 0.60583,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/PV/lower",
+          "displayed": "1.36756",
+          "expected": 1.36756,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/PV/upper",
+          "displayed": "3.63499",
+          "expected": 3.63499,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/lower",
+          "displayed": "68.37791",
+          "expected": 68.37791,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.33333",
+          "expected": 0.33333,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "100.00002",
+          "expected": 100.00002,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/TV/lower",
+          "displayed": "0.23034",
+          "expected": 0.23034,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/TV/upper",
+          "displayed": "0.60705",
+          "expected": 0.60705,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/TV/lower",
+          "displayed": "1.38205",
+          "expected": 1.38205,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/study_variation/TV/upper",
+          "displayed": "3.64229",
+          "expected": 3.64229,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/lower",
+          "displayed": "69.10237",
+          "expected": 69.10237,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/upper",
+          "displayed": "182.1144",
+          "expected": 182.1144,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "expected": 14.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": [
+        {
+          "path": "/confidence/study_variation/Operator/upper",
+          "displayed": "0.70556",
+          "expected": 0.70556,
+          "tolerance": 5e-06,
+          "program": 0.7055467657822592,
+          "difference": 1.323421774079847e-05
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/upper",
+          "displayed": "181.74966",
+          "expected": 181.74966,
+          "tolerance": 5e-06,
+          "program": 181.749667181083,
+          "difference": 7.1810829922469566e-06
+        }
+      ],
+      "comparison_count": 99,
+      "all_compared_values_match": false
+    },
+    {
+      "id": "origin-xbarr",
+      "source": "OriginPro 2026b Gage Study 原生 GUI，共同90条数据，k=6，双侧过程公差2，无历史SD。",
+      "evidence": "本地 build/gui-audit-20261025/origin-xbarr-baseline-ui.jpg",
+      "analysis": {
+        "method": "crossed_xbarr",
+        "study_multiplier": 6,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": false
+        }
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "8.20079E-4",
+          "expected": 0.000820079,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.86949",
+          "expected": 0.86949,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.02864",
+          "expected": 0.02864,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.17182",
+          "expected": 0.17182,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "9.32467",
+          "expected": 9.32467,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "8.59111",
+          "expected": 8.59111,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "5.21575E-4",
+          "expected": 0.000521575,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.553",
+          "expected": 0.553,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.02284",
+          "expected": 0.02284,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.13703",
+          "expected": 0.13703,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "7.43642",
+          "expected": 7.43642,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "6.8514",
+          "expected": 6.8514,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "2.98505E-4",
+          "expected": 0.000298505,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.31649",
+          "expected": 0.31649,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.01728",
+          "expected": 0.01728,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.10366",
+          "expected": 0.10366,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "5.62576",
+          "expected": 5.62576,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "5.18319",
+          "expected": 5.18319,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.0935",
+          "expected": 0.0935,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.13051",
+          "expected": 99.13051,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.30577",
+          "expected": 0.30577,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.83463",
+          "expected": 1.83463,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.5643",
+          "expected": 99.5643,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "91.73169",
+          "expected": 91.73169,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.09432",
+          "expected": 0.09432,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.30711",
+          "expected": 0.30711,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "1.84266",
+          "expected": 1.84266,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "92.13311",
+          "expected": 92.13311,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/ndc",
+          "displayed": "15",
+          "expected": 15.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": [],
+      "comparison_count": 31,
+      "all_compared_values_match": true
+    },
+    {
+      "id": "origin-xbarr-historical",
+      "source": "OriginPro 2026b Gage Study 原生 GUI，共同90条数据，k=5.15，双侧过程公差2，历史SD=0.5；启用历史SD后原生CI控件禁用。",
+      "evidence": "本地 build/gui-audit-20261025/origin-xbarr-historical-ui.jpg",
+      "analysis": {
+        "method": "crossed_xbarr",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "confidence": {
+          "enabled": false
+        }
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "8.20079E-4",
+          "expected": 0.000820079,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.32803",
+          "expected": 0.32803,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.02864",
+          "expected": 0.02864,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.14748",
+          "expected": 0.14748,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "5.72741",
+          "expected": 5.72741,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "7.37403",
+          "expected": 7.37403,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/process_pct",
+          "displayed": "5.72741",
+          "expected": 5.72741,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "5.21575E-4",
+          "expected": 0.000521575,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.20863",
+          "expected": 0.20863,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.02284",
+          "expected": 0.02284,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.11762",
+          "expected": 0.11762,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "4.5676",
+          "expected": 4.5676,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "5.88079",
+          "expected": 5.88079,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/process_pct",
+          "displayed": "4.5676",
+          "expected": 4.5676,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "2.98505E-4",
+          "expected": 0.000298505,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.1194",
+          "expected": 0.1194,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.01728",
+          "expected": 0.01728,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.08898",
+          "expected": 0.08898,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "3.45546",
+          "expected": 3.45546,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "4.4489",
+          "expected": 4.4489,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/process_pct",
+          "displayed": "3.45546",
+          "expected": 3.45546,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.24918",
+          "expected": 0.24918,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.67197",
+          "expected": 99.67197,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.49918",
+          "expected": 0.49918,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "2.57077",
+          "expected": 2.57077,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.83585",
+          "expected": 99.83585,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "128.53866",
+          "expected": 128.53866,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/process_pct",
+          "displayed": "99.83585",
+          "expected": 99.83585,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.25",
+          "expected": 0.25,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.5",
+          "expected": 0.5,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "2.575",
+          "expected": 2.575,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "128.75",
+          "expected": 128.75,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/process_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/ndc",
+          "displayed": "24",
+          "expected": 24.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": [],
+      "comparison_count": 36,
+      "all_compared_values_match": true
+    },
+    {
+      "id": "origin-anova-historical",
+      "source": "OriginPro 2026b Gage Study 原生 GUI，共同90条数据，k=5.15，双侧过程公差2，历史SD=0.5；启用历史SD后原生CI控件禁用。",
+      "evidence": "本地 build/gui-audit-20261025/origin-anova-historical-ui.jpg",
+      "analysis": {
+        "method": "crossed_anova",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "confidence": {
+          "enabled": false
+        }
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.00111",
+          "expected": 0.00111,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.44444",
+          "expected": 0.44444,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.03333",
+          "expected": 0.03333,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.17167",
+          "expected": 0.17167,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "6.66667",
+          "expected": 6.66667,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "8.58333",
+          "expected": 8.58333,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "4E-4",
+          "expected": 0.0004,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.16",
+          "expected": 0.16,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.02",
+          "expected": 0.02,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.103",
+          "expected": 0.103,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "4",
+          "expected": 4.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "5.15",
+          "expected": 5.15,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "7.11111E-4",
+          "expected": 0.000711111,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.28444",
+          "expected": 0.28444,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.02667",
+          "expected": 0.02667,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.13733",
+          "expected": 0.13733,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "5.33333",
+          "expected": 5.33333,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "6.86667",
+          "expected": 6.86667,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "2.96845E-4",
+          "expected": 0.000296845,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.11874",
+          "expected": 0.11874,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.01723",
+          "expected": 0.01723,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.08873",
+          "expected": 0.08873,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "3.44584",
+          "expected": 3.44584,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "4.43652",
+          "expected": 4.43652,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/variance",
+          "displayed": "4.14266E-4",
+          "expected": 0.000414266,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/study/components/OperatorPart/contribution_pct",
+          "displayed": "0.16571",
+          "expected": 0.16571,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/sd",
+          "displayed": "0.02035",
+          "expected": 0.02035,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.10482",
+          "expected": 0.10482,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation_pct",
+          "displayed": "4.07071",
+          "expected": 4.07071,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "5.24103",
+          "expected": 5.24103,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.24889",
+          "expected": 0.24889,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.55556",
+          "expected": 99.55556,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.49889",
+          "expected": 0.49889,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "2.56927",
+          "expected": 2.56927,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.77753",
+          "expected": 99.77753,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "128.46357",
+          "expected": 128.46357,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.25",
+          "expected": 0.25,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.5",
+          "expected": 0.5,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "2.575",
+          "expected": 2.575,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "128.75",
+          "expected": 128.75,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/ndc",
+          "displayed": "21",
+          "expected": 21.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": [],
+      "comparison_count": 43,
+      "all_compared_values_match": true
+    },
+    {
+      "id": "origin-anova-upper90",
+      "source": "OriginPro 2026b 原生GUI：ANOVA、k=5.15、公差2、无历史SD、90%单侧上限。报告表头仍显示95%，研究变异及P/T的CI仍按6倍换算，差异如实另列。",
+      "evidence": "本地 build/gui-audit-20261025/origin-anova-upper90-options-ui.jpg 与 origin-anova-upper90-ui.jpg",
+      "analysis": {
+        "method": "crossed_anova",
+        "study_multiplier": 5.15,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": true,
+          "level": 90,
+          "bound": "upper"
+        }
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "checks": [
+        {
+          "path": "/confidence/variance_components/GRR/upper",
+          "displayed": "0.00412",
+          "expected": 0.00412,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/GRR/upper",
+          "displayed": "0.06415",
+          "expected": 0.06415,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/EV/upper",
+          "displayed": "5.16586E-4",
+          "expected": 0.000516586,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/confidence/stddev/EV/upper",
+          "displayed": "0.02273",
+          "expected": 0.02273,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/AV/upper",
+          "displayed": "0.00371",
+          "expected": 0.00371,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/AV/upper",
+          "displayed": "0.06092",
+          "expected": 0.06092,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/Operator/upper",
+          "displayed": "0.00328",
+          "expected": 0.00328,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/Operator/upper",
+          "displayed": "0.05726",
+          "expected": 0.05726,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/OperatorPart/upper",
+          "displayed": "0.02781",
+          "expected": 0.02781,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/PV/upper",
+          "displayed": "0.23772",
+          "expected": 0.23772,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/PV/upper",
+          "displayed": "0.48757",
+          "expected": 0.48757,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/variance_components/TV/upper",
+          "displayed": "0.23887",
+          "expected": 0.23887,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/confidence/stddev/TV/upper",
+          "displayed": "0.48875",
+          "expected": 0.48875,
+          "tolerance": 5e-06
+        }
+      ],
+      "differences": [
+        {
+          "path": "/confidence/study_variation/GRR/upper",
+          "displayed": "0.3849",
+          "expected": 0.3849,
+          "tolerance": 5e-05,
+          "program": 0.3303701592975368,
+          "difference": 0.054529840702463195
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/upper",
+          "displayed": "19.24486",
+          "expected": 19.24486,
+          "tolerance": 5e-06,
+          "program": 16.51850796487684,
+          "difference": 2.72635203512316
+        },
+        {
+          "path": "/confidence/study_variation/EV/upper",
+          "displayed": "0.13637",
+          "expected": 0.13637,
+          "tolerance": 5e-06,
+          "program": 0.11705189970905991,
+          "difference": 0.019318100290940082
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/upper",
+          "displayed": "6.81856",
+          "expected": 6.81856,
+          "tolerance": 5e-06,
+          "program": 5.8525949854529955,
+          "difference": 0.9659650145470042
+        },
+        {
+          "path": "/confidence/study_variation/AV/upper",
+          "displayed": "0.36551",
+          "expected": 0.36551,
+          "tolerance": 5e-06,
+          "program": 0.3137335994576673,
+          "difference": 0.05177640054233268
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/upper",
+          "displayed": "18.27574",
+          "expected": 18.27574,
+          "tolerance": 5e-06,
+          "program": 15.686679972883365,
+          "difference": 2.589060027116634
+        },
+        {
+          "path": "/confidence/study_variation/Operator/upper",
+          "displayed": "0.34359",
+          "expected": 0.34359,
+          "tolerance": 5e-06,
+          "program": 0.2949134170778726,
+          "difference": 0.0486765829221274
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/upper",
+          "displayed": "17.17942",
+          "expected": 17.17942,
+          "tolerance": 5e-06,
+          "program": 14.74567085389363,
+          "difference": 2.4337491461063703
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/upper",
+          "displayed": "7.73666E-4",
+          "expected": 0.000773666,
+          "tolerance": 5e-10,
+          "program": 0.0007736596849775625,
+          "difference": 6.315022437483955e-09
+        },
+        {
+          "path": "/confidence/study_variation/OperatorPart/upper",
+          "displayed": "0.16689",
+          "expected": 0.16689,
+          "tolerance": 5e-06,
+          "program": 0.14324590393731126,
+          "difference": 0.023644096062688746
+        },
+        {
+          "path": "/confidence/tolerance_pct/OperatorPart/upper",
+          "displayed": "8.34442",
+          "expected": 8.34442,
+          "tolerance": 5e-06,
+          "program": 7.162295196865562,
+          "difference": 1.1821248031344371
+        },
+        {
+          "path": "/confidence/study_variation/PV/upper",
+          "displayed": "2.92541",
+          "expected": 2.92541,
+          "tolerance": 5e-06,
+          "program": 2.5109738203181675,
+          "difference": 0.41443617968183233
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/upper",
+          "displayed": "146.27032",
+          "expected": 146.27032,
+          "tolerance": 5e-06,
+          "program": 125.54869101590837,
+          "difference": 20.721628984091623
+        },
+        {
+          "path": "/confidence/study_variation/TV/upper",
+          "displayed": "2.93248",
+          "expected": 2.93248,
+          "tolerance": 5e-06,
+          "program": 2.5170426079038584,
+          "difference": 0.4154373920961416
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/upper",
+          "displayed": "146.62384",
+          "expected": 146.62384,
+          "tolerance": 5e-06,
+          "program": 125.85213039519292,
+          "difference": 20.771709604807086
+        }
+      ],
+      "comparison_count": 28,
+      "all_compared_values_match": false
+    },
+    {
+      "id": "minitab-anova-historical-lower95",
+      "analysis": {
+        "method": "crossed_anova",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "process_variation": "historical",
+        "tolerance": 2,
+        "confidence": {
+          "enabled": true,
+          "level": 95,
+          "bound": "lower"
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": null
+      },
+      "checks": [
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.92479",
+          "expected": 8.92479,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.991643",
+          "expected": 0.991643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "603.630",
+          "expected": 603.63,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/0/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.02110",
+          "expected": 0.0211,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.010548",
+          "expected": 0.010548,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "6.421",
+          "expected": 6.421,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.008",
+          "expected": 0.008,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.02957",
+          "expected": 0.02957,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.001643",
+          "expected": 0.001643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/2/f",
+          "displayed": "4.107",
+          "expected": 4.107,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "0.02400",
+          "expected": 0.024,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0.500000000001
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.99945",
+          "expected": 8.99945,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.001111",
+          "expected": 0.001111,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.44",
+          "expected": 0.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.16",
+          "expected": 0.16,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "0.000711",
+          "expected": 0.000711,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.28",
+          "expected": 0.28,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "0.000297",
+          "expected": 0.000297,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.12",
+          "expected": 0.12,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/variance",
+          "displayed": "0.000414",
+          "expected": 0.000414,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/OperatorPart/contribution_pct",
+          "displayed": "0.17",
+          "expected": 0.17,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.248889",
+          "expected": 0.248889,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.56",
+          "expected": 99.56,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.250000",
+          "expected": 0.25,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.033333",
+          "expected": 0.033333,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.17167",
+          "expected": 0.17167,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "6.67",
+          "expected": 6.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "8.58",
+          "expected": 8.58,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.020000",
+          "expected": 0.02,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.10300",
+          "expected": 0.103,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "4.00",
+          "expected": 4.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "5.15",
+          "expected": 5.15,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.026667",
+          "expected": 0.026667,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.13733",
+          "expected": 0.13733,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "5.33",
+          "expected": 5.33,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "6.87",
+          "expected": 6.87,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.017229",
+          "expected": 0.017229,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.08873",
+          "expected": 0.08873,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "3.45",
+          "expected": 3.45,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "4.44",
+          "expected": 4.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/sd",
+          "displayed": "0.020354",
+          "expected": 0.020354,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.10482",
+          "expected": 0.10482,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation_pct",
+          "displayed": "4.07",
+          "expected": 4.07,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "5.24",
+          "expected": 5.24,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.498888",
+          "expected": 0.498888,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "2.56927",
+          "expected": 2.56927,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.78",
+          "expected": 99.78,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "128.46",
+          "expected": 128.46,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.500000",
+          "expected": 0.5,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "2.57500",
+          "expected": 2.575,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "128.75",
+          "expected": 128.75,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/ndc",
+          "displayed": "21",
+          "expected": 21.0,
+          "tolerance": 0.500000000001
+        }
+      ],
+      "native_limitation": "Minitab 报告明确说明使用历史标准差计算总过程方差时置信区间不可用；仅比较实际显示的点估计。"
+    },
+    {
+      "id": "matlab-single-upper-515",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "study_multiplier": 5.15,
+        "historical_sd": null,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": 10.5
+      },
+      "comparison_count": 57,
+      "all_compared_values_match": false,
+      "checks": [
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.0011",
+          "expected": 0.0011,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "1.0000",
+          "expected": 1.0,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.0333",
+          "expected": 0.0333,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.1717",
+          "expected": 0.1717,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "10.0000",
+          "expected": 10.0,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "4.0000e-04",
+          "expected": 0.0004,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.3600",
+          "expected": 0.36,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.0200",
+          "expected": 0.02,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.1030",
+          "expected": 0.103,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "6.0000",
+          "expected": 6.0,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "7.1111e-04",
+          "expected": 0.00071111,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.6400",
+          "expected": 0.64,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.0267",
+          "expected": 0.0267,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.1373",
+          "expected": 0.1373,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "8.0000",
+          "expected": 8.0,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "2.9685e-04",
+          "expected": 0.00029685,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.2672",
+          "expected": 0.2672,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.0172",
+          "expected": 0.0172,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.0887",
+          "expected": 0.0887,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "5.1688",
+          "expected": 5.1688,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/OperatorPart/variance",
+          "displayed": "4.1427e-04",
+          "expected": 0.00041427,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/study/components/OperatorPart/contribution_pct",
+          "displayed": "0.3728",
+          "expected": 0.3728,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/OperatorPart/sd",
+          "displayed": "0.0204",
+          "expected": 0.0204,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.1048",
+          "expected": 0.1048,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation_pct",
+          "displayed": "6.1061",
+          "expected": 6.1061,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.1100",
+          "expected": 0.11,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.0000",
+          "expected": 99.0,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.3317",
+          "expected": 0.3317,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.7081",
+          "expected": 1.7081,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.4987",
+          "expected": 99.4987,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.1111",
+          "expected": 0.1111,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100",
+          "expected": 100.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.3333",
+          "expected": 0.3333,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "1.7167",
+          "expected": 1.7167,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.9248",
+          "expected": 8.9248,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.9916",
+          "expected": 0.9916,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "603.6303",
+          "expected": 603.6303,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/0/p",
+          "displayed": "1.8733e-20",
+          "expected": 1.8733e-20,
+          "tolerance": 5e-25
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.0211",
+          "expected": 0.0211,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.0105",
+          "expected": 0.0105,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "6.4208",
+          "expected": 6.4208,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.0079",
+          "expected": 0.0079,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.0296",
+          "expected": 0.0296,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.0016",
+          "expected": 0.0016,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/2/f",
+          "displayed": "4.1070",
+          "expected": 4.107,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/2/p",
+          "displayed": "1.8251e-05",
+          "expected": 1.8251e-05,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "0.0240",
+          "expected": 0.024,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": "4.0000e-04",
+          "expected": 0.0004,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.9995",
+          "expected": 8.9995,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "expected": 14.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/GRR_pct",
+          "displayed": "10",
+          "expected": 10.0,
+          "tolerance": 0.5
+        }
+      ],
+      "differences": [
+        {
+          "path": "/PT_pct",
+          "displayed": "0",
+          "expected": 0.0,
+          "actual": 17.166667197440862,
+          "tolerance": 0.5,
+          "passed": false
+        }
+      ],
+      "native_limitation": "仅上限10.5；MATLAB保留缺失规格侧为无穷，原生PTR=0，与本程序单侧公差定义不同。"
+    },
+    {
+      "id": "minitab-anova-study-history-lower95",
+      "analysis": {
+        "method": "crossed_anova",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "process_variation": "study",
+        "tolerance": 2,
+        "confidence": {
+          "enabled": true,
+          "level": 95,
+          "bound": "lower"
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": null
+      },
+      "comparison_count": 98,
+      "all_compared_values_match": true,
+      "checks": [
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.92479",
+          "expected": 8.92479,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.991643",
+          "expected": 0.991643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "603.630",
+          "expected": 603.63,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/0/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.02110",
+          "expected": 0.0211,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.010548",
+          "expected": 0.010548,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "6.421",
+          "expected": 6.421,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.008",
+          "expected": 0.008,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.02957",
+          "expected": 0.02957,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.001643",
+          "expected": 0.001643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/2/f",
+          "displayed": "4.107",
+          "expected": 4.107,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "0.02400",
+          "expected": 0.024,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.99945",
+          "expected": 8.99945,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.001111",
+          "expected": 0.001111,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/GRR/lower",
+          "displayed": "0.001",
+          "expected": 0.001,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "1.00",
+          "expected": 1.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/EV/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "0.000711",
+          "expected": 0.000711,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/AV/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.64",
+          "expected": 0.64,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "0.000297",
+          "expected": 0.000297,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/Operator/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.27",
+          "expected": 0.27,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/variance",
+          "displayed": "0.000414",
+          "expected": 0.000414,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/lower",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/OperatorPart/contribution_pct",
+          "displayed": "0.37",
+          "expected": 0.37,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.110000",
+          "expected": 0.11,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/PV/lower",
+          "displayed": "0.058",
+          "expected": 0.058,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.00",
+          "expected": 99.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.111111",
+          "expected": 0.111111,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/TV/lower",
+          "displayed": "0.060",
+          "expected": 0.06,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.033333",
+          "expected": 0.033333,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/GRR/lower",
+          "displayed": "0.028",
+          "expected": 0.028,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.17167",
+          "expected": 0.17167,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/GRR/lower",
+          "displayed": "0.146",
+          "expected": 0.146,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "10.00",
+          "expected": 10.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "8.58",
+          "expected": 8.58,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.020000",
+          "expected": 0.02,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/EV/lower",
+          "displayed": "0.017",
+          "expected": 0.017,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.10300",
+          "expected": 0.103,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/EV/lower",
+          "displayed": "0.090",
+          "expected": 0.09,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "6.00",
+          "expected": 6.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "5.15",
+          "expected": 5.15,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.026667",
+          "expected": 0.026667,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/AV/lower",
+          "displayed": "0.019",
+          "expected": 0.019,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.13733",
+          "expected": 0.13733,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/AV/lower",
+          "displayed": "0.099",
+          "expected": 0.099,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "8.00",
+          "expected": 8.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "6.87",
+          "expected": 6.87,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.017229",
+          "expected": 0.017229,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/Operator/lower",
+          "displayed": "0.008",
+          "expected": 0.008,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.08873",
+          "expected": 0.08873,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/Operator/lower",
+          "displayed": "0.039",
+          "expected": 0.039,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "5.17",
+          "expected": 5.17,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "4.44",
+          "expected": 4.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/sd",
+          "displayed": "0.020354",
+          "expected": 0.020354,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/OperatorPart/lower",
+          "displayed": "0.014",
+          "expected": 0.014,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.10482",
+          "expected": 0.10482,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/OperatorPart/lower",
+          "displayed": "0.073",
+          "expected": 0.073,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation_pct",
+          "displayed": "6.11",
+          "expected": 6.11,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "5.24",
+          "expected": 5.24,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.331663",
+          "expected": 0.331663,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/PV/lower",
+          "displayed": "0.242",
+          "expected": 0.242,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.70806",
+          "expected": 1.70806,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/PV/lower",
+          "displayed": "1.245",
+          "expected": 1.245,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.50",
+          "expected": 99.5,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "85.40",
+          "expected": 85.4,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.333333",
+          "expected": 0.333333,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/TV/lower",
+          "displayed": "0.244",
+          "expected": 0.244,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "1.71667",
+          "expected": 1.71667,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/TV/lower",
+          "displayed": "1.257",
+          "expected": 1.257,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "85.83",
+          "expected": 85.83,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/lower",
+          "displayed": "7.31",
+          "expected": 7.31,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/process_pct",
+          "displayed": "6.67",
+          "expected": 6.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/lower",
+          "displayed": "4.49",
+          "expected": 4.49,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/process_pct",
+          "displayed": "4.00",
+          "expected": 4.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/lower",
+          "displayed": "4.94",
+          "expected": 4.94,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/process_pct",
+          "displayed": "5.33",
+          "expected": 5.33,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/lower",
+          "displayed": "1.93",
+          "expected": 1.93,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/process_pct",
+          "displayed": "3.45",
+          "expected": 3.45,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/OperatorPart/lower",
+          "displayed": "3.65",
+          "expected": 3.65,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/OperatorPart/process_pct",
+          "displayed": "4.07",
+          "expected": 4.07,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/lower",
+          "displayed": "62.24",
+          "expected": 62.24,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/process_pct",
+          "displayed": "66.33",
+          "expected": 66.33,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/lower",
+          "displayed": "62.83",
+          "expected": 62.83,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/process_pct",
+          "displayed": "66.67",
+          "expected": 66.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "expected": 14.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": []
+    },
+    {
+      "id": "minitab-pooled-upper99",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "auto",
+        "interaction_alpha": 1e-06,
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "process_variation": "study",
+        "tolerance": 2,
+        "confidence": {
+          "enabled": true,
+          "level": 99,
+          "bound": "upper"
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": null
+      },
+      "comparison_count": 102,
+      "all_compared_values_match": true,
+      "checks": [
+        {
+          "path": "/anova/full_table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/full_table/0/ss",
+          "displayed": "8.92479",
+          "expected": 8.92479,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/full_table/0/ms",
+          "displayed": "0.991643",
+          "expected": 0.991643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/full_table/0/f",
+          "displayed": "603.630",
+          "expected": 603.63,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/full_table/0/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/full_table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/full_table/1/ss",
+          "displayed": "0.02110",
+          "expected": 0.0211,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/full_table/1/ms",
+          "displayed": "0.010548",
+          "expected": 0.010548,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/full_table/1/f",
+          "displayed": "6.421",
+          "expected": 6.421,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/full_table/1/p",
+          "displayed": "0.008",
+          "expected": 0.008,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/full_table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/full_table/2/ss",
+          "displayed": "0.02957",
+          "expected": 0.02957,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/full_table/2/ms",
+          "displayed": "0.001643",
+          "expected": 0.001643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/full_table/2/f",
+          "displayed": "4.107",
+          "expected": 4.107,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/full_table/2/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/full_table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/full_table/3/ss",
+          "displayed": "0.02400",
+          "expected": 0.024,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/full_table/3/ms",
+          "displayed": "0.000400",
+          "expected": 0.0004,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/full_table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/full_table/4/ss",
+          "displayed": "8.99945",
+          "expected": 8.99945,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.92479",
+          "expected": 8.92479,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.991643",
+          "expected": 0.991643,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "1443.86",
+          "expected": 1443.86,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/anova/table/0/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.02110",
+          "expected": 0.0211,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.010548",
+          "expected": 0.010548,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "15.36",
+          "expected": 15.36,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.000",
+          "expected": 0.0,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "78",
+          "expected": 78.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.05357",
+          "expected": 0.05357,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.000687",
+          "expected": 0.000687,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "8.99945",
+          "expected": 8.99945,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/study/components/GRR/variance",
+          "displayed": "0.001016",
+          "expected": 0.001016,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/GRR/upper",
+          "displayed": "0.036",
+          "expected": 0.036,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/contribution_pct",
+          "displayed": "0.91",
+          "expected": 0.91,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/variance",
+          "displayed": "0.000687",
+          "expected": 0.000687,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/EV/upper",
+          "displayed": "0.001",
+          "expected": 0.001,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/contribution_pct",
+          "displayed": "0.62",
+          "expected": 0.62,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/variance",
+          "displayed": "0.000329",
+          "expected": 0.000329,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/AV/upper",
+          "displayed": "0.035",
+          "expected": 0.035,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/contribution_pct",
+          "displayed": "0.30",
+          "expected": 0.3,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/variance",
+          "displayed": "0.000329",
+          "expected": 0.000329,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/Operator/upper",
+          "displayed": "0.035",
+          "expected": 0.035,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/contribution_pct",
+          "displayed": "0.30",
+          "expected": 0.3,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/variance",
+          "displayed": "0.110106",
+          "expected": 0.110106,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/PV/upper",
+          "displayed": "0.475",
+          "expected": 0.475,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/contribution_pct",
+          "displayed": "99.09",
+          "expected": 99.09,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/variance",
+          "displayed": "0.111122",
+          "expected": 0.111122,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/variance_components/TV/upper",
+          "displayed": "0.478",
+          "expected": 0.478,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/contribution_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/sd",
+          "displayed": "0.031867",
+          "expected": 0.031867,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/GRR/upper",
+          "displayed": "0.189",
+          "expected": 0.189,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.16412",
+          "expected": 0.16412,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/GRR/upper",
+          "displayed": "0.972",
+          "expected": 0.972,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/GRR/study_variation_pct",
+          "displayed": "9.56",
+          "expected": 9.56,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "8.21",
+          "expected": 8.21,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/GRR/upper",
+          "displayed": "48.62",
+          "expected": 48.62,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/sd",
+          "displayed": "0.026207",
+          "expected": 0.026207,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/EV/upper",
+          "displayed": "0.032",
+          "expected": 0.032,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.13497",
+          "expected": 0.13497,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/EV/upper",
+          "displayed": "0.165",
+          "expected": 0.165,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/EV/study_variation_pct",
+          "displayed": "7.86",
+          "expected": 7.86,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "6.75",
+          "expected": 6.75,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/EV/upper",
+          "displayed": "8.27",
+          "expected": 8.27,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/sd",
+          "displayed": "0.018130",
+          "expected": 0.01813,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/AV/upper",
+          "displayed": "0.187",
+          "expected": 0.187,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.09337",
+          "expected": 0.09337,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/AV/upper",
+          "displayed": "0.963",
+          "expected": 0.963,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/AV/study_variation_pct",
+          "displayed": "5.44",
+          "expected": 5.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "4.67",
+          "expected": 4.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/AV/upper",
+          "displayed": "48.15",
+          "expected": 48.15,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/sd",
+          "displayed": "0.018130",
+          "expected": 0.01813,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/Operator/upper",
+          "displayed": "0.187",
+          "expected": 0.187,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.09337",
+          "expected": 0.09337,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/Operator/upper",
+          "displayed": "0.963",
+          "expected": 0.963,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/Operator/study_variation_pct",
+          "displayed": "5.44",
+          "expected": 5.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "4.67",
+          "expected": 4.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/Operator/upper",
+          "displayed": "48.15",
+          "expected": 48.15,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/sd",
+          "displayed": "0.331823",
+          "expected": 0.331823,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/PV/upper",
+          "displayed": "0.689",
+          "expected": 0.689,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.70889",
+          "expected": 1.70889,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/PV/upper",
+          "displayed": "3.549",
+          "expected": 3.549,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/PV/study_variation_pct",
+          "displayed": "99.54",
+          "expected": 99.54,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "85.44",
+          "expected": 85.44,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/PV/upper",
+          "displayed": "177.45",
+          "expected": 177.45,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/sd",
+          "displayed": "0.333349",
+          "expected": 0.333349,
+          "tolerance": 5.00001e-07
+        },
+        {
+          "path": "/confidence/stddev/TV/upper",
+          "displayed": "0.691",
+          "expected": 0.691,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "1.71675",
+          "expected": 1.71675,
+          "tolerance": 5.000001000000001e-06
+        },
+        {
+          "path": "/confidence/study_variation/TV/upper",
+          "displayed": "3.559",
+          "expected": 3.559,
+          "tolerance": 0.000500000001
+        },
+        {
+          "path": "/study/components/TV/study_variation_pct",
+          "displayed": "100.00",
+          "expected": 100.0,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "85.84",
+          "expected": 85.84,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/confidence/tolerance_pct/TV/upper",
+          "displayed": "177.94",
+          "expected": 177.94,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/GRR/process_pct",
+          "displayed": "6.37",
+          "expected": 6.37,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/EV/process_pct",
+          "displayed": "5.24",
+          "expected": 5.24,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/AV/process_pct",
+          "displayed": "3.63",
+          "expected": 3.63,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/Operator/process_pct",
+          "displayed": "3.63",
+          "expected": 3.63,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/PV/process_pct",
+          "displayed": "66.36",
+          "expected": 66.36,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/study/components/TV/process_pct",
+          "displayed": "66.67",
+          "expected": 66.67,
+          "tolerance": 0.0050000000010000005
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "expected": 14.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": []
+    },
+    {
+      "id": "jmp-historical-515",
+      "source": "JMP 19 原生GUI：交叉、EMS/REML、5.15倍、容差范围2、历史过程Sigma=0.5。",
+      "evidence": "build/gui-audit-20261025/jmp-historical-515-native.txt；原生另存文本，另有报告与参数截图。",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "process_variation": "study",
+        "tolerance": 2,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": null
+      },
+      "comparison_count": 62,
+      "checks": [
+        {
+          "path": "/anova/table/1/df",
+          "displayed": "2",
+          "expected": 2.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/1/ss",
+          "displayed": "0.021096",
+          "expected": 0.021096,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/anova/table/1/ms",
+          "displayed": "0.01055",
+          "expected": 0.01055,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/1/f",
+          "displayed": "6.421",
+          "expected": 6.421,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/1/p",
+          "displayed": "0.0079",
+          "expected": 0.0079,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/0/df",
+          "displayed": "9",
+          "expected": 9.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/0/ss",
+          "displayed": "8.924788",
+          "expected": 8.924788,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/anova/table/0/ms",
+          "displayed": "0.99164",
+          "expected": 0.99164,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/0/f",
+          "displayed": "603.630",
+          "expected": 603.63,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/2/df",
+          "displayed": "18",
+          "expected": 18.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/2/ss",
+          "displayed": "0.02957",
+          "expected": 0.02957,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/2/ms",
+          "displayed": "0.00164",
+          "expected": 0.00164,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/table/2/f",
+          "displayed": "4.107",
+          "expected": 4.107,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/3/df",
+          "displayed": "60",
+          "expected": 60.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/3/ss",
+          "displayed": "0.024",
+          "expected": 0.024,
+          "tolerance": 0.0005
+        },
+        {
+          "path": "/anova/table/3/ms",
+          "displayed": "0.0004",
+          "expected": 0.0004,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/table/4/df",
+          "displayed": "89",
+          "expected": 89.0,
+          "tolerance": 0
+        },
+        {
+          "path": "/anova/table/4/ss",
+          "displayed": "8.999455",
+          "expected": 8.999455,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/anova/variance_components/Operator",
+          "displayed": "0.00029685",
+          "expected": 0.00029685,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/Operator",
+          "displayed": "0.2672",
+          "expected": 0.2672,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/stddev/Operator",
+          "displayed": "0.01723",
+          "expected": 0.01723,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/PV",
+          "displayed": "0.11000003",
+          "expected": 0.11000003,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/PV",
+          "displayed": "99.0",
+          "expected": 99.0,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/anova/stddev/PV",
+          "displayed": "0.33166",
+          "expected": 0.33166,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/OperatorPart",
+          "displayed": "0.00041427",
+          "expected": 0.00041427,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/OperatorPart",
+          "displayed": "0.3728",
+          "expected": 0.3728,
+          "tolerance": 5e-05
+        },
+        {
+          "path": "/anova/stddev/OperatorPart",
+          "displayed": "0.02035",
+          "expected": 0.02035,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/EV",
+          "displayed": "0.00040000",
+          "expected": 0.0004,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/EV",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/stddev/EV",
+          "displayed": "0.02000",
+          "expected": 0.02,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/anova/variance_components/TV",
+          "displayed": "0.11111114",
+          "expected": 0.11111114,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/TV",
+          "displayed": "100.0",
+          "expected": 100.0,
+          "tolerance": 0.05
+        },
+        {
+          "path": "/anova/stddev/TV",
+          "displayed": "0.33333",
+          "expected": 0.33333,
+          "tolerance": 5e-06
+        },
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": "0.1030000",
+          "expected": 0.103,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "5.15",
+          "expected": 5.15,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/EV/process_pct",
+          "displayed": "4.00",
+          "expected": 4.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": "0.1373333",
+          "expected": 0.1373333,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "6.87",
+          "expected": 6.87,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/AV/process_pct",
+          "displayed": "5.33",
+          "expected": 5.33,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": "0.0887303",
+          "expected": 0.0887303,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "4.44",
+          "expected": 4.44,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/Operator/process_pct",
+          "displayed": "3.45",
+          "expected": 3.45,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": "0.1048207",
+          "expected": 0.1048207,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "5.24",
+          "expected": 5.24,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/OperatorPart/process_pct",
+          "displayed": "4.07",
+          "expected": 4.07,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": "0.1716667",
+          "expected": 0.1716667,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "8.58",
+          "expected": 8.58,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/GRR/process_pct",
+          "displayed": "6.67",
+          "expected": 6.67,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": "1.7080620",
+          "expected": 1.708062,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "85.40",
+          "expected": 85.4,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/PV/process_pct",
+          "displayed": "66.33",
+          "expected": 66.33,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": "1.7166669",
+          "expected": 1.7166669,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "85.83",
+          "expected": 85.83,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/process_pct",
+          "displayed": "66.67",
+          "expected": 66.67,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/GRR",
+          "displayed": "0.00111111",
+          "expected": 0.00111111,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/GRR",
+          "displayed": "1.00",
+          "expected": 1.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/EV",
+          "displayed": "0.00040000",
+          "expected": 0.0004,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/EV",
+          "displayed": "0.36",
+          "expected": 0.36,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/AV",
+          "displayed": "0.00071111",
+          "expected": 0.00071111,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/AV",
+          "displayed": "0.64",
+          "expected": 0.64,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/anova/variance_components/PV",
+          "displayed": "0.11000003",
+          "expected": 0.11000003,
+          "tolerance": 5e-09
+        },
+        {
+          "path": "/anova/contribution_pct/PV",
+          "displayed": "99.00",
+          "expected": 99.0,
+          "tolerance": 0.005
+        }
+      ],
+      "differences": []
+    },
+    {
+      "id": "jmp-history-mean",
+      "source": "JMP 19 原生GUI：交叉EMS、5.15倍、历史均值10.1、历史Sigma0.5、上规格11、下规格9。",
+      "evidence": "build/gui-audit-20261025/jmp-history-mean-misclassification-ui.png、jmp-history-mean-confirmed-ui.png。",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "historical_mean": 10.1,
+        "process_variation": "study",
+        "tolerance": null,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": true
+      },
+      "specification": {
+        "lsl": 9,
+        "usl": 11
+      },
+      "comparison_count": 4,
+      "checks": [],
+      "differences": [
+        {
+          "path": "/misclassification/reject_given_good",
+          "displayed": ".00041547",
+          "conversion_multiplier": 1,
+          "expected": 0.00041547,
+          "tolerance": 5e-09,
+          "actual": 0.0034518075501527076,
+          "passed": false
+        },
+        {
+          "path": "/misclassification/accept_given_bad",
+          "displayed": ".11033804",
+          "conversion_multiplier": 1,
+          "expected": 0.11033804,
+          "tolerance": 5e-09,
+          "actual": 0.056595186419737785,
+          "passed": false
+        },
+        {
+          "path": "/misclassification/good_rejected",
+          "displayed": ".00041440",
+          "conversion_multiplier": 1,
+          "expected": 0.0004144,
+          "tolerance": 5e-09,
+          "actual": 0.0032814781874045225,
+          "passed": false
+        },
+        {
+          "path": "/misclassification/bad_accepted",
+          "displayed": ".00028344",
+          "conversion_multiplier": 1,
+          "expected": 0.00028344,
+          "tolerance": 5e-09,
+          "actual": 0.002792688148869195,
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "jmp-single-history",
+      "source": "JMP 19 原生GUI：交叉EMS、5.15倍、历史均值10.1、历史Sigma0.5、上规格11、下规格缺失。",
+      "evidence": "build/gui-audit-20261025/jmp-single-history-report-ui.png；历史均值另有参数及重新打开确认截图。",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "historical_mean": 10.1,
+        "process_variation": "study",
+        "tolerance": null,
+        "confidence": {
+          "enabled": false
+        },
+        "misclassification": true
+      },
+      "specification": {
+        "lsl": null,
+        "usl": 11
+      },
+      "comparison_count": 27,
+      "checks": [
+        {
+          "path": "/study/components/EV/study_variation",
+          "displayed": ".0515000",
+          "conversion_multiplier": 2,
+          "expected": 0.103,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/AV/study_variation",
+          "displayed": ".0686667",
+          "conversion_multiplier": 2,
+          "expected": 0.1373334,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/Operator/study_variation",
+          "displayed": ".0443652",
+          "conversion_multiplier": 2,
+          "expected": 0.0887304,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/OperatorPart/study_variation",
+          "displayed": ".0524103",
+          "conversion_multiplier": 2,
+          "expected": 0.1048206,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/GRR/study_variation",
+          "displayed": ".0858333",
+          "conversion_multiplier": 2,
+          "expected": 0.1716666,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/PV/study_variation",
+          "displayed": ".8540310",
+          "conversion_multiplier": 2,
+          "expected": 1.708062,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/TV/study_variation",
+          "displayed": ".8583335",
+          "conversion_multiplier": 2,
+          "expected": 1.716667,
+          "tolerance": 1e-07
+        },
+        {
+          "path": "/study/components/EV/tolerance_pct",
+          "displayed": "5.72",
+          "conversion_multiplier": 1,
+          "expected": 5.72,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/AV/tolerance_pct",
+          "displayed": "7.63",
+          "conversion_multiplier": 1,
+          "expected": 7.63,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/Operator/tolerance_pct",
+          "displayed": "4.93",
+          "conversion_multiplier": 1,
+          "expected": 4.93,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/OperatorPart/tolerance_pct",
+          "displayed": "5.82",
+          "conversion_multiplier": 1,
+          "expected": 5.82,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/GRR/tolerance_pct",
+          "displayed": "9.54",
+          "conversion_multiplier": 1,
+          "expected": 9.54,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/PV/tolerance_pct",
+          "displayed": "94.89",
+          "conversion_multiplier": 1,
+          "expected": 94.89,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/tolerance_pct",
+          "displayed": "95.37",
+          "conversion_multiplier": 1,
+          "expected": 95.37,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/EV/process_pct",
+          "displayed": "4.00",
+          "conversion_multiplier": 1,
+          "expected": 4.0,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/AV/process_pct",
+          "displayed": "5.33",
+          "conversion_multiplier": 1,
+          "expected": 5.33,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/Operator/process_pct",
+          "displayed": "3.45",
+          "conversion_multiplier": 1,
+          "expected": 3.45,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/OperatorPart/process_pct",
+          "displayed": "4.07",
+          "conversion_multiplier": 1,
+          "expected": 4.07,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/GRR/process_pct",
+          "displayed": "6.67",
+          "conversion_multiplier": 1,
+          "expected": 6.67,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/PV/process_pct",
+          "displayed": "66.33",
+          "conversion_multiplier": 1,
+          "expected": 66.33,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/study/components/TV/process_pct",
+          "displayed": "66.67",
+          "conversion_multiplier": 1,
+          "expected": 66.67,
+          "tolerance": 0.005
+        },
+        {
+          "path": "/GRR_pct",
+          "displayed": "10",
+          "conversion_multiplier": 1,
+          "expected": 10.0,
+          "tolerance": 0.5
+        },
+        {
+          "path": "/ndc",
+          "displayed": "14",
+          "conversion_multiplier": 1,
+          "expected": 14.0,
+          "tolerance": 0
+        }
+      ],
+      "differences": [
+        {
+          "path": "/misclassification/reject_given_good",
+          "displayed": ".00020747",
+          "conversion_multiplier": 1,
+          "expected": 0.00020747,
+          "tolerance": 5e-09,
+          "actual": 0.0023373826317928783,
+          "passed": false
+        },
+        {
+          "path": "/misclassification/accept_given_bad",
+          "displayed": ".11033804",
+          "conversion_multiplier": 1,
+          "expected": 0.11033804,
+          "tolerance": 5e-09,
+          "actual": 0.05442775619371945,
+          "passed": false
+        },
+        {
+          "path": "/misclassification/good_rejected",
+          "displayed": ".00020720",
+          "conversion_multiplier": 1,
+          "expected": 0.0002072,
+          "tolerance": 5e-09,
+          "actual": 0.0022541376739208248,
+          "passed": false
+        },
+        {
+          "path": "/misclassification/bad_accepted",
+          "displayed": ".00014172",
+          "conversion_multiplier": 1,
+          "expected": 0.00014172,
+          "tolerance": 5e-09,
+          "actual": 0.001938423007764554,
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "jmp-single-history-ci",
+      "source": "JMP 19 原生GUI：方差分量表右键→列→95%下限/上限；交叉EMS、5.15倍、历史均值10.1、历史Sigma0.5、仅上规格11。",
+      "evidence": "build/gui-audit-20261025/jmp-single-history-ci-ui.png",
+      "analysis": {
+        "method": "crossed_anova",
+        "interaction": "include",
+        "study_multiplier": 5.15,
+        "historical_sd": 0.5,
+        "historical_mean": 10.1,
+        "process_variation": "study",
+        "tolerance": null,
+        "confidence": {
+          "enabled": true,
+          "level": 95,
+          "bound": "both",
+          "method": "satterthwaite"
+        },
+        "misclassification": false
+      },
+      "specification": {
+        "lsl": null,
+        "usl": 11
+      },
+      "comparison_count": 10,
+      "note": "JMP方差分量表经列菜单显示95%上下限；本程序选择Satterthwaite，10个端点按显示精度一致。默认MLS的8项差异保留在独立诊断文件，不重复计数同一原生区间。",
+      "checks": [
+        {
+          "path": "/confidence/variance_components/Operator/lower",
+          "displayed": "6.9274e-5",
+          "expected": 6.9274e-05,
+          "tolerance": 5e-10
+        },
+        {
+          "path": "/confidence/variance_components/Operator/upper",
+          "displayed": ".0430427",
+          "expected": 0.0430427,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/confidence/variance_components/PV/lower",
+          "displayed": ".0519906",
+          "expected": 0.0519906,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/confidence/variance_components/PV/upper",
+          "displayed": ".367566",
+          "expected": 0.367566,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/lower",
+          "displayed": ".000203",
+          "expected": 0.000203,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/confidence/variance_components/OperatorPart/upper",
+          "displayed": ".0012649",
+          "expected": 0.0012649,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/confidence/variance_components/EV/lower",
+          "displayed": ".0002881",
+          "expected": 0.0002881,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/confidence/variance_components/EV/upper",
+          "displayed": ".0005929",
+          "expected": 0.0005929,
+          "tolerance": 5e-08
+        },
+        {
+          "path": "/confidence/variance_components/TV/lower",
+          "displayed": ".052835",
+          "expected": 0.052835,
+          "tolerance": 5e-07
+        },
+        {
+          "path": "/confidence/variance_components/TV/upper",
+          "displayed": ".3655412",
+          "expected": 0.3655412,
+          "tolerance": 5e-08
+        }
+      ],
+      "differences": []
+    }
+  ],
+  "check_count": 889,
+  "difference_count": 26,
+  "comparison_count": 915
+}

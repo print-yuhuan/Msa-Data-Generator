@@ -1,0 +1,1806 @@
+diff --git a/3rd/glfw/src/win32_window.c b/3rd/glfw/src/win32_window.c
+--- a/3rd/glfw/src/win32_window.c
++++ b/3rd/glfw/src/win32_window.c
+@@ -713,11 +713,12 @@
+             const int mods = getKeyMods();
+ 
+             scancode = (HIWORD(lParam) & (KF_EXTENDED | 0xff));
+-            if (!scancode)
++            if (!(scancode & 0xff))
+             {
+                 // NOTE: Some synthetic key messages have a scancode of zero
+                 // HACK: Map the virtual key back to a usable scancode
+-                scancode = MapVirtualKeyW((UINT) wParam, MAPVK_VK_TO_VSC);
++                scancode = (scancode & KF_EXTENDED) |
++                    MapVirtualKeyW((UINT) wParam, MAPVK_VK_TO_VSC);
+             }
+ 
+             // HACK: Alt+PrtSc has a different scancode than just PrtSc
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -407,7 +407,7 @@
+     set(APP_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/eui_app_icon.rc")
+     file(TO_NATIVE_PATH "${APP_ICON_ICO}" APP_ICON_ICO_NATIVE)
+     string(REPLACE "\\" "\\\\" APP_ICON_ICO_ESCAPED "${APP_ICON_ICO_NATIVE}")
+-    file(WRITE "${APP_ICON_RC}" "IDI_APP_ICON ICON \"${APP_ICON_ICO_ESCAPED}\"\n")
++    file(WRITE "${APP_ICON_RC}" "#pragma code_page(65001)\nIDI_APP_ICON ICON \"${APP_ICON_ICO_ESCAPED}\"\n")
+     set(APP_ICON_RESOURCE "${APP_ICON_RC}")
+ endif()
+ set_property(GLOBAL PROPERTY EUI_NEO_APP_ICON_RESOURCE "${APP_ICON_RESOURCE}")
+diff --git a/components/scrollview.h b/components/scrollview.h
+--- a/components/scrollview.h
++++ b/components/scrollview.h
+@@ -38,6 +38,7 @@
+     ScrollViewBuilder& step(float value) { step_ = std::max(1.0f, value); return *this; }
+     ScrollViewBuilder& scrollbarWidth(float value) { scrollbarWidth_ = std::max(0.0f, value); return *this; }
+     ScrollViewBuilder& scrollbarGap(float value) { scrollbarGap_ = std::max(0.0f, value); return *this; }
++    ScrollViewBuilder& reserveScrollbar(bool value = true) { reserveScrollbar_ = value; return *this; }
+     ScrollViewBuilder& zIndex(int value) { zIndex_ = value; return *this; }
+     ScrollViewBuilder& style(const ScrollStyle& value) { scrollStyle_ = value; return *this; }
+     ScrollViewBuilder& theme(const theme::ThemeColorTokens& tokens) {
+@@ -65,16 +66,19 @@
+ 
+     void build() {
+         MeasureCache* cache = contentKey_.empty() ? nullptr : &ui_.state<MeasureCache>(id_ + ".measure");
+-        const float initialContentHeight = contentKey_.empty()
+-            ? measureContentHeight(width_, height_)
+-            : cachedContentHeight(*cache, width_, height_);
+-        const bool scrollable = initialContentHeight > height_;
+         const float scrollbarWidth = scrollbarWidth_ >= 0.0f ? scrollbarWidth_ : metrics_.control.scrollbar;
+         const float scrollbarGap = scrollbarGap_ >= 0.0f ? scrollbarGap_ : metrics_.spacing.section;
+-        const float scrollWidth = scrollable ? scrollbarWidth : 0.0f;
+-        const float scrollGap = scrollable ? scrollbarGap : 0.0f;
++        const float measureWidth = reserveScrollbar_
++            ? std::max(0.0f, width_ - scrollbarWidth - scrollbarGap)
++            : width_;
++        const float initialContentHeight = contentKey_.empty()
++            ? measureContentHeight(measureWidth, height_)
++            : cachedContentHeight(*cache, measureWidth, height_);
++        const bool scrollable = initialContentHeight > height_;
++        const float scrollWidth = scrollable || reserveScrollbar_ ? scrollbarWidth : 0.0f;
++        const float scrollGap = scrollable || reserveScrollbar_ ? scrollbarGap : 0.0f;
+         const float contentWidth = std::max(0.0f, width_ - scrollWidth - scrollGap);
+-        const float contentHeight = scrollable
++        const float contentHeight = scrollable && !reserveScrollbar_
+             ? (contentKey_.empty() ? measureContentHeight(contentWidth, height_) : cachedContentHeight(*cache, contentWidth, height_))
+             : initialContentHeight;
+         const float maxOffset = std::max(0.0f, contentHeight - height_);
+@@ -205,6 +209,7 @@
+     float y_ = 0.0f;
+     bool hasX_ = false;
+     bool hasY_ = false;
++    bool reserveScrollbar_ = false;
+     int zIndex_ = 0;
+ };
+ 
+diff --git a/core/app/app_runner.h b/core/app/app_runner.h
+--- a/core/app/app_runner.h
++++ b/core/app/app_runner.h
+@@ -128,8 +128,12 @@
+         lastRefreshRateUpdate = now;
+     }
+ 
++    void beginRender() {
++        // 仅消费开始绘制前的请求；显示窗口或提交缓冲期间的新请求留给下一帧。
++        paintRequested = false;
++    }
++
+     void markRendered() {
+-        paintRequested = false;
+         ++renderedFrames;
+         renderedSinceLastClock = true;
+     }
+diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
+--- a/core/app/glfw_app_main.cpp
++++ b/core/app/glfw_app_main.cpp
+@@ -30,6 +30,7 @@
+ #include <algorithm>
+ #include <chrono>
+ #include <cstdio>
++#include <functional>
+ #include <memory>
+ #include <thread>
+ #include <vector>
+@@ -39,7 +40,42 @@
+     bool forceClose = false;
+     bool iconified = false;
+     GLFWwindow* modalChildWindow = nullptr;
++    std::function<void()> repaintImmediately;
+ };
++
++// Windows runs an internal message loop during a native border/corner drag.
++// GLFW resize/refresh callbacks still arrive, but the outer application loop
++// cannot draw until that drag ends. Reuse the normal renderer from those
++// callbacks, without allowing a nested frame or leaking another GL context.
++bool frameInProgress = false;
++
++struct WindowFrameScope {
++    GLFWwindow* previousContext = glfwGetCurrentContext();
++    bool previousFrameInProgress = frameInProgress;
++
++    WindowFrameScope() { frameInProgress = true; }
++    ~WindowFrameScope() {
++        if (glfwGetCurrentContext() != previousContext) {
++            glfwMakeContextCurrent(previousContext);
++        }
++        frameInProgress = previousFrameInProgress;
++    }
++};
++
++void requestWindowRepaint(GLFWwindow* window) {
++    auto* state = static_cast<WindowState*>(glfwGetWindowUserPointer(window));
++    if (state == nullptr) {
++        return;
++    }
++    state->paintRequested = true;
++    app::detail::requestFullPaint();
++#ifdef _WIN32
++    if (!frameInProgress && state->repaintImmediately) {
++        WindowFrameScope frame;
++        state->repaintImmediately();
++    }
++#endif
++}
+ 
+ struct ManagedWindow {
+     GLFWwindow* window = nullptr;
+@@ -210,18 +246,17 @@
+ void installWindowCallbacks(GLFWwindow* window, WindowState& windowState) {
+     glfwSetWindowUserPointer(window, &windowState);
+     glfwSetFramebufferSizeCallback(window, [](GLFWwindow* currentWindow, int w, int h) {
+-        static_cast<WindowState*>(glfwGetWindowUserPointer(currentWindow))->paintRequested = true;
+         if (w > 0 && h > 0) {
+-            app::detail::requestFullPaint();
++            requestWindowRepaint(currentWindow);
++        } else {
++            static_cast<WindowState*>(glfwGetWindowUserPointer(currentWindow))->paintRequested = true;
+         }
+     });
+     glfwSetWindowRefreshCallback(window, [](GLFWwindow* currentWindow) {
+-        static_cast<WindowState*>(glfwGetWindowUserPointer(currentWindow))->paintRequested = true;
+-        app::detail::requestFullPaint();
++        requestWindowRepaint(currentWindow);
+     });
+     glfwSetWindowContentScaleCallback(window, [](GLFWwindow* currentWindow, float, float) {
+-        static_cast<WindowState*>(glfwGetWindowUserPointer(currentWindow))->paintRequested = true;
+-        app::detail::requestFullPaint();
++        requestWindowRepaint(currentWindow);
+     });
+     glfwSetWindowFocusCallback(window, [](GLFWwindow* currentWindow, int focused) {
+         WindowState* state = static_cast<WindowState*>(glfwGetWindowUserPointer(currentWindow));
+@@ -249,6 +284,8 @@
+         }
+     });
+ }
++
++bool updateManagedWindow(ManagedWindow& managed, float deltaSeconds, bool updateRequested);
+ 
+ std::unique_ptr<ManagedWindow> createManagedWindow(const app::DslWindowRequest& request,
+                                                    GLFWwindow* parentWindow,
+@@ -288,6 +325,10 @@
+     }
+ 
+     managed->state.paintRequested = true;
++    managed->state.repaintImmediately = [current = managed.get()] {
++        current->content.requestFullPaint();
++        updateManagedWindow(*current, current->state.consumeFrameDelta(glfwGetTime()), true);
++    };
+     if (managed->content.request().modal) {
+         glfwFocusWindow(childWindow);
+     }
+@@ -301,6 +342,7 @@
+     }
+ 
+     GLFWwindow* windowToDestroy = managed->window;
++    managed->state.repaintImmediately = {};
+     if (managed->renderBackend) {
+         managed->renderBackend->makeCurrent();
+         managed->renderBackend->releaseRenderCache();
+@@ -496,8 +538,6 @@
+     }
+     app::MainWindowRuntime mainWindowRuntime(windowState, [&] {
+         glfwShowWindow(window);
+-        app::detail::requestFullPaint();
+-        core::platform::requestFrame();
+     });
+     windowState.initializeTray();
+     glfwSetWindowCloseCallback(window, [](GLFWwindow* currentWindow) {
+@@ -527,6 +567,17 @@
+     });
+ 
+     app::DslWindowManager<ManagedWindow> childWindows;
++    windowState.repaintImmediately = [&] {
++        if (windowState.hiddenToTray || glfwWindowShouldClose(window) ||
++            glfwGetWindowAttrib(window, GLFW_ICONIFIED) == GLFW_TRUE) {
++            return;
++        }
++        mainWindowRuntime.updateAndRender(
++            window, *renderBackend, windowMetrics(window),
++            windowState.consumeFrameDelta(glfwGetTime()), true,
++            windowState.modalChildWindow == nullptr, [] {},
++            [&] { return windowMetrics(window); });
++    };
+ 
+     while (!glfwWindowShouldClose(window)) {
+         renderBackend->makeCurrent();
+@@ -585,42 +636,46 @@
+ 
+         const bool mainInputEnabled = windowState.modalChildWindow == nullptr;
+ 
+-        mainWindowRuntime.runFrame(
+-            window,
+-            *renderBackend,
+-            [&] { return windowMetrics(window); },
+-            currentFrameTime,
+-            getWindowRefreshRate(window),
+-            mainInputEnabled,
+-            [&] {
+-                createRequestedWindows(childWindows, window, *renderBackend, app::consumeWindowRequests());
+-                pruneClosedWindows(childWindows);
+-                windowState.modalChildWindow = findModalChildWindow(childWindows);
+-            },
+-            [&](float frameDelta, bool updateRequested) {
+-                childWindows.updateAll([&](ManagedWindow& managed) {
+-                    updateManagedWindow(managed, frameDelta, updateRequested);
++        {
++            WindowFrameScope frame;
++            mainWindowRuntime.runFrame(
++                window,
++                *renderBackend,
++                [&] { return windowMetrics(window); },
++                currentFrameTime,
++                getWindowRefreshRate(window),
++                mainInputEnabled,
++                [&] {
++                    createRequestedWindows(childWindows, window, *renderBackend, app::consumeWindowRequests());
++                    pruneClosedWindows(childWindows);
++                    windowState.modalChildWindow = findModalChildWindow(childWindows);
++                },
++                [&](float frameDelta, bool updateRequested) {
++                    childWindows.updateAll([&](ManagedWindow& managed) {
++                        updateManagedWindow(managed, frameDelta, updateRequested);
++                    });
++
++                    createRequestedWindows(childWindows, window, *renderBackend, app::consumeWindowRequests());
++                    pruneClosedWindows(childWindows);
++                    windowState.modalChildWindow = findModalChildWindow(childWindows);
++                },
++                [&](const char* title) {
++                    glfwSetWindowTitle(window, title);
++                },
++                [&] {
++                    return anyRenderableManagedWindowAnimating(childWindows);
+                 });
+-
+-                createRequestedWindows(childWindows, window, *renderBackend, app::consumeWindowRequests());
+-                pruneClosedWindows(childWindows);
+-                windowState.modalChildWindow = findModalChildWindow(childWindows);
+-            },
+-            [&](const char* title) {
+-                glfwSetWindowTitle(window, title);
+-            },
+-            [&] {
+-                return anyRenderableManagedWindowAnimating(childWindows);
+-            });
++        }
+ 
+         const bool anyAnimating = windowState.anyAnimating(anyRenderableManagedWindowAnimating(childWindows));
+-        if (anyAnimating) {
++        if (anyAnimating || windowState.paintRequested) {
+             glfwPollEvents();
+         } else {
+             glfwWaitEvents();
+         }
+     }
+ 
++    windowState.repaintImmediately = {};
+     childWindows.destroyAll(destroyManagedWindow);
+     core::releaseInputQueue(window);
+     renderBackend->makeCurrent();
+diff --git a/core/app/main_window_runtime.h b/core/app/main_window_runtime.h
+--- a/core/app/main_window_runtime.h
++++ b/core/app/main_window_runtime.h
+@@ -139,6 +139,7 @@
+         }
+ 
+         const auto renderStart = std::chrono::steady_clock::now();
++        runner_.beginRender();
+         renderBackend.beginFrame({
+             window,
+             core::window::nativeWindowInfo(window),
+@@ -152,6 +153,10 @@
+         if (firstFrameReady_) {
+             auto ready = std::move(firstFrameReady_);
+             ready();
++            // 映射窗口可能重建或清除默认帧缓冲。显式保留显示后的一帧，
++            // 不依赖显示/SwapBuffers 的内部消息循环保留唤醒事件。
++            runner_.paintRequested = true;
++            app::detail::requestFullPaint();
+         }
+         renderBackend.present();
+         core::render::publishRenderFrameStats();
+diff --git a/core/dsl.h b/core/dsl.h
+--- a/core/dsl.h
++++ b/core/dsl.h
+@@ -1485,6 +1485,12 @@
+         return !focusedId_.empty() && focusedId_ == resolveId(id);
+     }
+ 
++    // 请求由 Runtime 在事件处理结束后统一应用，保持实际焦点和界面状态同步。
++    void requestFocus(const std::string& id) {
++        requestedFocusId_ = resolveId(id);
++        focusRequested_ = true;
++    }
++
+     template <typename T>
+     T& state(const std::string& id) {
+         return stateStore_.get<T>(resolveId(id));
+@@ -1499,6 +1505,8 @@
+     void clearState() {
+         stateStore_.clear();
+         releasedStateScopes_.clear();
++        requestedFocusId_.clear();
++        focusRequested_ = false;
+     }
+ 
+ private:
+@@ -1792,6 +1800,8 @@
+     std::vector<Element*> stack_;
+     std::unordered_map<std::string, Element*> index_;
+     std::string focusedId_;
++    std::string requestedFocusId_;
++    bool focusRequested_ = false;
+     StateStore stateStore_;
+     std::vector<std::string> releasedStateScopes_;
+     std::size_t generatedId_ = 0;
+diff --git a/core/dsl_runtime.h b/core/dsl_runtime.h
+--- a/core/dsl_runtime.h
++++ b/core/dsl_runtime.h
+@@ -165,6 +165,8 @@
+                                  std::string& targetId) const;
+ 
+     void setFocusedId(const std::string& id);
++
++    void applyFocusRequest();
+ 
+     void updateScroll(const ScrollEvent& event, const std::string& targetId, float dpiScale);
+ 
+diff --git a/core/render/opengl/opengl_backend.h b/core/render/opengl/opengl_backend.h
+--- a/core/render/opengl/opengl_backend.h
++++ b/core/render/opengl/opengl_backend.h
+@@ -152,6 +152,8 @@
+     int textBatchWindowHeight_ = 0;
+     std::uint64_t textBatchGrayGeneration_ = 0;
+     std::uint64_t textBatchColorGeneration_ = 0;
++    std::uint64_t textBatchGrayPageId_ = 0;
++    std::uint64_t textBatchColorPageId_ = 0;
+     core::Color textBatchColor_{};
+     std::size_t currentBackbuffer_ = 0;
+     unsigned int imageVao_ = 0;
+diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text.cpp
+--- a/core/render/opengl/opengl_text.cpp
++++ b/core/render/opengl/opengl_text.cpp
+@@ -14,6 +14,7 @@
+ namespace {
+ 
+ constexpr std::size_t kTextBatchMaxFloats = 262144;
++constexpr std::size_t kTextTextureByteBudget = 32u * 1024u * 1024u;
+ 
+ struct TextAtlasTexture {
+     GLuint texture = 0;
+@@ -21,6 +22,7 @@
+     int height = 0;
+     int channels = 0;
+     std::uint64_t generation = 0;
++    std::uint64_t lastUsed = 0;
+ };
+ 
+ struct TextRenderResources {
+@@ -31,8 +33,12 @@
+     GLint colorLocation = -1;
+     GLint grayTextureLocation = -1;
+     GLint colorTextureLocation = -1;
+-    TextAtlasTexture gray;
+-    TextAtlasTexture color;
++    std::unordered_map<std::uint64_t, TextAtlasTexture> pages;
++    std::size_t residentBytes = 0;
++    std::uint64_t accessTick = 0;
++    GLuint selectedGray = 0;
++    GLuint selectedColor = 0;
++    GLint maximumAtlasSize = 0;
+ };
+ 
+ std::unordered_map<window::ContextKey, TextRenderResources>& textResourcesByContext() {
+@@ -75,8 +81,7 @@
+     if (resources.shaderProgram != 0) {
+         glDeleteProgram(resources.shaderProgram);
+     }
+-    destroyAtlasTexture(resources.gray);
+-    destroyAtlasTexture(resources.color);
++    for (auto& page : resources.pages) destroyAtlasTexture(page.second);
+     resources = {};
+ }
+ 
+@@ -234,6 +239,52 @@
+     return texture.texture != 0;
+ }
+ 
++std::uint64_t pageKey(const TextAtlasPageData& page) {
++    return page.pageId ? page.pageId : (page.kind == TextAtlasPageKind::Gray ? 1u : 2u);
++}
++
++bool pageNeedsUpload(const TextRenderResources& resources, const TextAtlasPageData& page) {
++    if (!page.pixels) return false;
++    const auto found = resources.pages.find(pageKey(page));
++    if (found == resources.pages.end()) return true;
++    const auto& texture = found->second;
++    return texture.texture == 0 || texture.width != page.width || texture.height != page.height ||
++           texture.channels != page.channels || texture.generation != page.generation;
++}
++
++GLuint cachedAtlasTexture(TextRenderResources& resources, const TextAtlasPageData& page,
++                         std::uint64_t protectedKey) {
++    if (!page.pixels || page.width <= 0 || page.height <= 0 ||
++        (page.channels != 1 && page.channels != 4)) return 0;
++    if (resources.maximumAtlasSize == 0)
++        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &resources.maximumAtlasSize);
++    if (page.width > resources.maximumAtlasSize || page.height > resources.maximumAtlasSize) return 0;
++    const auto key = pageKey(page);
++    const auto bytes = std::size_t(page.width) * page.height * page.channels;
++    if (bytes > kTextTextureByteBudget) return 0;
++    auto existing = resources.pages.find(key);
++    const std::size_t previousBytes = existing == resources.pages.end() ? 0 :
++        std::size_t(existing->second.width) * existing->second.height * existing->second.channels;
++    while (resources.residentBytes - previousBytes + bytes > kTextTextureByteBudget) {
++        auto oldest = resources.pages.end();
++        for (auto it = resources.pages.begin(); it != resources.pages.end(); ++it) {
++            if (it->first == key || it->first == protectedKey) continue;
++            if (oldest == resources.pages.end() || it->second.lastUsed < oldest->second.lastUsed)
++                oldest = it;
++        }
++        if (oldest == resources.pages.end()) return 0;
++        resources.residentBytes -= std::size_t(oldest->second.width) * oldest->second.height *
++                                   oldest->second.channels;
++        destroyAtlasTexture(oldest->second);
++        resources.pages.erase(oldest);
++    }
++    auto& texture = resources.pages[key];
++    if (!ensureAtlasTexture(texture, page)) return 0;
++    resources.residentBytes = resources.residentBytes - previousBytes + bytes;
++    texture.lastUsed = ++resources.accessTick;
++    return texture.texture;
++}
++
+ } // namespace
+ 
+ void OpenGLRenderBackend::flushTextBatch() {
+@@ -244,7 +295,7 @@
+     TextRenderResources& resources = textResources();
+     if (textBatchWindowWidth_ <= 0 || textBatchWindowHeight_ <= 0 ||
+         !ensureTextRenderResources(resources) ||
+-        resources.gray.texture == 0) {
++        resources.selectedGray == 0) {
+         textBatchVertices_.clear();
+         textBatchWindowWidth_ = 0;
+         textBatchWindowHeight_ = 0;
+@@ -262,9 +313,9 @@
+     glUniform1i(resources.grayTextureLocation, 0);
+     glUniform1i(resources.colorTextureLocation, 1);
+     activeTextureUnit(0);
+-    bindTexture2D(resources.gray.texture);
++    bindTexture2D(resources.selectedGray);
+     activeTextureUnit(1);
+-    bindTexture2D(resources.color.texture != 0 ? resources.color.texture : resources.gray.texture);
++    bindTexture2D(resources.selectedColor != 0 ? resources.selectedColor : resources.selectedGray);
+     activeTextureUnit(0);
+     bindVertexArray(resources.vao);
+     bindArrayBuffer(resources.vbo);
+@@ -293,36 +344,32 @@
+ 
+     TextRenderResources& resources = textResources();
+     const bool hadResources = resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0;
+-    const bool grayAtlasUpload =
+-        command.grayAtlas.pixels != nullptr &&
+-        command.grayAtlas.width > 0 &&
+-        command.grayAtlas.height > 0 &&
+-        command.grayAtlas.channels > 0 &&
+-        (resources.gray.texture == 0 ||
+-         resources.gray.width != command.grayAtlas.width ||
+-         resources.gray.height != command.grayAtlas.height ||
+-         resources.gray.channels != command.grayAtlas.channels ||
+-         resources.gray.generation != command.grayAtlas.generation);
+-    const bool colorAtlasUpload =
+-        command.colorAtlas.pixels != nullptr &&
+-        command.colorAtlas.width > 0 &&
+-        command.colorAtlas.height > 0 &&
+-        command.colorAtlas.channels > 0 &&
+-        (resources.color.texture == 0 ||
+-         resources.color.width != command.colorAtlas.width ||
+-         resources.color.height != command.colorAtlas.height ||
+-         resources.color.channels != command.colorAtlas.channels ||
+-         resources.color.generation != command.colorAtlas.generation);
+-    if ((grayAtlasUpload || colorAtlasUpload) && !textBatchVertices_.empty()) {
++    const bool grayAtlasUpload = pageNeedsUpload(resources, command.grayAtlas);
++    const bool colorAtlasUpload = pageNeedsUpload(resources, command.colorAtlas);
++    // 每页有独立纹理；在修改页内容或淘汰纹理前必须提交旧批次。
++    // 页标识与内容版本分别比较，也兼容独立页拥有相同 generation。
++    const bool pageChanged = !textBatchVertices_.empty() &&
++        (textBatchGrayGeneration_ != command.grayAtlas.generation ||
++         textBatchColorGeneration_ != command.colorAtlas.generation ||
++         textBatchGrayPageId_ != pageKey(command.grayAtlas) ||
++         textBatchColorPageId_ != pageKey(command.colorAtlas));
++    if ((grayAtlasUpload || colorAtlasUpload || pageChanged) && !textBatchVertices_.empty()) {
+         flushTextBatch();
+     }
+-    if (!ensureTextRenderResources(resources) ||
+-        !ensureAtlasTexture(resources.gray, command.grayAtlas)) {
++    if (!ensureTextRenderResources(resources)) return;
++    const GLuint gray = cachedAtlasTexture(resources, command.grayAtlas,
++        command.colorAtlas.pixels ? pageKey(command.colorAtlas) : 0);
++    const GLuint color = command.colorAtlas.pixels
++        ? cachedAtlasTexture(resources, command.colorAtlas, pageKey(command.grayAtlas)) : 0;
++    if (!gray || (command.colorAtlas.pixels && !color)) {
++        resetStateCache();
+         return;
+     }
+-    if (command.colorAtlas.pixels != nullptr && command.colorAtlas.width > 0 && command.colorAtlas.height > 0) {
+-        ensureAtlasTexture(resources.color, command.colorAtlas);
+-    }
++    resources.selectedGray = gray;
++    resources.selectedColor = color;
++    auto& stats = core::render::currentRenderFrameStats();
++    stats.textAtlasResidentBytes = resources.residentBytes;
++    stats.textAtlasResidentPages = resources.pages.size();
+     if (!hadResources || grayAtlasUpload || colorAtlasUpload) {
+         resetStateCache();
+     }
+@@ -334,7 +381,9 @@
+          textBatchColor_.a != command.color.a);
+     const bool atlasChanged = !textBatchVertices_.empty() &&
+         (textBatchGrayGeneration_ != command.grayAtlas.generation ||
+-         textBatchColorGeneration_ != command.colorAtlas.generation);
++         textBatchColorGeneration_ != command.colorAtlas.generation ||
++         textBatchGrayPageId_ != pageKey(command.grayAtlas) ||
++         textBatchColorPageId_ != pageKey(command.colorAtlas));
+     const bool targetChanged = !textBatchVertices_.empty() &&
+         (textBatchWindowWidth_ != windowWidth || textBatchWindowHeight_ != windowHeight);
+     if (colorChanged || atlasChanged || targetChanged) {
+@@ -349,6 +398,8 @@
+         textBatchWindowHeight_ = windowHeight;
+         textBatchGrayGeneration_ = command.grayAtlas.generation;
+         textBatchColorGeneration_ = command.colorAtlas.generation;
++        textBatchGrayPageId_ = pageKey(command.grayAtlas);
++        textBatchColorPageId_ = pageKey(command.colorAtlas);
+         textBatchColor_ = command.color;
+     }
+     textBatchVertices_.insert(textBatchVertices_.end(),
+diff --git a/core/render/render_backend.h b/core/render/render_backend.h
+--- a/core/render/render_backend.h
++++ b/core/render/render_backend.h
+@@ -37,6 +37,8 @@
+     int channels = 0;
+     std::uint64_t generation = 0;
+     const unsigned char* pixels = nullptr;
++    // 同一页内容追加时标识保持不变；代际编号仍标识像素内容更新。
++    std::uint64_t pageId = 0;
+ };
+ 
+ struct TextDrawCommand {
+@@ -72,6 +74,10 @@
+     int backendResolveDraws = 0;
+     int textBatchFlushes = 0;
+     std::uint64_t textBatchVertices = 0;
++    std::uint64_t textAtlasResidentBytes = 0;
++    std::uint64_t textAtlasResidentPages = 0;
++    std::uint64_t textGlyphsSubmitted = 0;
++    std::uint64_t textGlyphsUnavailable = 0;
+     int backdropCaptures = 0;
+     int backdropCaptureReuses = 0;
+     int rectDraws = 0;
+diff --git a/core/render/text.cpp b/core/render/text.cpp
+--- a/core/render/text.cpp
++++ b/core/render/text.cpp
+@@ -22,9 +22,11 @@
+ #include <array>
+ #include <cmath>
+ #include <cstdint>
++#include <cstring>
+ #include <filesystem>
+ #include <initializer_list>
+ #include <memory>
++#include <new>
+ #include <limits>
+ #include <string>
+ #include <unordered_map>
+@@ -39,7 +41,28 @@
+ constexpr const char* kDefaultIconFontFile = "Font Awesome 7 Free-Solid-900.otf";
+ constexpr int kGrayAtlasSize = 2048;
+ constexpr int kColorAtlasSize = 1024;
++constexpr std::size_t kTextAtlasByteBudget = 32u * 1024u * 1024u;
+ constexpr FT_Int32 kGlyphLoadFlags = FT_LOAD_DEFAULT | FT_LOAD_COLOR | FT_LOAD_NO_SVG | FT_LOAD_TARGET_LIGHT;
++
++using FontBytes = std::vector<unsigned char>;
++struct MemoryFont {
++    std::shared_ptr<const FontBytes> bytes;
++    std::uint64_t revision = 0;
++};
++
++std::unordered_map<std::string, MemoryFont>& memoryFonts() {
++    static std::unordered_map<std::string, MemoryFont> fonts;
++    return fonts;
++}
++
++std::uint64_t& memoryFontRevision() {
++    static std::uint64_t revision = 0;
++    return revision;
++}
++
++bool isMemoryFontReference(const std::string& path) {
++    return path.compare(0, 7, "memory:") == 0;
++}
+ 
+ struct GlyphAdvance {
+     unsigned int index = std::numeric_limits<unsigned int>::max();
+@@ -49,6 +72,8 @@
+ 
+ struct FontFace {
+     std::string path;
++    std::shared_ptr<const FontBytes> bytes;
++    std::uint64_t memoryRevision = 0;
+     FT_Face face = nullptr;
+     float size = 16.0f;
+     float ascent = 0.0f;
+@@ -76,6 +101,8 @@
+             FT_Done_Face(face);
+         }
+         path = std::move(other.path);
++        bytes = std::move(other.bytes);
++        memoryRevision = other.memoryRevision;
+         face = other.face;
+         size = other.size;
+         ascent = other.ascent;
+@@ -98,10 +125,14 @@
+ struct FontInfoHolder {
+     std::vector<FontFace> faces;
+     std::vector<std::string> lazyFallbackPaths;
++    std::string primaryPath;
++    bool fallbackPathsResolved = false;
+ };
+ 
+ constexpr std::size_t kFontStackCacheCapacity = 16;
+ constexpr std::size_t kTextSizeCacheCapacity = 1024;
++constexpr std::size_t kTextMetricsCacheCapacity = 256;
++constexpr std::size_t kTextMetricsCacheMaxBytes = 4096;
+ 
+ struct FontStackCacheEntry {
+     std::shared_ptr<FontInfoHolder> holder;
+@@ -169,6 +200,21 @@
+     return cache;
+ }
+ 
++struct TextMetricsCacheEntry {
++    TextPrimitive::TextMetrics metrics;
++    std::uint64_t lastUsed = 0;
++};
++
++struct TextMetricsCache {
++    std::unordered_map<TextSizeCacheKey, TextMetricsCacheEntry, TextSizeCacheKeyHash> entries;
++    std::uint64_t accessTick = 0;
++};
++
++TextMetricsCache& sharedTextMetricsCache() {
++    static TextMetricsCache cache;
++    return cache;
++}
++
+ void clearSharedFontStackCache() {
+     FontStackCache& cache = sharedFontStackCache();
+     cache.entries.clear();
+@@ -177,9 +223,15 @@
+     TextSizeCache& sizeCache = sharedTextSizeCache();
+     sizeCache.entries.clear();
+     sizeCache.accessTick = 0;
++
++    TextMetricsCache& metricsCache = sharedTextMetricsCache();
++    metricsCache.entries.clear();
++    metricsCache.accessTick = 0;
+ }
+ 
+ struct AtlasPage {
++    std::uint64_t id = 0;
++    std::uint64_t lastUsed = 0;
+     int width = 0;
+     int height = 0;
+     int channels = 1;
+@@ -194,8 +246,12 @@
+ };
+ 
+ struct SharedTextAtlas {
+-    AtlasPage gray;
+-    AtlasPage color;
++    std::vector<std::shared_ptr<AtlasPage>> pages;
++    // 预留完整页容量作为 LRU 额度，实际位图按需增长且不超过该容量。
++    std::size_t reservedBytes = 0;
++    std::uint64_t accessTick = 0;
++    std::uint64_t allocations = 0;
++    std::uint64_t evictions = 0;
+     int references = 0;
+ };
+ 
+@@ -220,7 +276,7 @@
+ }
+ 
+ bool ensureAtlasPage(AtlasPage& page, int width, int height, int channels) {
+-    if (!page.pixels.empty()) {
++    if (page.id != 0) {
+         return true;
+     }
+ 
+@@ -231,6 +287,10 @@
+     page.y = 1;
+     page.rowHeight = 0;
+     page.generation = ++textAtlasGenerationCounter();
++    // 0 保留给旧调用方，1/2 保留给渲染后端的单页兼容槽位。
++    page.id = page.generation + 2;
++    page.usedWidth = 0;
++    page.usedHeight = 0;
+     page.pixels.clear();
+     return true;
+ }
+@@ -239,10 +299,6 @@
+     SharedTextAtlas& atlas = sharedTextAtlas();
+     ++atlas.references;
+     return true;
+-}
+-
+-void releaseAtlasPage(AtlasPage& page) {
+-    page = {};
+ }
+ 
+ void releaseSharedTextAtlas() {
+@@ -252,8 +308,70 @@
+         return;
+     }
+ 
+-    releaseAtlasPage(atlas.gray);
+-    releaseAtlasPage(atlas.color);
++    atlas.pages.clear();
++    atlas.reservedBytes = 0;
++}
++
++std::shared_ptr<AtlasPage> findAtlasPage(std::uint64_t id) {
++    auto& atlas = sharedTextAtlas();
++    for (const auto& page : atlas.pages) {
++        if (page->id == id) {
++            page->lastUsed = ++atlas.accessTick;
++            return page;
++        }
++    }
++    return {};
++}
++
++bool cachedAtlasGlyph(const std::string& key, TextPrimitive::Glyph& glyph) {
++    auto& atlas = sharedTextAtlas();
++    for (const auto& page : atlas.pages) {
++        const auto found = page->glyphs.find(key);
++        if (found != page->glyphs.end()) {
++            // 后备字体可能由不同主字体共用；主字体基线和彩色字形缩放
++            // 属于当前实例，只复用栅格页坐标，不能覆盖刚算出的几何量。
++            glyph.u0 = found->second.u0;
++            glyph.v0 = found->second.v0;
++            glyph.u1 = found->second.u1;
++            glyph.v1 = found->second.v1;
++            glyph.atlasPageId = found->second.atlasPageId;
++            page->lastUsed = ++atlas.accessTick;
++            return true;
++        }
++    }
++    return false;
++}
++
++std::shared_ptr<AtlasPage> newAtlasPage(bool colored, int glyphWidth, int glyphHeight) {
++    auto& atlas = sharedTextAtlas();
++    int width = colored ? kColorAtlasSize : kGrayAtlasSize;
++    int height = width;
++    while (width < glyphWidth + 2 && width < 4096) width *= 2;
++    while (height < glyphHeight + 2 && height < 4096) height *= 2;
++    const int channels = colored ? 4 : 1;
++    const auto bytes = std::size_t(width) * height * channels;
++    if (glyphWidth + 2 > width || glyphHeight + 2 > height || bytes > kTextAtlasByteBudget)
++        return {};
++    // 淘汰只移除缓存所有权。正在提交的一段文字最多暂时持有一个旧页，
++    // 其像素会在 drawText 同步上传后释放，不会破坏待绘批次。
++    while (atlas.reservedBytes + bytes > kTextAtlasByteBudget && !atlas.pages.empty()) {
++        const auto oldest = std::min_element(atlas.pages.begin(), atlas.pages.end(),
++            [](const auto& a, const auto& b) { return a->lastUsed < b->lastUsed; });
++        atlas.reservedBytes -= std::size_t((*oldest)->width) * (*oldest)->height * (*oldest)->channels;
++        atlas.pages.erase(oldest);
++        ++atlas.evictions;
++    }
++    try {
++        auto page = std::make_shared<AtlasPage>();
++        if (!ensureAtlasPage(*page, width, height, channels)) return {};
++        page->lastUsed = ++atlas.accessTick;
++        atlas.pages.push_back(page);
++        atlas.reservedBytes += bytes;
++        ++atlas.allocations;
++        return page;
++    } catch (const std::bad_alloc&) {
++        return {};
++    }
+ }
+ 
+ std::uint64_t makeGlyphKey(size_t faceIndex, unsigned int glyphIndex) {
+@@ -269,7 +387,7 @@
+ }
+ 
+ std::string glyphCacheKey(const FontFace& face, float fontSize, unsigned int glyphIndex, bool colored) {
+-    return face.path + "#" +
++    return face.path + "#" + std::to_string(face.memoryRevision) + "#" +
+            std::to_string(static_cast<int>(std::round(fontSize * 64.0f))) + "#" +
+            (colored ? "color#" : "gray#") +
+            std::to_string(glyphIndex);
+@@ -512,6 +630,9 @@
+ std::string resolveDefaultUiFontPath() {
+     const std::string& override = defaultUiFontFileOverride();
+     const std::string path = override.empty() ? resolveProjectAssetPath(kDefaultUiFontFile) : resolveFontFilePath(override);
++    if (isMemoryFontReference(path)) {
++        return path;
++    }
+     if (const std::string existing = existingPath(path); !existing.empty()) {
+         return existing;
+     }
+@@ -521,6 +642,9 @@
+ std::string resolveDefaultIconFontPath() {
+     const std::string& override = defaultIconFontFileOverride();
+     const std::string path = override.empty() ? resolveProjectAssetPath(kDefaultIconFontFile) : resolveFontFilePath(override);
++    if (isMemoryFontReference(path)) {
++        return path;
++    }
+     if (const std::string existing = existingPath(path); !existing.empty()) {
+         return existing;
+     }
+@@ -528,6 +652,9 @@
+ }
+ 
+ std::string resolveFontFilePath(const std::string& path) {
++    if (isMemoryFontReference(path)) {
++        return path;
++    }
+     const std::filesystem::path raw(path);
+     if (const std::string existing = existingPath(raw); !existing.empty()) {
+         return existing;
+@@ -564,7 +691,22 @@
+     }
+ 
+     FT_Face loadedFace = nullptr;
+-    if (FT_New_Face(library, path.c_str(), 0, &loadedFace) != 0 || !loadedFace) {
++    std::shared_ptr<const FontBytes> bytes;
++    std::uint64_t revision = 0;
++    FT_Error openError = 0;
++    if (isMemoryFontReference(path)) {
++        const auto stored = memoryFonts().find(path);
++        if (stored == memoryFonts().end()) {
++            return false;
++        }
++        bytes = stored->second.bytes;
++        revision = stored->second.revision;
++        openError = FT_New_Memory_Face(library, bytes->data(),
++                                       static_cast<FT_Long>(bytes->size()), 0, &loadedFace);
++    } else {
++        openError = FT_New_Face(library, path.c_str(), 0, &loadedFace);
++    }
++    if (openError != 0 || !loadedFace) {
+         return false;
+     }
+ 
+@@ -614,6 +756,8 @@
+     }
+ 
+     face.path = path;
++    face.bytes = std::move(bytes);
++    face.memoryRevision = revision;
+     face.face = loadedFace;
+     face.size = fontSize;
+     face.glyphScale = glyphScale;
+@@ -635,48 +779,17 @@
+     return fontPath + "#" + std::to_string(static_cast<int>(std::round(fontSize * 64.0f)));
+ }
+ 
+-std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath, float fontSize) {
+-    const std::string cacheKey = fontStackCacheKey(fontPath, fontSize);
+-    FontStackCache& cache = sharedFontStackCache();
+-    const auto existing = cache.entries.find(cacheKey);
+-    if (existing != cache.entries.end()) {
+-        existing->second.lastUsed = ++cache.accessTick;
+-        return existing->second.holder;
+-    }
+-
+-    auto holder = std::make_shared<FontInfoHolder>();
+-
+-    auto addLoadedFace = [&](const std::string& path) {
+-        if (path.empty()) {
+-            return false;
+-        }
+-        const bool alreadyLoaded = std::any_of(holder->faces.begin(), holder->faces.end(),
+-                                               [&](const FontFace& loadedFace) {
+-                                                   return loadedFace.path == path;
+-                                               });
+-        if (alreadyLoaded) {
+-            return true;
+-        }
+-        FontFace face;
+-        if (!loadFontFace(path, fontSize, face)) {
+-            return false;
+-        }
+-        holder->faces.push_back(std::move(face));
+-        return true;
+-    };
+-
+-    if (!addLoadedFace(fontPath) &&
+-        !addLoadedFace(resolveDefaultUiFontPath()) &&
+-        !addLoadedFace(resolveSystemUiFontPath())) {
+-        return {};
+-    }
+-
++// 只有主字体缺字时才解析后备字体；正常中文布局不做多余的文件系统探测。
++void resolveLazyFallbackPaths(FontInfoHolder& holder) {
++    if (holder.fallbackPathsResolved) {
++        return;
++    }
+     auto addLazyFallback = [&](const std::string& fallbackPath) {
+-        if (fallbackPath.empty() || fallbackPath == fontPath) {
++        if (fallbackPath.empty() || fallbackPath == holder.primaryPath) {
+             return;
+         }
+-        if (std::find(holder->lazyFallbackPaths.begin(), holder->lazyFallbackPaths.end(), fallbackPath) == holder->lazyFallbackPaths.end()) {
+-            holder->lazyFallbackPaths.push_back(fallbackPath);
++        if (std::find(holder.lazyFallbackPaths.begin(), holder.lazyFallbackPaths.end(), fallbackPath) == holder.lazyFallbackPaths.end()) {
++            holder.lazyFallbackPaths.push_back(fallbackPath);
+         }
+     };
+ 
+@@ -707,6 +820,48 @@
+     addLazyFallback("/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc");
+     addLazyFallback("/usr/share/fonts/dejavu/DejaVuSans.ttf");
+ #endif
++    holder.fallbackPathsResolved = true;
++}
++
++std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath, float fontSize) {
++    const std::string cacheKey = fontStackCacheKey(fontPath, fontSize);
++    FontStackCache& cache = sharedFontStackCache();
++    const auto existing = cache.entries.find(cacheKey);
++    if (existing != cache.entries.end()) {
++        existing->second.lastUsed = ++cache.accessTick;
++        return existing->second.holder;
++    }
++
++    auto holder = std::make_shared<FontInfoHolder>();
++    holder->primaryPath = fontPath;
++
++    auto addLoadedFace = [&](const std::string& path) {
++        if (path.empty()) {
++            return false;
++        }
++        const bool alreadyLoaded = std::any_of(holder->faces.begin(), holder->faces.end(),
++                                               [&](const FontFace& loadedFace) {
++                                                   return loadedFace.path == path;
++                                               });
++        if (alreadyLoaded) {
++            return true;
++        }
++        FontFace face;
++        if (!loadFontFace(path, fontSize, face)) {
++            return false;
++        }
++        holder->faces.push_back(std::move(face));
++        return true;
++    };
++
++    if (isMemoryFontReference(fontPath) && !addLoadedFace(fontPath)) {
++        return {};
++    }
++    if (!addLoadedFace(fontPath) &&
++        !addLoadedFace(resolveDefaultUiFontPath()) &&
++        !addLoadedFace(resolveSystemUiFontPath())) {
++        return {};
++    }
+ 
+     if (cache.entries.size() >= kFontStackCacheCapacity) {
+         const auto oldest = std::min_element(cache.entries.begin(), cache.entries.end(),
+@@ -783,6 +938,7 @@
+         }
+     }
+ 
++    resolveLazyFallbackPaths(holder);
+     for (const std::string& fallbackPath : holder.lazyFallbackPaths) {
+         if (fallbackPath.empty()) {
+             continue;
+@@ -818,6 +974,7 @@
+         }
+     }
+ 
++    resolveLazyFallbackPaths(holder);
+     for (const std::string& fallbackPath : holder.lazyFallbackPaths) {
+         if (fallbackPath.empty() || !isEmojiFontPath(fallbackPath)) {
+             continue;
+@@ -958,21 +1115,34 @@
+         return true;
+     }
+ 
+-    if (page.x + width + 1 >= page.width) {
+-        page.x = 1;
+-        page.y += page.rowHeight + 1;
+-        page.rowHeight = 0;
+-    }
+-    if (page.y + height + 1 >= page.height) {
++    int nextX = page.x, nextY = page.y, rowHeight = page.rowHeight;
++    if (nextX + width + 1 >= page.width) {
++        nextX = 1;
++        nextY += rowHeight + 1;
++        rowHeight = 0;
++    }
++    if (width + 2 > page.width || nextY + height + 1 >= page.height) {
+         return false;
+     }
+-
+-    const std::size_t requiredBytes = static_cast<std::size_t>(page.y + height) *
+-                                      static_cast<std::size_t>(page.width) *
+-                                      static_cast<std::size_t>(page.channels);
+-    if (page.pixels.size() < requiredBytes) {
+-        page.pixels.resize(requiredBytes, 0);
+-    }
++    // 保留最外侧的透明像素，缩放或旋转采样时不读取尚未上传的纹理区域。
++    const int requiredRows = nextY + std::max(rowHeight, height) + 1;
++    const std::size_t stride = std::size_t(page.width) * page.channels;
++    if (page.pixels.size() < std::size_t(requiredRows) * stride) {
++        const int currentRows = static_cast<int>(page.pixels.size() / stride);
++        const int allocatedRows = std::min(page.height,
++            std::max(requiredRows, std::max(64, currentRows * 2)));
++        try {
++            // 明确限制扩容上界，避免 vector 的隐式增长超出整页预算。
++            std::vector<unsigned char> expanded(std::size_t(allocatedRows) * stride, 0);
++            std::copy(page.pixels.begin(), page.pixels.end(), expanded.begin());
++            page.pixels.swap(expanded);
++        } catch (const std::bad_alloc&) {
++            return false;
++        }
++    }
++    page.x = nextX;
++    page.y = nextY;
++    page.rowHeight = rowHeight;
+ 
+     const int copyChannels = std::min(channels, page.channels);
+     for (int row = 0; row < height; ++row) {
+@@ -993,12 +1163,32 @@
+     glyph.v0 = static_cast<float>(page.y) / static_cast<float>(page.height);
+     glyph.u1 = static_cast<float>(page.x + width) / static_cast<float>(page.width);
+     glyph.v1 = static_cast<float>(page.y + height) / static_cast<float>(page.height);
++    glyph.atlasPageId = page.id;
+ 
+     page.x += width + 1;
+     page.rowHeight = std::max(page.rowHeight, height);
+     page.usedWidth = std::max(page.usedWidth, page.x);
+-    page.usedHeight = std::max(page.usedHeight, page.y + page.rowHeight);
++    page.usedHeight = std::max(page.usedHeight, page.y + page.rowHeight + 1);
+     page.generation = ++textAtlasGenerationCounter();
++    return true;
++}
++
++bool storeAtlasGlyph(bool colored, const std::string& key,
++                     const unsigned char* pixels, int width, int height,
++                     TextPrimitive::Glyph& glyph) {
++    auto& atlas = sharedTextAtlas();
++    const int channels = colored ? 4 : 1;
++    for (auto it = atlas.pages.rbegin(); it != atlas.pages.rend(); ++it) {
++        auto& page = **it;
++        if (page.channels == channels && appendToAtlas(page, pixels, width, height, channels, glyph)) {
++            page.glyphs[key] = glyph;
++            page.lastUsed = ++atlas.accessTick;
++            return true;
++        }
++    }
++    const auto page = newAtlasPage(colored, width, height);
++    if (!page || !appendToAtlas(*page, pixels, width, height, channels, glyph)) return false;
++    page->glyphs[key] = glyph;
+     return true;
+ }
+ 
+@@ -1053,6 +1243,7 @@
+         Glyph glyph;
+         float x = 0.0f;
+         float y = 0.0f;
++        ShapedGlyph shaped;
+     };
+ 
+     struct Line {
+@@ -1065,6 +1256,7 @@
+ 
+     Impl() = default;
+     Impl(float x, float y) : position_{x, y} {}
++    ~Impl() { destroy(); }
+ 
+     bool initialize();
+     void destroy();
+@@ -1103,6 +1295,7 @@
+     void render(int windowWidth, int windowHeight);
+ 
+     bool loadFont();
++    void refreshMemoryFonts();
+     bool ensureGlyph(const ShapedGlyph& shaped);
+     Glyph* findGlyph(std::uint64_t key);
+     void cacheGlyph(std::uint64_t key, const Glyph& glyph);
+@@ -1134,27 +1327,34 @@
+ 
+     std::vector<Line> lines_;
+     std::vector<float> vertices_;
++    // 顶点只缓存几何位置；提交前为每个字形验证页标识并更新 UV。
++    std::vector<ShapedGlyph> vertexGlyphs_;
+     Vec2 measuredSize_;
+     bool layoutDirty_ = true;
+     bool verticesDirty_ = true;
+     bool fontDirty_ = true;
++    std::uint64_t memoryFontRevision_ = 0;
++    bool atlasRetained_ = false;
+ };
+ 
+ bool TextPrimitive::Impl::initialize() {
++    if (atlasRetained_) return true;
+     if (!loadFont() || !retainSharedTextAtlas()) {
+         return false;
+     }
+-
++    atlasRetained_ = true;
+     return true;
+ }
+ 
+ void TextPrimitive::Impl::destroy() {
+-    releaseSharedTextAtlas();
++    if (atlasRetained_) releaseSharedTextAtlas();
++    atlasRetained_ = false;
+     fontInfoStorage_.reset();
+     glyphs_.clear();
+     glyphs_.rehash(0);
+     lines_.clear();
+     vertices_.clear();
++    vertexGlyphs_.clear();
+     measuredSize_ = {};
+     layoutDirty_ = true;
+     verticesDirty_ = true;
+@@ -1195,6 +1395,7 @@
+             : std::numeric_limits<std::size_t>::max());
+     if (vertices_.capacity() > desiredCapacity) {
+         std::vector<float>().swap(vertices_);
++        std::vector<ShapedGlyph>().swap(vertexGlyphs_);
+     }
+     invalidateLayout();
+ }
+@@ -1351,6 +1552,7 @@
+ }
+ 
+ Vec2 TextPrimitive::Impl::measuredSize() {
++    refreshMemoryFonts();
+     if (layoutDirty_) {
+         rebuildLayout();
+     }
+@@ -1377,12 +1579,37 @@
+ 
+     const float size = std::max(1.0f, fontSize);
+     const std::string fontPath = resolveFontPath(fontFamily, fontWeight);
++    // 仅缓存不可变内存字体覆盖的短文本，限制占用，保留外部后备字体的更新行为。
++    const bool cacheable = isMemoryFontReference(fontPath) && text.size() <= kTextMetricsCacheMaxBytes;
++    TextMetricsCache& cache = sharedTextMetricsCache();
++    TextSizeCacheKey cacheKey;
++    if (cacheable) {
++        cacheKey = {text, fontPath, size, 0.0f, 0.0f, fontWeight, false};
++        const auto cached = cache.entries.find(cacheKey);
++        if (cached != cache.entries.end()) {
++            cached->second.lastUsed = ++cache.accessTick;
++            return cached->second.metrics;
++        }
++    }
+     auto holder = loadSharedFontStack(fontPath, size);
+     if (!holder || holder->faces.empty()) {
+         return empty;
+     }
+ 
+-    return makeTextMetrics(text, shapeTextWithFontStack(*holder, text, size));
++    auto metrics = makeTextMetrics(text, shapeTextWithFontStack(*holder, text, size));
++    if (cacheable && !holder->fallbackPathsResolved) {
++        if (cache.entries.size() >= kTextMetricsCacheCapacity) {
++            const auto oldest = std::min_element(cache.entries.begin(), cache.entries.end(),
++                [](const auto& left, const auto& right) {
++                    return left.second.lastUsed < right.second.lastUsed;
++                });
++            if (oldest != cache.entries.end()) {
++                cache.entries.erase(oldest);
++            }
++        }
++        cache.entries.emplace(std::move(cacheKey), TextMetricsCacheEntry{metrics, ++cache.accessTick});
++    }
++    return metrics;
+ }
+ 
+ Vec2 TextPrimitive::Impl::measureTextSize(const TextStyle& style) {
+@@ -1458,10 +1685,12 @@
+     ++defaultFontConfigurationRevision();
+     defaultUiFontFileOverride() = textFontFile;
+     defaultIconFontFileOverride() = iconFontFile;
++    ++memoryFontRevision();
+     clearSharedFontStackCache();
+ }
+ 
+ void TextPrimitive::Impl::prepare() {
++    refreshMemoryFonts();
+     if (layoutDirty_) {
+         rebuildLayout();
+     }
+@@ -1482,32 +1711,62 @@
+         return;
+     }
+ 
+-    const SharedTextAtlas& atlas = sharedTextAtlas();
+-    core::render::TextDrawCommand command{};
+-    command.vertices = vertices_.data();
+-    command.vertexFloatCount = vertices_.size();
+-    command.color = style_.color;
+-    command.grayAtlas = {
+-        core::render::TextAtlasPageKind::Gray,
+-        atlas.gray.width,
+-        atlas.gray.height,
+-        atlas.gray.usedWidth,
+-        atlas.gray.usedHeight,
+-        atlas.gray.channels,
+-        atlas.gray.generation,
+-        atlas.gray.pixels.empty() ? nullptr : atlas.gray.pixels.data()
++    std::shared_ptr<AtlasPage> runPage;
++    std::size_t runStart = 0, runFloats = 0;
++    const auto submit = [&] {
++        if (!runPage || runFloats == 0) return;
++        core::render::TextDrawCommand command{};
++        command.vertices = vertices_.data() + runStart;
++        command.vertexFloatCount = runFloats;
++        command.color = style_.color;
++        const auto kind = runPage->channels == 4
++            ? core::render::TextAtlasPageKind::Color : core::render::TextAtlasPageKind::Gray;
++        const core::render::TextAtlasPageData page{
++            kind, runPage->width, runPage->height, runPage->usedWidth, runPage->usedHeight,
++            runPage->channels, runPage->generation, runPage->pixels.data(), runPage->id};
++        if (runPage->channels == 4) {
++            // 彩色批次不使用灰度采样，但统一接口仍需要一个有效灰度纹理。
++            static const unsigned char emptyGray = 0;
++            command.grayAtlas = {core::render::TextAtlasPageKind::Gray, 1, 1, 1, 1, 1, 1, &emptyGray};
++            command.colorAtlas = page;
++        } else {
++            command.grayAtlas = page;
++        }
++        backend->drawText(command, windowWidth, windowHeight);
++        runFloats = 0;
+     };
+-    command.colorAtlas = {
+-        core::render::TextAtlasPageKind::Color,
+-        atlas.color.width,
+-        atlas.color.height,
+-        atlas.color.usedWidth,
+-        atlas.color.usedHeight,
+-        atlas.color.channels,
+-        atlas.color.generation,
+-        atlas.color.pixels.empty() ? nullptr : atlas.color.pixels.data()
+-    };
+-    backend->drawText(command, windowWidth, windowHeight);
++    for (std::size_t i = 0; i < vertexGlyphs_.size(); ++i) {
++        const auto& shaped = vertexGlyphs_[i];
++        if (!ensureGlyph(shaped)) {
++            ++core::render::currentRenderFrameStats().textGlyphsUnavailable;
++            submit();
++            continue;
++        }
++        const auto* glyph = findGlyph(shaped.key);
++        auto page = glyph ? findAtlasPage(glyph->atlasPageId) : nullptr;
++        if (!page || !(glyph->u1 > glyph->u0) || !(glyph->v1 > glyph->v0)) {
++            ++core::render::currentRenderFrameStats().textGlyphsUnavailable;
++            submit();
++            continue;
++        }
++        const std::size_t offset = i * 30;
++        if (!runPage || runPage->id != page->id || runStart + runFloats != offset) {
++            submit();
++            runPage = std::move(page);
++            runStart = offset;
++        }
++        const float uv[12]{glyph->u0, glyph->v0, glyph->u1, glyph->v0,
++                           glyph->u1, glyph->v1, glyph->u0, glyph->v0,
++                           glyph->u1, glyph->v1, glyph->u0, glyph->v1};
++        for (std::size_t vertex = 0; vertex < 6; ++vertex) {
++            vertices_[offset + vertex * 5 + 2] = uv[vertex * 2];
++            vertices_[offset + vertex * 5 + 3] = uv[vertex * 2 + 1];
++            vertices_[offset + vertex * 5 + 4] = glyph->colored ? 1.f : 0.f;
++        }
++        runFloats += 30;
++        ++core::render::currentRenderFrameStats().textGlyphsSubmitted;
++    }
++    submit();
+ }
+ 
+ bool TextPrimitive::Impl::loadFont() {
+@@ -1526,15 +1785,24 @@
+     glyphs_.clear();
+ 
+     fontDirty_ = false;
++    memoryFontRevision_ = memoryFontRevision();
+     return true;
++}
++
++void TextPrimitive::Impl::refreshMemoryFonts() {
++    if (memoryFontRevision_ != memoryFontRevision()) {
++        fontDirty_ = true;
++        invalidateLayout();
++    }
+ }
+ 
+ bool TextPrimitive::Impl::ensureGlyph(const ShapedGlyph& shaped) {
+     if (shaped.key == 0) {
+         return true;
+     }
+-    if (findGlyph(shaped.key)) {
+-        return true;
++    if (const auto* cached = findGlyph(shaped.key)) {
++        if (cached->width == 0 || cached->height == 0 || findAtlasPage(cached->atlasPageId))
++            return true;
+     }
+ 
+     if (fontDirty_ && !loadFont()) {
+@@ -1599,57 +1867,27 @@
+     }
+ 
+     const std::string cacheKey = glyphCacheKey(face, style_.fontSize, glyphIndex, colorBitmap);
+-    SharedTextAtlas& atlas = sharedTextAtlas();
+-    AtlasPage& page = colorBitmap ? atlas.color : atlas.gray;
+-    if (const auto cached = page.glyphs.find(cacheKey); cached != page.glyphs.end()) {
+-        glyph.u0 = cached->second.u0;
+-        glyph.v0 = cached->second.v0;
+-        glyph.u1 = cached->second.u1;
+-        glyph.v1 = cached->second.v1;
++    if (cachedAtlasGlyph(cacheKey, glyph)) {
+         cacheGlyph(shaped.key, glyph);
+         return true;
+     }
+ 
+     if (colorBitmap) {
+-        if (!ensureAtlasPage(atlas.gray, kGrayAtlasSize, kGrayAtlasSize, 1)) {
+-            cacheGlyph(shaped.key, glyph);
+-            return true;
+-        }
+-        if (atlas.gray.usedWidth == 0 || atlas.gray.usedHeight == 0) {
+-            atlas.gray.pixels.resize(static_cast<std::size_t>(atlas.gray.width) * atlas.gray.channels, 0);
+-            atlas.gray.usedWidth = 1;
+-            atlas.gray.usedHeight = 1;
+-            atlas.gray.generation = ++textAtlasGenerationCounter();
+-        }
+-        if (!ensureAtlasPage(atlas.color, kColorAtlasSize, kColorAtlasSize, 4)) {
+-            cacheGlyph(shaped.key, glyph);
+-            return true;
+-        }
+         std::vector<unsigned char> rgba = copyBgraBitmapAsRgba(bitmap);
+         if (rgba.empty()) {
+             cacheGlyph(shaped.key, glyph);
+             return true;
+         }
+-        if (!appendToAtlas(atlas.color, rgba.data(), static_cast<int>(bitmap.width), static_cast<int>(bitmap.rows), 4, glyph)) {
+-            cacheGlyph(shaped.key, glyph);
+-            return true;
+-        }
+-        atlas.color.glyphs[cacheKey] = glyph;
++        if (!storeAtlasGlyph(true, cacheKey, rgba.data(), static_cast<int>(bitmap.width),
++                             static_cast<int>(bitmap.rows), glyph)) return false;
+     } else if (bitmap.pixel_mode == FT_PIXEL_MODE_GRAY) {
+-        if (!ensureAtlasPage(atlas.gray, kGrayAtlasSize, kGrayAtlasSize, 1)) {
+-            cacheGlyph(shaped.key, glyph);
+-            return true;
+-        }
+         std::vector<unsigned char> gray = copyGrayBitmap(bitmap);
+         if (gray.empty()) {
+             cacheGlyph(shaped.key, glyph);
+             return true;
+         }
+-        if (!appendToAtlas(atlas.gray, gray.data(), static_cast<int>(bitmap.width), static_cast<int>(bitmap.rows), 1, glyph)) {
+-            cacheGlyph(shaped.key, glyph);
+-            return true;
+-        }
+-        atlas.gray.glyphs[cacheKey] = glyph;
++        if (!storeAtlasGlyph(false, cacheKey, gray.data(), static_cast<int>(bitmap.width),
++                             static_cast<int>(bitmap.rows), glyph)) return false;
+     } else {
+         cacheGlyph(shaped.key, glyph);
+         return true;
+@@ -1736,17 +1974,18 @@
+ 
+ void TextPrimitive::Impl::rebuildVertices() {
+     vertices_.clear();
++    vertexGlyphs_.clear();
+     const float lineHeight = style_.lineHeight > 0.0f ? style_.lineHeight : style_.fontSize * 1.2f;
+     const auto close = [](float left, float right) {
+         return std::fabs(left - right) <= 0.0001f;
+     };
++    // 纯平移（含滚动和居中的小数位移）仍按最终物理像素对齐字形，避免二次插值。
++    // 缩放、旋转和透视保持原变换，不能将变形后的字形强制吸附到像素网格。
+     const bool pixelAlignedMatrix = hasTransformMatrix_ &&
+         close(transformMatrix_.m00, 1.0f) && close(transformMatrix_.m01, 0.0f) &&
+         close(transformMatrix_.m10, 0.0f) && close(transformMatrix_.m11, 1.0f) &&
+         close(transformMatrix_.px, 0.0f) && close(transformMatrix_.py, 0.0f) &&
+-        close(transformMatrix_.pw, 1.0f) &&
+-        close(transformMatrix_.tx, std::round(transformMatrix_.tx)) &&
+-        close(transformMatrix_.ty, std::round(transformMatrix_.ty));
++        close(transformMatrix_.pw, 1.0f);
+     float blockYOffset = 0.0f;
+     if (style_.verticalAlign == VerticalAlign::Center) {
+         float inkTop = std::numeric_limits<float>::max();
+@@ -1781,6 +2020,7 @@
+         const float lineY = position_.y + blockYOffset + static_cast<float>(lineIndex) * lineHeight;
+         for (const LaidOutGlyph& laidOut : line.glyphs) {
+             const Glyph& glyph = laidOut.glyph;
++            if (glyph.width <= 0 || glyph.height <= 0) continue;
+             const float x0 = lineX + laidOut.x + glyph.xOffset;
+             const float y0 = lineY + laidOut.y + glyph.yOffset;
+             const float x1 = x0 + glyph.width;
+@@ -1851,6 +2091,7 @@
+                 p2.x, p2.y, glyph.u1, glyph.v1, colored,
+                 p3.x, p3.y, glyph.u0, glyph.v1, colored
+             });
++            vertexGlyphs_.push_back(laidOut.shaped);
+         }
+     }
+     verticesDirty_ = false;
+@@ -1876,7 +2117,7 @@
+ 
+     const Glyph* glyph = findGlyph(shaped.key);
+     if (glyph && shaped.key != 0 && shaped.codepoint != ' ' && shaped.codepoint != '\t') {
+-        line.glyphs.push_back({*glyph, cursorX + shaped.xOffset, shaped.yOffset});
++        line.glyphs.push_back({*glyph, cursorX + shaped.xOffset, shaped.yOffset, shaped});
+         const float top = shaped.yOffset + glyph->yOffset;
+         const float bottom = top + glyph->height;
+         if (!line.hasInk) {
+@@ -1897,6 +2138,9 @@
+ }
+ 
+ std::string TextPrimitive::Impl::resolveFontPath(const std::string& fontFamily, int fontWeight) {
++    if (isMemoryFontReference(fontFamily)) {
++        return fontFamily;
++    }
+     if (!fontFamily.empty() && fontFamily.find('.') != std::string::npos) {
+         return resolveFontFilePath(fontFamily);
+     }
+@@ -2024,6 +2268,67 @@
+ void TextPrimitive::setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile) {
+     Impl::setDefaultFontFiles(textFontFile, iconFontFile);
+ }
++bool TextPrimitive::registerMemoryFont(const std::string& family, const void* data, std::size_t size) {
++    if (!isMemoryFontReference(family) || family.size() == 7 || data == nullptr || size == 0 ||
++        size > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max())) {
++        return false;
++    }
++    auto& fonts = memoryFonts();
++    const auto existing = fonts.find(family);
++    if (existing != fonts.end() && existing->second.bytes->size() == size &&
++        std::memcmp(existing->second.bytes->data(), data, size) == 0) {
++        return true;
++    }
++    try {
++        const auto* begin = static_cast<const unsigned char*>(data);
++        return registerMemoryFontShared(family, std::make_shared<const FontBytes>(begin, begin + size));
++    } catch (const std::bad_alloc&) {
++        return false;
++    }
++}
++bool TextPrimitive::registerMemoryFontShared(const std::string& family,
++                                            std::shared_ptr<const std::vector<unsigned char>> bytes) {
++    if (!isMemoryFontReference(family) || family.size() == 7 || !bytes || bytes->empty() ||
++        bytes->size() > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max())) {
++        return false;
++    }
++    auto& fonts = memoryFonts();
++    const auto existing = fonts.find(family);
++    if (existing != fonts.end() &&
++        (existing->second.bytes == bytes ||
++         (existing->second.bytes->size() == bytes->size() &&
++          std::memcmp(existing->second.bytes->data(), bytes->data(), bytes->size()) == 0))) {
++        return true;
++    }
++    FT_Library library = sharedFreeTypeLibrary();
++    if (!library) {
++        return false;
++    }
++    try {
++        FT_Face validation = nullptr;
++        if (FT_New_Memory_Face(library, bytes->data(), static_cast<FT_Long>(bytes->size()), 0,
++                               &validation) != 0 || validation == nullptr) {
++            return false;
++        }
++        FT_Done_Face(validation);
++        const auto revision = memoryFontRevision() + 1;
++        fonts.insert_or_assign(family, MemoryFont{std::move(bytes), revision});
++        memoryFontRevision() = revision;
++        ++defaultFontConfigurationRevision();
++        clearSharedFontStackCache();
++        return true;
++    } catch (const std::bad_alloc&) {
++        return false;
++    }
++}
+ void TextPrimitive::render(int windowWidth, int windowHeight) { impl_->render(windowWidth, windowHeight); }
+ 
++TextPrimitive::AtlasStatistics TextPrimitive::atlasStatistics() {
++    const auto& atlas = sharedTextAtlas();
++    std::size_t residentBytes = 0;
++    for (const auto& page : atlas.pages) residentBytes += page->pixels.size();
++    return {atlas.pages.size(), residentBytes, kTextAtlasByteBudget,
++            atlas.allocations, atlas.evictions};
++}
++
+ } // namespace core
+diff --git a/core/render/text.h b/core/render/text.h
+--- a/core/render/text.h
++++ b/core/render/text.h
+@@ -4,6 +4,7 @@
+ #include "core/render/text_types.h"
+ 
+ #include <memory>
++#include <cstddef>
+ #include <cstdint>
+ #include <string>
+ #include <vector>
+@@ -23,6 +24,8 @@
+         float u1 = 0.0f;
+         float v1 = 0.0f;
+         bool colored = false;
++        // 页标识不持有页内存；LRU 淘汰后在绘制前按原字形重新准备。
++        std::uint64_t atlasPageId = 0;
+     };
+ 
+     struct ShapedGlyph {
+@@ -84,6 +87,24 @@
+     // Changes when the default font configuration changes; metric caches may key on it.
+     static std::uint64_t fontConfigurationRevision();
+     static void setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile);
++    // 在 UI/渲染线程调用。此接口复制字体字节，调用方可立即释放或改写输入。
++    // 相同字节重复注册不改变缓存；无效替换保留原注册及现有字体实例。
++    static bool registerMemoryFont(const std::string& family, const void* data, std::size_t size);
++    // 共享只读字体的所有权，不复制底层字节；交接后不得通过其他别名改写数据。
++    // 调用方可释放自己的 shared_ptr，注册表与字体实例会保持资源生命周期。
++    static bool registerMemoryFontShared(
++        const std::string& family,
++        std::shared_ptr<const std::vector<unsigned char>> bytes);
++
++    struct AtlasStatistics {
++        std::size_t residentPages = 0;
++        std::size_t residentBytes = 0;
++        std::size_t byteBudget = 0;
++        std::uint64_t allocations = 0;
++        std::uint64_t evictions = 0;
++    };
++    // 只读诊断接口，与字体准备一样在 UI/渲染线程使用。
++    static AtlasStatistics atlasStatistics();
+ 
+     void prepare();
+     void render(int windowWidth, int windowHeight);
+diff --git a/core/runtime/runtime_input.h b/core/runtime/runtime_input.h
+--- a/core/runtime/runtime_input.h
++++ b/core/runtime/runtime_input.h
+@@ -248,6 +248,41 @@
+     paintRequested_ = true;
+ }
+ 
++inline void Runtime::applyFocusRequest() {
++    if (!ui_.focusRequested_) {
++        return;
++    }
++    const std::string requested = std::move(ui_.requestedFocusId_);
++    ui_.focusRequested_ = false;
++    if (requested.empty()) {
++        setFocusedId({});
++        return;
++    }
++    const Element* target = ui_.find(requested);
++    // 非 Tab 停靠点也可接收程序化焦点，例如选项卡中即将选中的命中区域。
++    if (target == nullptr || (!target->focusable && !target->interactive)) {
++        return;
++    }
++    std::function<bool(const Element&, bool)> available = [&](const Element& node, bool blocked) {
++        blocked = blocked || node.disabled || node.opacity <= 0.0f;
++        if (node.id == requested) {
++            return !blocked;
++        }
++        for (const auto& child : node.children) {
++            if (available(*child, blocked)) {
++                return true;
++            }
++        }
++        return false;
++    };
++    for (const auto& root : ui_.roots()) {
++        if (available(*root, false)) {
++            setFocusedId(requested);
++            return;
++        }
++    }
++}
++
+ inline void Runtime::updateScroll(const ScrollEvent& event, const std::string& targetId, float dpiScale) {
+     const Element* element = targetId.empty() ? nullptr : ui_.find(targetId);
+     const std::string activeScrollStateId = element != nullptr && !element->disabled
+@@ -310,6 +345,48 @@
+     }
+ 
+     for (const KeyEvent& key : events) {
++        // MSA integration: native keyboard traversal, including scrolled fields.
++        if (key.key == InputKey::Tab && key.isDown() && !key.modifiers.control && !key.modifiers.alt) {
++            if (keyEventHandler_) keyEventHandler_(key);
++            std::vector<const Element*> stops;
++            std::vector<const Element*> scrollParents;
++            std::vector<std::vector<const Element*>> parentPaths;
++            std::function<void(const Element&, bool)> visit = [&](const Element& node, bool blocked) {
++                blocked = blocked || node.disabled || node.opacity <= 0.0f;
++                if (blocked) return;
++                if (node.focusable) { stops.push_back(&node); parentPaths.push_back(scrollParents); }
++                const bool scroll = !node.scrollStateId.empty() && node.clip;
++                if (scroll) scrollParents.push_back(&node);
++                for (const auto& child : node.children) visit(*child, blocked);
++                if (scroll) scrollParents.pop_back();
++            };
++            for (const auto& root : ui_.roots()) visit(*root, false);
++            if (!stops.empty()) {
++                int index = -1;
++                for (int i = 0; i < static_cast<int>(stops.size()); ++i)
++                    if (stops[i]->id == focusedId_) index = i;
++                index = index < 0 ? (key.modifiers.shift ? static_cast<int>(stops.size()) - 1 : 0)
++                    : (index + (key.modifiers.shift ? -1 : 1) + static_cast<int>(stops.size())) % static_cast<int>(stops.size());
++                const Element* target = stops[index];
++                // Layout frames precede the scroll render transform. Bring each
++                // destination into view before the next compose, rather than
++                // allowing keyboard focus to disappear outside a clipped panel.
++                for (const Element* parent : parentPaths[index]) {
++                    float top = target->frame.y - parent->scrollOffset;
++                    float bottom = top + target->frame.height;
++                    if (top < parent->frame.y) setScrollOffset(parent->scrollStateId, parent->scrollOffset + top - parent->frame.y - 6.0f);
++                    else if (bottom > parent->frame.y + parent->frame.height)
++                        setScrollOffset(parent->scrollStateId, parent->scrollOffset + bottom - parent->frame.y - parent->frame.height + 6.0f);
++                }
++                setFocusedId(target->id);
++                focused = target;
++                composeRequested_ = true;
++                paintRequested_ = true;
++            }
++            applyFocusRequest();
++            focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
++            continue;
++        }
+         bool handled = false;
+         if (focused != nullptr && focused->onKeyEvent) {
+             handled = focused->onKeyEvent(key);
+@@ -323,6 +400,8 @@
+             composeRequested_ = true;
+             paintRequested_ = true;
+         }
++        applyFocusRequest();
++        focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
+     }
+ }
+ 
+diff --git a/core/runtime/runtime_instances.h b/core/runtime/runtime_instances.h
+--- a/core/runtime/runtime_instances.h
++++ b/core/runtime/runtime_instances.h
+@@ -343,6 +343,16 @@
+                                     const RenderTransform& inherited) const {
+         RenderTransform result = inherited;
+ 
++        // Keep scrolling descendants out of static retained layers even at the
++        // top. Mark the dynamic path explicitly instead of adding an epsilon
++        // translation, which disables pixel-aligned text rendering at offset 0.
++        if (!element.scrollContentSourceId.empty()) {
++            const auto scroll = scrollStates.find(element.scrollContentSourceId);
++            if (scroll != scrollStates.end() && scroll->second.maxOffset > 0.0f) {
++                result.active = true;
++            }
++        }
++
+         if (element.kind == ElementKind::Row ||
+             element.kind == ElementKind::Column ||
+             element.kind == ElementKind::Stack ||
+@@ -352,7 +362,12 @@
+                 const Transform local = layout->second.transform.value();
+                 const float opacity = layout->second.opacity.value();
+                 if (!isIdentityTransform(local) || !closeEnough(opacity, 1.0f)) {
+-                    const Transform scaled = scaleTransform(local, dpiScale);
++                    Transform scaled = scaleTransform(local, dpiScale);
++                    // 在滚动容器统一对齐物理位移，让整块内容及各行文字同步移动。
++                    // 逻辑偏移和惯性仍保留浮点精度，避免把取整误差反馈到滚动状态。
++                    if (!element.scrollContentSourceId.empty()) {
++                        scaled.translate.y = std::round(scaled.translate.y);
++                    }
+                     result = appendRenderMatrix(
+                         result,
+                         matrixForTransform(toPixelRect(element.frame, dpiScale), scaled));
+diff --git a/core/runtime/runtime_lifecycle.h b/core/runtime/runtime_lifecycle.h
+--- a/core/runtime/runtime_lifecycle.h
++++ b/core/runtime/runtime_lifecycle.h
+@@ -32,6 +32,7 @@
+     if (!focusedId_.empty() && isElementInDisabledTree(focusedId_)) {
+         setFocusedId({});
+     }
++    applyFocusRequest();
+ 
+     if (elementStructure_ != previousStructure) {
+         paintRequested_ = true;
+@@ -111,6 +112,7 @@
+         const std::string hoverTargetId = resolveHoverTarget(event, dpiScale, inputEnabled);
+         const float eventDeltaSeconds = index + 1 == pointerEvents.size() ? deltaSeconds : 0.0f;
+         updateElementTree(event, eventDeltaSeconds, dpiScale, hoverTargetId);
++        applyFocusRequest();
+     }
+     for (const PointerEvent& event : pointerEvents) {
+         if (event.touch && (event.action == PointerAction::Release || event.action == PointerAction::Cancel)) {
+@@ -297,6 +299,9 @@
+ }
+ 
+ inline void Runtime::applyCursor(core::window::Handle window) {
++    if (window == nullptr) {
++        return;
++    }
+     if (!arrowCursor_) {
+         arrowCursor_ = core::window::createStandardCursor(core::window::CursorType::Arrow);
+     }
+diff --git a/core/runtime/runtime_state_bindings.h b/core/runtime/runtime_state_bindings.h
+--- a/core/runtime/runtime_state_bindings.h
++++ b/core/runtime/runtime_state_bindings.h
+@@ -16,10 +16,6 @@
+ 
+ inline bool ownsSliderState(const Element& element) {
+     return !element.sliderStateId.empty() && element.id == element.sliderStateId;
+-}
+-
+-inline constexpr float scrollTransformMinActiveOffset() {
+-    return 0.01f;
+ }
+ 
+ inline constexpr float scrollInertiaFriction() {
+@@ -167,11 +163,7 @@
+     if (!element.scrollContentSourceId.empty()) {
+         const auto state = scrollStates.find(element.scrollContentSourceId);
+         if (state != scrollStates.end() && state->second.maxOffset > 0.0f) {
+-            float offset = state->second.offset;
+-            if (std::fabs(offset) <= scrollTransformMinActiveOffset()) {
+-                offset = scrollTransformMinActiveOffset();
+-            }
+-            transform.translate.y -= offset;
++            transform.translate.y -= state->second.offset;
+         }
+     }
+     if (!element.scrollThumbSourceId.empty()) {
+diff --git a/core/render/opengl/opengl_image.cpp b/core/render/opengl/opengl_image.cpp
+index ae292c4..6bbb81d 100644
+--- a/core/render/opengl/opengl_image.cpp
++++ b/core/render/opengl/opengl_image.cpp
+@@ -600,7 +600,9 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
+ 
+     bindVertexArray(imageVao_);
+     bindArrayBuffer(imageVbo_);
+-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
++    // 图像与保留层共用顶点缓冲；流式更换存储，避免连续绘制反复原位写入。
++    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)),
++                 vertices, GL_STREAM_DRAW);
+     activeTextureUnit(0);
+     bindTexture2D(texture);
+     GLint previousSampler = 0;
+@@ -661,7 +663,9 @@ void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
+ 
+     bindVertexArray(imageVao_);
+     bindArrayBuffer(imageVbo_);
+-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), uploadVertices);
++    // 保留层可能连续多帧提交，为本次顶点提供独立存储而不等待整条渲染队列。
++    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)),
++                 uploadVertices, GL_STREAM_DRAW);
+     activeTextureUnit(0);
+     bindTexture2D(texture);
+     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));

@@ -1,0 +1,3 @@
+#pragma code_page(65001)
+// 完整字体无损分块压缩，启动时只解码一次到共享内存，不产生外部字体文件。
+MSA_FONT_NOTO_CJK RCDATA "@MSA_UI_FONT_RESOURCE_FILE@"

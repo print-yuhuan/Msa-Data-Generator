@@ -1,0 +1,26 @@
+* text=auto
+/LICENSE text eol=lf
+/NOTICE text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.h text eol=lf
+*.py text eol=lf
+*.ps1 text eol=crlf
+*.md text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.in text eol=lf
+*.manifest text eol=lf
+*.txt text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.clang-format text eol=lf
+*.png binary
+*.ico binary
+*.otf binary
+*.csv -text whitespace=cr-at-eol
+third_party/** -text whitespace=cr-at-eol linguist-vendored
+# Preserve upstream CRLF context inside vendor patches, including blank context lines.
+patches/*.patch -text whitespace=-blank-at-eol,cr-at-eol
+resources/fonts/** -text linguist-vendored
+tests/fixtures/minitab_baseline.json -text whitespace=cr-at-eol
