@@ -271,7 +271,7 @@ struct State {
             resultRevision = revision;
             feedback("数据已生成", "已找到满足生成约束的数据；尝试 " +
                                        std::to_string(result->attempts) + " 次，种子 " +
-                                       std::to_string(result->seed) + "。可导出 CSV 复验。");
+                                       std::to_string(result->seed) + "。可导出数据复验。");
         } else {
             status = v.status == msa::TaskStatus::Infeasible     ? Status::Infeasible
                      : v.status == msa::TaskStatus::SearchFailed ? Status::SearchFailed
@@ -1010,42 +1010,19 @@ void compactField(Ui &u, const std::string &id, const std::string &label, std::s
 }
 void inputs(Ui &u, float w) {
     section(u, "rules", "生成设置", w, [&](float c) {
-        const float centerWidth = c * .40f, choiceWidth = c - centerWidth - 12;
-        u.row("rulerow")
+        const float limitWidth = (c - 12) / 2;
+        field(u, "center", "数据中心", state.draft.center, c, "可选");
+        u.row("limits")
             .width(c)
             .gap(12)
             .content([&] {
-                field(u, "center", "数据中心（可留空）", state.draft.center, centerWidth,
-                      "自动确定中心");
-                u.column("prioritycol")
-                    .width(choiceWidth)
-                    .gap(7)
-                    .content([&] {
-                        text(u, "prioritylabel", "生成优先级", choiceWidth, 22, 14);
-                        segments(u, "priority", {"中心优先", "指标优先"}, state.draft.priority,
-                                 choiceWidth, [](int i) {
-                                     state.draft.priority = i;
-                                     state.changed();
-                                 });
-                    })
-                    .build();
+                field(u, "lsl", "规格下限 LSL", state.draft.lsl, limitWidth, "可选");
+                field(u, "usl", "规格上限 USL", state.draft.usl, limitWidth, "可选");
             })
             .build();
-        u.row("strictrow")
-            .width(c)
-            .gap(8)
-            .alignItems(eui::Align::CENTER)
-            .content([&] {
-                toggle(u, "compliance", "规格内生成", state.draft.compliance == 0, 160,
-                       [](bool strict) {
-                           state.draft.compliance = strict ? 0 : 1;
-                           state.changed();
-                       });
-                text(u, "stricthint",
-                     state.draft.compliance == 0 ? "所有测量值均满足规格限" : "允许数据超出规格限",
-                     c - 168, 28, 12, muted);
-            })
-            .build();
+        text(u, "spechelp",
+             state.draft.compliance == 0 ? "规格内生成至少需要一侧规格限。" : "允许生成超出规格限的测量值。",
+             c, 24, 12, muted);
     });
     section(u, "targets", "指标约束", w, [&](float c) {
         u.column("constraintrows")
@@ -1747,20 +1724,41 @@ void designSettings(Ui &u, float w) {
         badge(u, "design.records", "共 " + std::to_string(records) + " 次测量", 144);
     });
 }
-void specSettings(Ui &u, float w) {
-    section(u, "spec", "规格范围", w, [&](float c) {
-        float f = (c - 12) / 2;
-        u.row("limits")
+void generationRules(Ui &u, float w) {
+    section(u, "generation.rules", "生成规则", w, [&](float c) {
+        u.column("prioritycol")
             .width(c)
-            .gap(12)
+            .gap(7)
             .content([&] {
-                field(u, "lsl", "规格下限 LSL", state.draft.lsl, f, "可留空");
-                field(u, "usl", "规格上限 USL", state.draft.usl, f, "可留空");
+                text(u, "prioritylabel", "生成优先级", c, 22, 14);
+                segments(u, "priority", {"中心优先", "指标优先"}, state.draft.priority, c,
+                         [](int i) {
+                             if (state.busy() || state.draft.priority == i)
+                                 return;
+                             state.draft.priority = i;
+                             state.changed();
+                         });
             })
             .build();
-        paragraph(u, "spechelp",
-                  "规格限用于约束生成范围，并作为 P/T 的默认评价依据。开启“规格内生成”时至少填写一个规格限。",
-                  c, muted, 17.5f);
+        u.row("strictrow")
+            .width(c)
+            .gap(12)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                toggle(u, "compliance", "规格内生成", state.draft.compliance == 0, 148,
+                       [](bool strict) {
+                           const int mode = strict ? 0 : 1;
+                           if (state.busy() || state.draft.compliance == mode)
+                               return;
+                           state.draft.compliance = mode;
+                           state.changed();
+                       });
+                paragraph(u, "stricthint", state.draft.compliance == 0
+                                               ? "测量值须满足规格限。在“数据”页填写。"
+                                               : "允许测量值超出规格限。",
+                          c - 160, muted, 17.5f);
+            })
+            .build();
     });
 }
 void evaluationSettings(Ui &u, float w) {
@@ -1771,8 +1769,8 @@ void evaluationSettings(Ui &u, float w) {
             .content([&] {
                 field(u, "multiplier", "研究变异倍数 k", state.draft.multiplier, (c - 12) / 2,
                       "默认 6");
-                field(u, "analysis.tolerance", "分析容差（可留空）", state.draft.analysisTolerance,
-                      (c - 12) / 2, "留空按规格限计算 P/T");
+                field(u, "analysis.tolerance", "分析容差", state.draft.analysisTolerance,
+                      (c - 12) / 2, "可选");
             })
             .build();
         paragraph(u, "analysis.tolerance.note",
@@ -1787,9 +1785,9 @@ void processSettings(Ui &u, float w) {
             .gap(12)
             .content([&] {
                 field(u, "analysis.historical.sd", "历史标准差（1σ）", state.draft.historicalSd,
-                      (c - 12) / 2, "正数，可留空");
+                      (c - 12) / 2, "可选");
                 field(u, "analysis.historical.mean", "历史均值", state.draft.historicalMean,
-                      (c - 12) / 2, "留空使用测量均值");
+                      (c - 12) / 2, "可选");
             })
             .build();
         text(u, "analysis.process.label", "过程变异估计来源", c, 24, 14);
@@ -1838,10 +1836,8 @@ void generationSettings(Ui &u, float w) {
             .build();
         if (state.draft.scale == 1 || native_ui::trim(state.draft.lsl).empty() ||
             native_ui::trim(state.draft.usl).empty())
-            field(u, "reference", "参考总变异标准差 TV_SD", state.draft.reference, c,
-                  "正数，1σ；可由历史标准差补足");
-        field(u, "seed", "数据生成随机种子（可留空）", state.draft.seed, c,
-              "留空自动选择；固定种子可复现数据");
+            field(u, "reference", "参考总变异标准差 TV_SD", state.draft.reference, c, "可选");
+        field(u, "seed", "数据生成随机种子", state.draft.seed, c, "可选");
         paragraph(u, "generation.note",
                   "小数位数支持 0～10 位，用于测量值生成和 CSV 保存；生成种子与运行顺序种子相互独立。",
                   c, muted, 17.5f);
@@ -1873,7 +1869,7 @@ void statisticsSettings(Ui &u, float w) {
             .build();
         paragraph(u, "statistics.note",
                   !anova     ? "误分类概率和置信区间仅适用于 ANOVA；切换方法后可设置。"
-                  : !hasSpec ? "计算误分类概率需要至少一个规格限；请在“研究”中填写。"
+                  : !hasSpec ? "计算误分类概率需要至少一个规格限。请在“数据”页填写。"
                              : "误分类概率评估真实合格状态与测量判定不一致的可能性。",
                   c, muted, 17.5f);
         u.column("analysis.confidence.control")
@@ -2194,8 +2190,8 @@ void runOrderSettings(Ui &u, float w) {
             .width(c)
             .disabled(disabled || state.draft.runMode == 0)
             .content([&] {
-                field(u, "runorder.seed", "运行顺序随机种子（可留空）", state.draft.runSeed, c,
-                      "正整数；留空时为本研究自动选择", true);
+                field(u, "runorder.seed", "运行顺序随机种子", state.draft.runSeed, c, "可选",
+                      true);
             })
             .build();
         if (!disabled)
@@ -2299,7 +2295,7 @@ void config(Ui &u, float w) {
     if (state.optionsTab == 0) {
         settingsColumns(
             u, "options.study.definition", w, [&](float c) { designSettings(u, c); },
-            [&](float c) { specSettings(u, c); });
+            [&](float c) { generationRules(u, c); });
         settingsColumns(
             u, "options.study.generation", w, [&](float c) { generationSettings(u, c); },
             [&](float c) { searchSettings(u, c); });
@@ -2335,7 +2331,7 @@ void optionsPage(Ui &u, float w, float h) {
                 .content([&] {
                     text(u, "options.title", "选项", 76, 32, 22);
                     const std::array<std::string, 3> descriptions{
-                        "定义测量设计、规格范围与生成条件", "设置统计方法、评价口径与推断选项",
+                        "设置研究设计、生成规则与搜索参数", "设置统计方法、评价口径与推断选项",
                         "选择数据格式、运行顺序与保存方式"};
                     text(u, "options.subtitle", descriptions[state.optionsTab], w - 92, 32, 12,
                          muted);
@@ -2872,26 +2868,20 @@ void helpPage(Ui &u, float w, float h) {
                                                 .build();
                                         };
                                     step("help.step1", "01", "定义研究",
-                                         "在“选项 → "
-                                         "研究”填写操作员数、每件重复测量次数、部件数和规格限，"
-                                         "在“分析”选择分析方法。开启“规格内生成”时至少需要一个"
-                                         "规格限；"
-                                         "默认设置尚未填写规格或参考尺度，也可载入下方示例快速开始"
-                                         "。");
+                                         "在“选项 → 研究”设置操作员数、每件重复测量次数和部件数，"
+                                         "并在“生成规则”设置生成优先级和规格内生成。"
+                                         "在“选项 → 分析”选择分析方法。");
                                     step("help.step2", "02", "设置生成条件",
-                                         "在“数据”设置数据中心、生成优先级和指标约束。数据中心"
-                                         "可留空；"
-                                         "选择“不约束”的指标无需填写数值。测量值的小数位数在“选项 "
-                                         "→ 研究”"
-                                         "中设置。");
+                                         "在“数据”页填写规格限和指标约束，数据中心为可选项。"
+                                         "开启规格内生成时至少填写一侧规格限。"
+                                         "也可载入下方示例快速开始。");
                                     step("help.step3", "03", "生成并复核",
                                          "点击“生成数据”，在“指标复核”检查实际值与接受范围，在“数据"
                                          "预览”检查"
                                          "测量记录。生成期间可查看日志或从底栏取消。满足生成约束不"
                                          "代表测量系统合格。");
                                     step("help.step4", "04", "导出与保存",
-                                         "在“选项 → 导出”设置格式、目录及文件名，再点击“导出 "
-                                         "CSV”。"
+                                         "在“选项 → 导出”设置格式、目录及文件名，再点击“导出数据”。"
                                          "仅修改导出设置无需重新生成；修改研究、分析或生成参数后需"
                                          "重新生成。"
                                          "“保存配置”保存当前设置，不保存已生成的测量数据。");
@@ -3284,7 +3274,7 @@ void helpPage(Ui &u, float w, float h) {
                                               "读取已有宽表或长表，按操作员与部件标识恢复测量记录。"
                                               "配合 --method crossed_anova 或 crossed_xbarr "
                                               "选择方法，并使用 --report 保存分析报告。"
-                                              "此模式不生成数据、不导出 CSV，不能与 --output "
+                                              "此模式仅分析输入数据，不输出 CSV 文件，不能与 --output "
                                               "同用；研究设计须与输入数据一致。",
                                               c);
                                     text(v, "help.cli.files.title", "输出路径与退出状态", c, 26,
@@ -3696,7 +3686,7 @@ void footer(Ui &u, float w) {
                                   number(state.elapsed) + " 秒")
             : state.retainedResult() ? "保留上次成功结果，可复核或导出"
             : !state.message.empty() ? "操作未完成，请查看页面提示或运行日志"
-            : state.validResult()    ? (w >= 760 ? "数据已生成，可复核并导出 CSV" : "数据已生成")
+            : state.validResult()    ? (w >= 760 ? "数据已生成，可复核并导出" : "数据已生成")
             : state.result && state.resultRevision != state.revision ? "输入已修改，请重新生成"
             : w >= 760                                               ? "准备好后，开始生成测量数据"
                                                                      : "准备就绪";
@@ -3718,7 +3708,7 @@ void footer(Ui &u, float w) {
             state.busy() || !state.validResult(),
             state.status == Status::Cancelling);
         button(
-            u, "export", "导出 CSV", 176, [] { exportData(); }, state.validResult(),
+            u, "export", "导出数据", 176, [] { exportData(); }, state.validResult(),
             !state.validResult());
     } else if (state.busy()) {
         footerStatus(u, w - 284, "生成中 · " + number(state.elapsed) + " 秒");

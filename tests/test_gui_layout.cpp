@@ -118,6 +118,52 @@ bool contains_element(const core::dsl::Element &node, const core::dsl::Element &
                        [&](const auto &child) { return contains_element(*child, target); });
 }
 
+void data_settings_layout() {
+    const auto offset = gui::state.generateOffset;
+    gui::state.generateOffset = 0;
+    for (float width : {588.f, 1020.f, 1100.f, 1232.f}) {
+        constexpr float height = 500;
+        eui::Ui ui;
+        ui.begin("data-settings-layout");
+        gui::dataPage(ui, width, height);
+        ui.end();
+        ui.layout(width, height);
+        const auto *settings = ui.find("rules.card");
+        const auto *targets = ui.find("targets.card");
+        if (!settings || !targets || ui.find("priority") || ui.find("compliance.hit") ||
+            ui.find("generation.rules.card"))
+            throw std::runtime_error("数据页生成设置分组错误");
+        if (settings->frame.y + settings->frame.height + 12 > targets->frame.y + .1f)
+            throw std::runtime_error("生成设置和指标约束之间的间距不足");
+        controls_fit(*settings, settings->frame.x, settings->frame.x + settings->frame.width,
+                     "数据页生成设置");
+        std::array<core::LayoutRect, 3> frames{};
+        const std::array<const char *, 3> ids{"center.hit", "lsl.hit", "usl.hit"};
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            const auto *field = ui.find(ids[i]);
+            if (!field || !contains_element(*settings, *field))
+                throw std::runtime_error(std::string("数据页生成设置缺少字段：") + ids[i]);
+            const auto &frame = field->frame;
+            const auto bottom = frame.y + frame.height;
+            if (frame.y < settings->frame.y - .1f ||
+                bottom > settings->frame.y + settings->frame.height + .1f || bottom > height)
+                throw std::runtime_error(std::string("数据页生成设置字段超出可见范围：") + ids[i]);
+            for (std::size_t j = 0; j < i; ++j) {
+                const auto &other = frames[j];
+                if (frame.x < other.x + other.width && other.x < frame.x + frame.width &&
+                    frame.y < other.y + other.height && other.y < bottom)
+                    throw std::runtime_error("数据页生成设置字段重叠");
+            }
+            frames[i] = frame;
+        }
+        const auto &lsl = frames[1];
+        const auto &usl = frames[2];
+        if (lsl.y > usl.y + .1f || (std::fabs(lsl.y - usl.y) <= .1f && lsl.x >= usl.x))
+            throw std::runtime_error("数据页规格限的阅读顺序错误");
+    }
+    gui::state.generateOffset = offset;
+}
+
 void options_grouping(const eui::Ui &ui, int tab) {
     const auto node = [&](const std::string &id) -> const core::dsl::Element & {
         const auto *found = ui.find(id);
@@ -132,7 +178,7 @@ void options_grouping(const eui::Ui &ui, int tab) {
                 throw std::runtime_error(std::string("选项归类错误：") + id + " 不在 " + card);
     };
     const std::array<std::vector<const char *>, 3> groups{{
-        {"design.card", "spec.card", "generation.card", "advanced.card"},
+        {"design.card", "generation.rules.card", "generation.card", "advanced.card"},
         {"analysis.card", "analysis.evaluation.card", "analysis.process.card",
          "analysis.statistics.card"},
         {"output.card", "output.files.card", "runorder.card"},
@@ -143,9 +189,13 @@ void options_grouping(const eui::Ui &ui, int tab) {
                 throw std::runtime_error(std::string("选项业务分组跨页或丢失：") + id);
     if (ui.find("precision.card"))
         throw std::runtime_error("旧的精度分组未合并到生成参数");
+    if (ui.find("center.hit") || ui.find("lsl.hit") || ui.find("usl.hit") || ui.find("spec.card"))
+        throw std::runtime_error("数据中心或规格范围仍出现在选项页");
+    if (tab != 0 && (ui.find("priority") || ui.find("compliance.hit")))
+        throw std::runtime_error("生成规则控件出现在非研究选项中");
     if (tab == 0) {
         group("design.card", {"operators", "replicates", "parts"});
-        group("spec.card", {"lsl.hit", "usl.hit"});
+        group("generation.rules.card", {"priority", "compliance.hit"});
         group("generation.card", {"decimals", "scale", "seed.hit"});
         const bool reference = gui::state.draft.scale == 1 ||
                                native_ui::trim(gui::state.draft.lsl).empty() ||
@@ -350,7 +400,7 @@ void options_navigation(const msa::Result &generated) {
         << "选项在五种宽度下分类清晰、无重叠，共享配置管理与固定导航保持对齐\n";
 }
 
-void regrouped_options_state(const msa::Result &generated) {
+void regrouped_settings_state(const msa::Result &generated) {
     const auto draft = gui::state.draft;
     const auto page = gui::state.page;
     const auto revision = gui::state.revision;
@@ -362,7 +412,11 @@ void regrouped_options_state(const msa::Result &generated) {
         std::string native_ui::Draft::*member;
         const char *value;
     };
-    const std::array<FieldCase, 6> fields{{
+    constexpr int dataTab = -1;
+    const std::array<FieldCase, 9> fields{{
+        {dataTab, "center", &native_ui::Draft::center, "10.25"},
+        {dataTab, "lsl", &native_ui::Draft::lsl, "8.5"},
+        {dataTab, "usl", &native_ui::Draft::usl, "11.5"},
         {0, "seed", &native_ui::Draft::seed, "22409"},
         {0, "reference", &native_ui::Draft::reference, "0.25"},
         {0, "percenterror", &native_ui::Draft::percentError, "0.2"},
@@ -374,15 +428,22 @@ void regrouped_options_state(const msa::Result &generated) {
         gui::state.draft = draft;
         gui::state.draft.scale = 1;
         gui::state.status = gui::Status::Success;
-        gui::state.page = gui::Page::Options;
+        gui::state.page = tab == dataTab ? gui::Page::Data : gui::Page::Options;
         gui::state.message.clear();
         gui::state.footerMessage.clear();
         gui::state.result = generated;
         gui::state.revision = revision;
         gui::state.resultRevision = revision;
-        gui::state.optionsTab = tab;
+        gui::state.optionsTab = std::max(0, tab);
         gui::state.configOffset = 0;
+        gui::state.generateOffset = 0;
         gui::state.configDirty = false;
+    };
+    const auto staleResult = [&] {
+        return gui::state.revision == revision + 1 && !gui::state.validResult() &&
+               gui::state.configDirty && gui::state.result &&
+               gui::state.result->matrix == generated.matrix &&
+               gui::headerStatusPresentation().label == "待重新生成";
     };
     const auto input = [](eui::Ui &ui, const std::string &id, const std::string &value) {
         auto *node = ui.find(id + ".hit");
@@ -400,19 +461,35 @@ void regrouped_options_state(const msa::Result &generated) {
         reset(field.tab);
         const std::string value = gui::state.draft.*field.member == field.value ? "3" : field.value;
         eui::Ui ui;
-        ui.begin("regrouped-study-input");
-        gui::optionsPage(ui, 1232, 500);
+        ui.begin("regrouped-settings-input");
+        if (field.tab == dataTab)
+            gui::dataPage(ui, 1232, 500);
+        else
+            gui::optionsPage(ui, 1232, 500);
         ui.end();
         ui.layout(1232, 500);
         input(ui, field.id, value);
-        if (gui::state.draft.*field.member != value || gui::state.revision != revision + 1 ||
-            gui::state.validResult() || !gui::state.configDirty || !gui::state.result ||
-            gui::state.result->matrix != generated.matrix ||
-            gui::headerStatusPresentation().label != "待重新生成")
-            throw std::runtime_error(std::string("研究/分析参数变更未正确保留并标记旧结果：") + field.id);
+        if (gui::state.draft.*field.member != value || !staleResult())
+            throw std::runtime_error(std::string("参数变更未正确保留并标记旧结果：") + field.id);
         input(ui, field.id, value);
         if (gui::state.revision != revision + 1)
             throw std::runtime_error("重复填写相同值导致重复失效");
+    }
+    const std::array<std::pair<const char *, int native_ui::Draft::*>, 2> rules{{
+        {"priority.hit.1", &native_ui::Draft::priority},
+        {"compliance.hit", &native_ui::Draft::compliance},
+    }};
+    for (const auto &[id, member] : rules) {
+        reset(0);
+        gui::state.draft.*member = 0;
+        eui::Ui ui;
+        ui.begin("regrouped-generation-rules");
+        gui::optionsPage(ui, 1232, 500);
+        ui.end();
+        ui.layout(1232, 500);
+        click(ui, id);
+        if (gui::state.draft.*member != 1 || !staleResult())
+            throw std::runtime_error(std::string("生成规则变更未正确保留并标记旧结果：") + id);
     }
     reset(2);
     gui::state.draft.csvFormat = 1;
@@ -434,7 +511,7 @@ void regrouped_options_state(const msa::Result &generated) {
     gui::state.footerMessage.clear();
     gui::state.logs = logs;
     gui::state.logSequence = sequence;
-    std::cout << "重分组后六项研究/分析字段正确失效，附加导出列仅修改输出偏好\n";
+    std::cout << "重分组后参数变更正确标记旧结果，附加导出列仅修改输出偏好\n";
 }
 
 void help_topics() {
@@ -2071,8 +2148,9 @@ int wmain(int argc, wchar_t **argv) {
         disclosure_and_reduced_motion(generated);
         runtime_keyboard_navigation();
         xbar_details(generated);
+        data_settings_layout();
         options_navigation(generated);
-        regrouped_options_state(generated);
+        regrouped_settings_state(generated);
         help_topics();
         scrolled_menu_anchors();
         help_destinations();
