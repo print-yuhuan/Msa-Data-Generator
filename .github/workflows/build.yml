@@ -1,0 +1,19 @@
+name: Windows native build and regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure bundled dependencies
+        run: cmake -S . -B build -A x64
+      - name: Build GUI, CLI and tests
+        run: cmake --build build --config Release --parallel 4
+      - name: Native, CLI and release evidence regression
+        run: ctest --test-dir build -C Release --output-on-failure

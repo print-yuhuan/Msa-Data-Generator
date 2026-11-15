@@ -1,0 +1,4 @@
+#pragma once
+namespace msa {
+inline constexpr const char project_license_text[] = R"MSA_LICENSE(@MSA_PROJECT_LICENSE_TEXT@)MSA_LICENSE";
+}

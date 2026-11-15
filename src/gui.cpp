@@ -1,0 +1,4767 @@
+// Native MSA application: EUI-NEO presentation; shared, GUI-free business kernel.
+#include "eui_neo.h"
+#include "core/render/text.h"
+#include "nlohmann/json.hpp"
+#include "platform_win.hpp"
+#include "platform/embedded_resources_win.hpp"
+#include "ui_model.hpp"
+#include "msa/brand.hpp"
+#include "msa/task.hpp"
+#include "msa/project.hpp"
+#include "msa/charts.hpp"
+#include "platform/chart_export.hpp"
+#include <dwmapi.h>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <fstream>
+#include <future>
+#include <iomanip>
+#include <locale>
+#include <sstream>
+#include <thread>
+
+namespace gui {
+using eui::Ui;
+using Json = nlohmann::json;
+using Clock = std::chrono::steady_clock;
+constexpr const char *ink = "#182C45", *muted = "#52647A", *blue = msa::brand_blue, *line = "#DCE4EE",
+                     *bg = "#F2F5F9", *surface = "#FFFFFF", *surfaceSoft = "#F5F8FC",
+                     *surfaceHover = "#EDF3FA", *surfacePressed = "#DFEAF8",
+                     *surfaceDisabled = "#EFF3F7", *inkDisabled = "#64748B", *blueWash = "#F3F6FE",
+                     *blueWashActive = "#F1F4FE",
+                     *green = "#176C52", *greenWash = "#E8F6EF", *tableHeader = "#EEF3F9";
+const eui::Color brandColor(blue);
+const auto brandBorder = core::mixColor(eui::Color(surface), brandColor, .20f);
+constexpr const char *tableStripe = surfaceSoft;
+constexpr float cardRadius = 12.f, controlRadius = 8.f, controlHeight = 40.f, sectionGap = 12.f,
+                scrollGutter = 8.f, controlFont = 19.f, tableLabelFont = 16.f,
+                tableValueFont = 17.5f;
+constexpr eui::Color headerSurface = eui::Color::fromHex(0xFFFFFF);
+constexpr COLORREF headerBackground =
+    RGB(headerSurface.r * 255.f + .5f, headerSurface.g * 255.f + .5f,
+        headerSurface.b * 255.f + .5f);
+const std::array<std::string, 5> metricNames{"EV / TV %", "AV / TV %", "GRR / TV %", "P/T %",
+                                             "ndc"};
+const std::vector<std::string> modes{"不约束", "目标值", "区间", "不高于", "不低于"};
+using native_ui::Draft;
+using native_ui::Target;
+enum class Status {
+    Ready,
+    Running,
+    Cancelling,
+    Success,
+    Cancelled,
+    Error,
+    Infeasible,
+    SearchFailed,
+    ExportError
+};
+enum class Page { Data, Charts, Logs, Options, Help, About };
+enum class Level { Info, Warning, Error };
+const char *levelColor(Level level) {
+    return level == Level::Error ? "#9F3229" : level == Level::Warning ? "#80580B" : blue;
+}
+const char *levelSurface(Level level) {
+    return level == Level::Error ? "#FCEDEA" : level == Level::Warning ? "#FFF3D9" : blueWash;
+}
+struct LogEntry {
+    unsigned sequence;
+    std::string time;
+    Level level;
+    std::string message;
+};
+constexpr std::size_t logLimit = 100;
+struct State {
+    Draft draft;
+    Status status = Status::Ready;
+    Page page = Page::Data;
+    int resultTab = 0, previewPage = 0, logFilter = 0;
+    int optionsTab = 0, helpTopic = 0;
+    bool advanced = false, followLogs = true, logsCopied = false, versionCopied = false;
+    bool motion = true;
+    bool configDirty = true;
+    Level footerLevel = Level::Info;
+    Page footerPage = Page::Data;
+    Clock::time_point footerEntered{};
+    Clock::time_point resultEntered = Clock::now(), advancedChanged = Clock::now();
+    float advancedFrom = 0;
+    float generateOffset = 0, resultOffset = 0, configOffset = 0, pixelScale = 1;
+    float previousWidth = 0, previousHeight = 0, limitScale = 0;
+    unsigned systemDpi = 96;
+    std::string message, footerMessage;
+    float logOffset = 0, logPageOffset = 0, helpOffset = 0, aboutOffset = 0;
+    unsigned logSequence = 0;
+    std::vector<LogEntry> logs;
+    unsigned revision = 0, resultRevision = 0, taskRevision = 0;
+    std::thread worker;
+    std::atomic<int> ticks{0};
+    msa::SearchTask task;
+    std::optional<msa::Result> result;
+    bool found = false;
+    std::atomic<bool> cancel{false};
+    Clock::time_point started{};
+    double elapsed = 0;
+    State() {
+        log("程序已就绪，可使用均值极差法（Xbar-R）或方差分析法（ANOVA）生成交叉量具 R&R 数据。");
+    }
+    ~State() { stop(); }
+    void stop() {
+        cancel = true;
+        task.cancel();
+        if (worker.joinable())
+            worker.join();
+        task.stop();
+    }
+    bool busy() const { return status == Status::Running || status == Status::Cancelling; }
+    void requestCancel() {
+        if (status != Status::Running)
+            return;
+        task.cancel();
+        status = Status::Cancelling;
+        cancel = true;
+    }
+    bool validResult() const { return !busy() && displayedResult(); }
+    bool displayedResult() const { return result.has_value() && resultRevision == revision; }
+    bool retainedResult() const {
+        return displayedResult() &&
+               (status == Status::Cancelled || status == Status::Error ||
+                status == Status::Infeasible || status == Status::SearchFailed);
+    }
+    void navigate(Page next) {
+        if (next == page)
+            return;
+        page = next;
+        footerMessage.clear();
+    }
+    void hint(std::string summary, Level level = Level::Info) {
+        footerMessage = std::move(summary);
+        footerLevel = level;
+        footerPage = page;
+        footerEntered = Clock::now();
+    }
+    bool visibleHint() const {
+        return !busy() && !footerMessage.empty() && footerPage == page &&
+               Clock::now() - footerEntered < std::chrono::seconds(6);
+    }
+    void log(std::string s, Level level = Level::Info) {
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        char time[16]{};
+        std::snprintf(time, sizeof(time), "%02u:%02u:%02u", now.wHour, now.wMinute, now.wSecond);
+        if (logs.size() >= logLimit)
+            logs.erase(logs.begin());
+        logs.push_back({++logSequence, time, level, std::move(s)});
+        logsCopied = false;
+        if (followLogs)
+            logOffset = 1000000.0f;
+    }
+    void feedback(std::string summary, std::string detail = {}, Level level = Level::Info) {
+        hint(summary, level);
+        log(detail.empty() ? std::move(summary) : std::move(detail), level);
+    }
+    void changed() {
+        const bool invalidate = displayedResult();
+        footerMessage.clear();
+        message.clear();
+        configDirty = true;
+        if (!busy())
+            status = Status::Ready;
+        ++revision;
+        resultTab = 0;
+        previewPage = 0;
+        resultOffset = 0;
+        if (invalidate)
+            feedback("参数已修改，请重新生成", "研究参数已修改。请重新生成数据以更新结果。");
+    }
+    void outputChanged() {
+        footerMessage.clear();
+        configDirty = true;
+        if (status == Status::ExportError) {
+            message.clear();
+            status = result && resultRevision == revision ? Status::Success : Status::Ready;
+        }
+    }
+    void sample() {
+        const int method = draft.analysisMethod, interaction = draft.interactionMode;
+        const std::string alpha = draft.interactionAlpha;
+        const auto previous = draft;
+        draft = Draft{};
+        // 示例只替换研究参数；用户的导出路径、格式和运行顺序保持不变。
+        draft.directory = previous.directory;
+        draft.filename = previous.filename;
+        draft.existingFile = previous.existingFile;
+        draft.csvFormat = previous.csvFormat;
+        draft.runMode = previous.runMode;
+        draft.randomOperators = previous.randomOperators;
+        draft.storeStandardOrder = previous.storeStandardOrder;
+        draft.runSeed = previous.runSeed;
+        draft.analysisMethod = method;
+        draft.interactionMode = interaction;
+        draft.interactionAlpha = alpha;
+        draft.lsl = "9.5";
+        draft.usl = "10.5";
+        draft.targets[0] = {1, "10", "0.1"};
+        draft.targets[1] = {3, "10", ""};
+        draft.targets[2] = {2, "10", "20"};
+        draft.targets[3] = {3, "20", ""};
+        draft.targets[4] = {4, "5", ""};
+        changed();
+        status = Status::Ready;
+        feedback("示例设置已填入", "已载入示例设置，可生成模拟测量数据并复核指标。");
+        message.clear();
+    }
+    void loadInitial() {
+        try {
+            const auto path = msa::config_path();
+            if (std::filesystem::exists(path)) {
+                draft = native_ui::from_config(msa::load_config(path));
+                configDirty = false;
+                log("已载入用户配置 " + path.u8string());
+            } else
+                log("当前使用默认设置。点击「保存配置」可供下次启动使用。");
+        } catch (const std::exception &e) {
+            message = std::string("无法载入用户配置。") + e.what();
+            status = Status::Error;
+            feedback("配置载入失败", message, Level::Error);
+        }
+    }
+    void start() {
+        if (busy())
+            return;
+        if (worker.joinable())
+            worker.join();
+        message.clear();
+        footerMessage.clear();
+        try {
+            const auto snapshot = msa::validate_request(
+                native_ui::to_config(draft, native_ui::ConfigUse::Generation));
+            task.start(snapshot);
+        } catch (const msa::InfeasibleError &e) {
+            status = Status::Infeasible;
+            message = e.what();
+            feedback("约束冲突，请调整参数", message, Level::Error);
+            return;
+        } catch (const std::exception &e) {
+            status = Status::Error;
+            message = e.what();
+            feedback("参数校验失败", message, Level::Error);
+            return;
+        }
+        status = Status::Running;
+        cancel = false;
+        ticks = 0;
+        found = false;
+        taskRevision = revision;
+        started = Clock::now();
+        log(draft.analysisMethod ? "开始生成模拟测量数据，使用 ANOVA 分析。"
+                                 : "开始生成模拟测量数据，使用 Xbar-R 分析。");
+        try {
+            worker = std::thread([this] {
+                for (;;) {
+                    if (cancel.load())
+                        task.cancel();
+                    auto v = task.view();
+                    app::requestUpdate();
+                    if (v.status != msa::TaskStatus::Running &&
+                        v.status != msa::TaskStatus::Cancelling)
+                        break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+            });
+        } catch (const std::exception &e) {
+            task.stop();
+            status = Status::Error;
+            message = std::string("无法启动任务通知线程：") + e.what();
+            feedback("生成启动失败", message, Level::Error);
+        }
+    }
+    void poll() {
+        if (!busy())
+            return;
+        if (cancel.load())
+            task.cancel();
+        auto v = task.view();
+        ticks = v.attempts;
+        elapsed = v.elapsed;
+        found = v.found;
+        if (v.status == msa::TaskStatus::Running || v.status == msa::TaskStatus::Cancelling)
+            return;
+        if (worker.joinable())
+            worker.join();
+        if (v.status == msa::TaskStatus::Cancelled) {
+            status = Status::Cancelled;
+            feedback(displayedResult() ? "已取消，保留上次结果" : "已取消生成",
+                     displayedResult() ? "本次生成已取消。仍可复核或导出上次生成的数据。"
+                                       : "本次生成已取消。可以再次生成。",
+                     Level::Warning);
+        } else if (taskRevision != revision) {
+            status = Status::Ready;
+            feedback("参数已修改，请重新生成", "生成期间研究参数有变更，请重新生成数据。");
+        } else if (v.status == msa::TaskStatus::Success && v.result) {
+            result = std::move(v.result);
+            status = Status::Success;
+            resultRevision = revision;
+            feedback("数据已生成", "已找到满足生成约束的数据。尝试 " +
+                                       std::to_string(result->attempts) + " 次，种子 " +
+                                       std::to_string(result->seed) + "。可导出数据复验。");
+        } else {
+            status = v.status == msa::TaskStatus::Infeasible     ? Status::Infeasible
+                     : v.status == msa::TaskStatus::SearchFailed ? Status::SearchFailed
+                                                                 : Status::Error;
+            message = v.error;
+            feedback("生成失败，请查看日志", message, Level::Error);
+        }
+    }
+
+} state;
+std::string font() { return "memory:msa-noto-cjk"; }
+
+std::future<std::shared_ptr<const platform::FontBytes>> &fontLoad() {
+    static auto loading = [] {
+        const auto load = [] { return platform::embeddedFont(); };
+        try {
+            return std::async(std::launch::async, load);
+        } catch (const std::system_error &) {
+            // 线程资源不足时保留同步加载路径，字体仍在首帧前完成注册。
+            return std::async(std::launch::deferred, load);
+        }
+    }();
+    return loading;
+}
+
+void initializeFont() {
+    static const bool initialized = [] {
+        const auto bytes = fontLoad().get();
+        if (!core::TextPrimitive::registerMemoryFontShared(font(), bytes))
+            throw std::runtime_error("无法加载内嵌中文字体");
+        return true;
+    }();
+    (void)initialized;
+}
+auto tokens() {
+    auto t = components::theme::light();
+    t.primary = brandColor;
+    t.background = eui::Color(bg);
+    t.surface = eui::Color(surfaceSoft);
+    t.surfaceHover = eui::Color(surfaceHover);
+    t.surfaceActive = eui::Color(surfacePressed);
+    t.text = eui::Color(ink);
+    t.border = eui::Color(line);
+    return t;
+}
+eui::Transition transition(float seconds = .18f) {
+    auto value = eui::Transition::make(state.motion ? seconds : 0.0f, eui::Ease::OutCubic);
+    // 常规控件仅过渡颜色；几何过渡交由分段指示条、开关和进度条明确启用。
+    value.properties =
+        eui::AnimProperty::Color | eui::AnimProperty::TextColor | eui::AnimProperty::Border;
+    return value;
+}
+float reveal(Clock::time_point since, float duration = .18f) {
+    if (!state.motion)
+        return 1;
+    const float t = std::clamp(
+        std::chrono::duration<float>(Clock::now() - since).count() / duration, 0.0f, 1.0f);
+    return 1 - (1 - t) * (1 - t) * (1 - t);
+}
+// Attach keyboard behavior to the component's actual hit area, so pointer and Tab
+// focus use the same element. Keep this adaptation local to the application.
+void keyboard(Ui &u, const std::string &id, std::function<bool(const eui::KeyEvent &)> fn) {
+    if (auto *hit = u.find(id)) {
+        hit->focusable = true;
+        hit->interactive = true;
+        hit->onKeyEvent = std::move(fn);
+        if (!hit->disabled && u.isFocused(id))
+            hit->border = {2, eui::Color(blue)};
+    }
+}
+bool activate(const eui::KeyEvent &key) {
+    return key.action == core::KeyAction::Press &&
+           (key.key == eui::InputKey::Enter || key.key == eui::InputKey::Space);
+}
+void segments(Ui &u, const std::string &id, const std::vector<std::string> &items, int selected,
+              float w, std::function<void(int)> select, float h = controlHeight,
+              bool soft = false) {
+    auto &choice = u.state<int>(id + ".choice");
+    choice = selected;
+    select = [&u, id, &choice, callback = std::move(select)](int next) {
+        if (next != choice) {
+            choice = next;
+            callback(next);
+        }
+        u.requestFocus(id + ".hit." + std::to_string(next));
+    };
+    auto style = components::SegmentedStyle(tokens());
+    if (soft) {
+        style.selected = eui::Color(surface);
+        style.selectedText = eui::Color(blue);
+    }
+    components::segmented(u, id)
+        .size(w, h)
+        .items(items)
+        .selected(selected)
+        .theme(tokens())
+        .style(style)
+        .fontSize(controlFont)
+        .transition(transition())
+        .onChange(select)
+        .build();
+    for (int i = 0; i < int(items.size()); ++i) {
+        const auto hitId = id + ".hit." + std::to_string(i);
+        keyboard(u, hitId,
+                 [select, &choice, i, count = int(items.size())](const eui::KeyEvent &key) {
+                     if (activate(key)) {
+                         select(i);
+                         return true;
+                     }
+                     if (!key.isDown())
+                         return false;
+                     int next = choice;
+                     if (key.key == eui::InputKey::Right || key.key == eui::InputKey::Down)
+                         next = (choice + 1) % count;
+                     else if (key.key == eui::InputKey::Left || key.key == eui::InputKey::Up)
+                         next = (choice + count - 1) % count;
+                     else if (key.key == eui::InputKey::Home)
+                         next = 0;
+                     else if (key.key == eui::InputKey::End)
+                         next = count - 1;
+                     else
+                         return false;
+                     select(next);
+                     return true;
+                 });
+        if (auto *hit = u.find(hitId))
+            hit->focusable = i == selected;
+    }
+}
+void tabs(Ui &u, const std::string &id, const std::vector<std::string> &items, int selected,
+          float w, std::function<void(int)> select, float h = controlHeight) {
+    auto &choice = u.state<int>(id + ".choice");
+    choice = selected;
+    select = [&u, id, &choice, callback = std::move(select)](int next) {
+        if (next != choice) {
+            choice = next;
+            callback(next);
+        }
+        u.requestFocus(id + ".hit." + std::to_string(next));
+    };
+    auto style = components::TabsStyle(tokens());
+    style.text = eui::Color(muted);
+    components::tabs(u, id)
+        .size(w, h)
+        .items(items)
+        .selected(selected)
+        .fontSize(controlFont)
+        .theme(tokens())
+        .style(style)
+        .transition(transition())
+        .onChange(select)
+        .build();
+    for (int i = 0; i < int(items.size()); ++i) {
+        const auto hitId = id + ".hit." + std::to_string(i);
+        if (auto *hit = u.find(hitId)) {
+            if (i == selected)
+                hit->color = eui::Color(blueWash);
+            hit->hoverColor = eui::Color(i == selected ? blueWashActive : surfaceHover);
+            hit->pressedColor = eui::Color(i == selected ? blueWashActive : surfacePressed);
+            hit->transition = transition(.12f);
+        }
+        keyboard(u, hitId,
+                 [select, &choice, i, count = int(items.size())](const eui::KeyEvent &key) {
+                     if (!key.isDown())
+                         return false;
+                     int next = choice;
+                     if (activate(key))
+                         next = i;
+                     else if (key.key == eui::InputKey::Right || key.key == eui::InputKey::Down)
+                         next = (choice + 1) % count;
+                     else if (key.key == eui::InputKey::Left || key.key == eui::InputKey::Up)
+                         next = (choice + count - 1) % count;
+                     else if (key.key == eui::InputKey::Home)
+                         next = 0;
+                     else if (key.key == eui::InputKey::End)
+                         next = count - 1;
+                     else
+                         return false;
+                     select(next);
+                     return true;
+                 });
+        if (auto *hit = u.find(hitId))
+            hit->focusable = i == selected;
+    }
+}
+void toggle(Ui &u, const std::string &id, const std::string &label, bool value, float w,
+            std::function<void(bool)> change, bool disabled = false) {
+    auto style = components::SwitchStyle(tokens());
+    if (disabled) {
+        style.off = eui::Color("#E2E7EF");
+        style.on = eui::Color("#A7B7D9");
+        style.text = eui::Color(inkDisabled);
+        style.rowHover = style.rowPressed = eui::Color("#00000000");
+    }
+    components::toggleSwitch(u, id)
+        .size(w, controlHeight)
+        .checked(value)
+        .text(label)
+        .fontSize(controlFont)
+        .trackSize(38, 22)
+        .theme(tokens())
+        .style(style)
+        .transition(transition())
+        .onChange([change, disabled](bool next) {
+            if (!disabled)
+                change(next);
+        })
+        .build();
+    keyboard(u, id + ".hit", [change, value, disabled](const eui::KeyEvent &key) {
+        if (disabled || !activate(key))
+            return false;
+        change(!value);
+        return true;
+    });
+    if (auto *hit = u.find(id + ".hit"))
+        hit->disabled = disabled;
+}
+void stepper(Ui &u, const std::string &id, std::string &value, float w, int lo, int hi) {
+    const int current = std::clamp(std::atoi(value.c_str()), lo, hi);
+    auto change = [&value](long long n) {
+        const auto next = std::to_string(n);
+        if (next != value) {
+            value = next;
+            state.changed();
+        }
+    };
+    components::stepper(u, id)
+        .size(w, 40)
+        .value(current)
+        .min(lo)
+        .max(hi)
+        .fontSize(20)
+        .theme(tokens())
+        .transition(transition())
+        .onChange(change)
+        .build();
+    for (const auto &part : {std::string(".minus.bg"), std::string(".plus.bg")})
+        keyboard(u, id + part, [change, current, lo, hi, part](const eui::KeyEvent &key) {
+            int next = current;
+            if (activate(key))
+                next += part == ".minus.bg" ? -1 : 1;
+            else if (key.isDown() &&
+                     (key.key == eui::InputKey::Up || key.key == eui::InputKey::Right))
+                ++next;
+            else if (key.isDown() &&
+                     (key.key == eui::InputKey::Down || key.key == eui::InputKey::Left))
+                --next;
+            else
+                return false;
+            change(std::clamp(next, lo, hi));
+            return true;
+        });
+}
+std::string number(double n, int dp = 1) {
+    std::ostringstream s;
+    s.imbue(std::locale::classic());
+    s << std::fixed << std::setprecision(dp) << n;
+    return s.str();
+}
+void text(Ui &u, const std::string &id, const std::string &s, float w, float h = 24,
+          float size = 15, const char *c = ink) {
+    u.text(id)
+        .size(w, h)
+        .text(s)
+        .fontSize(size * 1.35f)
+        .color(c)
+        .verticalAlign(eui::VerticalAlign::Center)
+        .build();
+}
+void badge(Ui &u, const std::string &id, const std::string &label, float w,
+           const char *color = blue, const char *fill = blueWash) {
+    u.stack(id)
+        .size(w, 28)
+        .content([&] {
+            u.rect(id + ".bg").size(w, 28).color(fill).radius(14).build();
+            u.text(id + ".text")
+                .size(w, 28)
+                .text(label)
+                .fontSize(16)
+                .color(color)
+                .horizontalAlign(eui::HorizontalAlign::Center)
+                .verticalAlign(eui::VerticalAlign::Center)
+                .build();
+        })
+        .build();
+}
+void button(Ui &u, const std::string &id, const std::string &s, float w, std::function<void()> fn,
+            bool primary = false, bool disabled = false, float h = controlHeight) {
+    const bool focus = !disabled && u.isFocused(id + ".bg");
+    constexpr auto black = eui::Color::fromHex(0x000000);
+    components::button(u, id)
+        .size(w, h)
+        .text(s)
+        .fontSize(controlFont)
+        .theme(tokens(), primary)
+        .colors(disabled  ? surfaceDisabled
+                : primary ? blue
+                          : surface,
+                primary ? core::mixColor(brandColor, black, .10f) : eui::Color(surfaceHover),
+                primary ? core::mixColor(brandColor, black, .20f) : eui::Color(surfacePressed))
+        .textColor(disabled  ? inkDisabled
+                   : primary ? surface
+                             : ink)
+        .radius(controlRadius)
+        .border(focus ? 2.0f : 1.0f, !disabled && (focus || primary) ? blue : line)
+        .shadow(primary && !disabled ? 7.0f : 0.0f, 0, 2,
+                components::theme::withAlpha(brandColor, .13f))
+        .pressScale(1.0f)
+        .transition(transition(.14f))
+        .disabled(disabled)
+        .onClick(fn)
+        .build();
+    keyboard(u, id + ".bg", [fn, disabled](const eui::KeyEvent &key) {
+        if (disabled || !activate(key))
+            return false;
+        fn();
+        return true;
+        });
+    if (auto *hit = u.find(id + ".bg"); hit && disabled)
+        hit->focusable = false;
+}
+// 短选项直接呈现，按文字宽度换行；只过渡颜色，不移动控件或输入焦点。
+void choiceChips(Ui &u, const std::string &id, const std::vector<std::string> &items, int selected,
+                 float w, std::function<void(int)> select, bool disabled = false) {
+    if (items.empty())
+        return;
+    auto &choice = u.state<int>(id + ".choice");
+    choice = selected;
+    const int count = static_cast<int>(items.size());
+    float minimum = 80;
+    for (const auto &item : items)
+        minimum = std::max(minimum,
+                           core::TextPrimitive::measureTextWidth(item, {}, controlFont, 400) + 36);
+    const int columns = std::clamp(static_cast<int>((w + 8) / (minimum + 8)), 1, count);
+    const float cell = (w - 8 * (columns - 1)) / columns;
+    auto choose = [&u, id, &choice, disabled, callback = std::move(select)](int next) {
+        if (disabled)
+            return;
+        if (next != choice) {
+            choice = next;
+            callback(next);
+        }
+        u.requestFocus(id + ".item." + std::to_string(next) + ".bg");
+    };
+    u.column(id)
+        .width(w)
+        .gap(8)
+        .content([&] {
+            for (int first = 0; first < count; first += columns)
+                u.row(id + ".row." + std::to_string(first))
+                    .width(w)
+                    .gap(8)
+                    .content([&] {
+                        for (int i = first; i < std::min(count, first + columns); ++i) {
+                            const auto itemId = id + ".item." + std::to_string(i);
+                            const bool active = selected == i;
+                            const bool focus = !disabled && u.isFocused(itemId + ".bg");
+                            components::button(u, itemId)
+                                .size(cell, 36)
+                                .text(items[i])
+                                .fontSize(controlFont)
+                                .theme(tokens())
+                                .colors(disabled ? surfaceDisabled
+                                        : active ? blueWash
+                                                 : surface,
+                                        active ? blueWashActive : surfaceHover,
+                                        active ? blueWashActive : surfacePressed)
+                                .textColor(disabled ? inkDisabled
+                                           : active ? blue
+                                                    : ink)
+                                .radius(controlRadius)
+                                .border(focus ? 2.f : 1.f, !disabled && (focus || active) ? blue : line)
+                                .pressScale(1)
+                                .transition(transition(.14f))
+                                .disabled(disabled)
+                                .onClick([choose, i] { choose(i); })
+                                .build();
+                            keyboard(
+                                u, itemId + ".bg",
+                                [choose, &choice, i, count, disabled](const eui::KeyEvent &key) {
+                                    if (disabled || !key.isDown())
+                                        return false;
+                                    int next = choice >= 0 ? choice : i;
+                                    if (activate(key))
+                                        next = i;
+                                    else if (key.key == eui::InputKey::Right ||
+                                             key.key == eui::InputKey::Down)
+                                        next = (next + 1) % count;
+                                    else if (key.key == eui::InputKey::Left ||
+                                             key.key == eui::InputKey::Up)
+                                        next = (next + count - 1) % count;
+                                    else if (key.key == eui::InputKey::Home)
+                                        next = 0;
+                                    else if (key.key == eui::InputKey::End)
+                                        next = count - 1;
+                                    else
+                                        return false;
+                                    choose(next);
+                                    return true;
+                                });
+                            if (auto *hit = u.find(itemId + ".bg"))
+                                hit->focusable = !disabled && i == std::max(0, selected);
+                        }
+                    })
+                    .build();
+        })
+        .build();
+}
+void checkOption(Ui &u, const std::string &id, const std::string &label, bool value, float w,
+                 std::function<void(bool)> change, bool disabled = false) {
+    auto style = components::CheckboxStyle(tokens());
+    style.radius = 5;
+    if (disabled) {
+        style.text = eui::Color(inkDisabled);
+        style.checked = style.checkedHover = style.checkedPressed = eui::Color("#A7B7D9");
+        style.rowHover = style.rowPressed = eui::Color("#00000000");
+    }
+    auto &checked = u.state<bool>(id + ".checked");
+    checked = value;
+    auto changeValue = [&checked, disabled, change](bool next) {
+        if (!disabled && next != checked) {
+            checked = next;
+            change(next);
+        }
+    };
+    components::checkbox(u, id)
+        .size(w, 36)
+        .text(label)
+        .checked(value)
+        .boxSize(20)
+        .fontSize(controlFont)
+        .theme(tokens())
+        .style(style)
+        .transition(transition(.14f))
+        .onChange(changeValue)
+        .build();
+    keyboard(u, id + ".hit", [changeValue, &checked, disabled](const eui::KeyEvent &key) {
+        if (disabled || !activate(key))
+            return false;
+        changeValue(!checked);
+        return true;
+    });
+    if (auto *hit = u.find(id + ".hit")) {
+        hit->disabled = disabled;
+        hit->focusable = !disabled;
+    }
+    // EUI 的勾选标记有独立时长；系统关闭动画时一并关闭。
+    for (const auto *suffix : {".mark.short", ".mark.long"})
+        if (auto *mark = u.find(id + suffix))
+            mark->transition.durationSeconds = state.motion ? .12f : 0.f;
+}
+void subheading(Ui &u, const std::string &id, const std::string &title,
+                const std::string &description, float w) {
+    u.column(id)
+        .width(w)
+        .gap(4)
+        .content([&] {
+            text(u, id + ".title", title, w, 24, 14, ink);
+            if (!description.empty())
+                u.text(id + ".description")
+                    .width(w)
+                    .text(description)
+                    .fontSize(17)
+                    .lineHeight(23)
+                    .color(muted)
+                    .wrap()
+                    .maxWidth(w)
+                    .build();
+        })
+        .build();
+}
+struct Menu {
+    std::string id;
+    std::vector<std::string> items;
+    std::function<void(int)> select;
+    eui::Rect anchor{};
+    int highlighted = 0;
+    float offset = 0, viewportHeight = 0;
+    bool revealHighlighted = true;
+} menu;
+eui::Rect menuAnchor(const Ui &ui, const core::dsl::Element &target) {
+    eui::Rect anchor{target.frame.x, target.frame.y, target.frame.width, target.frame.height};
+    // 布局坐标不含滚动变换；仅累加目标实际所属的滚动内容祖先。
+    // 固定导航不受正文滚动影响，嵌套滚动则分别应用各自的偏移。
+    const auto visit = [&](const auto &self, const core::dsl::Element &node,
+                           float offset) -> bool {
+        if (!node.scrollContentSourceId.empty())
+            if (const auto *owner = ui.find(node.scrollContentSourceId))
+                offset += std::round(std::clamp(owner->scrollOffset, 0.f, owner->scrollMaxOffset) *
+                                     state.pixelScale) / state.pixelScale;
+        if (&node == &target) {
+            anchor.y -= offset;
+            return true;
+        }
+        for (const auto &child : node.children)
+            if (self(self, *child, offset))
+                return true;
+        return false;
+    };
+    for (const auto &root : ui.roots())
+        if (visit(visit, *root, 0.f))
+            break;
+    return anchor;
+}
+void combo(Ui &u, const std::string &id, const std::vector<std::string> &items, int selected,
+           float w, std::function<void(int)> select) {
+    selected = items.empty() ? 0 : std::clamp(selected, 0, int(items.size()) - 1);
+    select = [selected, count = int(items.size()), callback = std::move(select)](int next) {
+        if (next >= 0 && next < count && next != selected)
+            callback(next);
+    };
+    if (menu.id == id) {
+        if (items.empty())
+            menu.id.clear();
+        else {
+            if (menu.items != items) {
+                menu.items = items;
+                menu.highlighted = selected;
+                menu.offset = 0;
+                menu.revealHighlighted = true;
+            }
+            menu.select = select;
+        }
+    }
+    bool f = u.isFocused(id);
+    u.stack(id + ".wrap")
+        .size(w, controlHeight)
+        .content([&] {
+            u.rect(id)
+                .size(w, controlHeight)
+                .states(surface, surfaceHover, blueWash)
+                .border(f ? 2.0f : 1.0f, f ? blue : line)
+                .radius(controlRadius)
+                .transition(transition(.14f))
+                .focusable()
+                .onPress(
+                    [id, items, select, selected](const eui::PointerEvent &, const eui::Rect &r) {
+                        if (items.empty())
+                            return;
+                        if (menu.id == id) {
+                            menu.id.clear();
+                            return;
+                        }
+                        menu = {id,
+                                items,
+                                select,
+                                {r.x / state.pixelScale, r.y / state.pixelScale,
+                                 r.width / state.pixelScale, r.height / state.pixelScale},
+                                selected};
+                    })
+                .onKeyEvent([id, items, select, selected, &u](const eui::KeyEvent &k) {
+                    if (!k.isDown() || items.empty())
+                        return false;
+                    bool open = menu.id == id;
+                    if (k.key == eui::InputKey::Escape) {
+                        menu.id.clear();
+                        return true;
+                    }
+                    if (k.key == eui::InputKey::Tab) {
+                        menu.id.clear();
+                        return false;
+                    }
+                    if (k.key == eui::InputKey::Down || k.key == eui::InputKey::Up ||
+                        k.key == eui::InputKey::Home || k.key == eui::InputKey::End) {
+                        int i = open ? menu.highlighted : selected;
+                        i = k.key == eui::InputKey::Home ? 0
+                            : k.key == eui::InputKey::End
+                                ? int(items.size()) - 1
+                                : (i + (k.key == eui::InputKey::Down ? 1 : -1) +
+                                   int(items.size())) %
+                                      int(items.size());
+                        if (open) {
+                            menu.highlighted = i;
+                            menu.revealHighlighted = true;
+                        } else
+                            select(i);
+                        return true;
+                    }
+                    if (activate(k)) {
+                        if (open) {
+                            auto fn = menu.select;
+                            int i = menu.highlighted;
+                            menu.id.clear();
+                            if (fn)
+                                fn(i);
+                        } else if (const auto *e = u.find(id))
+                            menu = {id, items, select, menuAnchor(u, *e), selected};
+                        return true;
+                    }
+                    return false;
+                })
+                .build();
+            u.row(id + ".caption")
+                .size(w, controlHeight)
+                .padding(10)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    u.text(id + ".value")
+                        .size(w - 40, 20)
+                        .text(items.empty() ? "暂无可选项" : items.at(selected))
+                        .fontSize(controlFont)
+                        .color(items.empty() ? muted : ink)
+                        .verticalAlign(eui::VerticalAlign::Center)
+                        .clip()
+                        .build();
+                    text(u, id + ".arrow", "⌄", 20, 20, 16, muted);
+                })
+                .build();
+        })
+        .build();
+    if (auto *control = u.find(id); control && items.empty()) {
+        control->disabled = true;
+        control->focusable = false;
+    }
+}
+void inputControl(Ui &u, const std::string &id, std::string &value, float w,
+                  const std::string &hint, std::function<void()> changed) {
+    auto style = components::InputStyle(tokens());
+    style.background = eui::Color(surfaceSoft);
+    style.focused = eui::Color(surface);
+    style.border = eui::Color(line);
+    style.placeholder = eui::Color(muted);
+    style.radius = controlRadius;
+    components::input(u, id)
+        .size(w, controlHeight)
+        .value(value)
+        .placeholder(hint)
+        .fontSize(controlFont)
+        .inset(10)
+        .theme(tokens())
+        .style(style)
+        .transition(transition(.14f))
+        .onChange([&value, changed = std::move(changed)](const std::string &s) {
+            if (value == s)
+                return;
+            value = s;
+            if (changed)
+                changed();
+        })
+        .build();
+}
+void input(Ui &u, const std::string &id, std::string &value, float w, const std::string &hint = "",
+           bool exportOnly = false) {
+    inputControl(u, id, value, w, hint, [exportOnly] {
+        if (exportOnly)
+            state.outputChanged();
+        else
+            state.changed();
+    });
+}
+void field(Ui &u, const std::string &id, const std::string &label, std::string &v, float w,
+           const std::string &hint = "", bool exportOnly = false) {
+    u.column(id + ".field")
+        .width(w)
+        .gap(5)
+        .content([&] {
+            text(u, id + ".label", label, w, 21, 13);
+            input(u, id, v, w, hint, exportOnly);
+        })
+        .build();
+}
+eui::Shadow cardShadow() {
+    eui::Shadow shadow;
+    shadow.enabled = true;
+    shadow.offset = {0, 2};
+    shadow.blur = 10;
+    shadow.color = eui::Color("#203B5B0B");
+    return shadow;
+}
+constexpr float secondaryNavHeight = 50.f, secondaryNavInset = 12.f, secondaryNavGap = 14.f;
+void navigationCard(Ui &u, const std::string &id, const std::string &rowId, float w,
+                    const std::function<void()> &content) {
+    components::card(u, id)
+        .size(w, secondaryNavHeight)
+        .theme(tokens())
+        .padding(0)
+        .radius(cardRadius)
+        .color(surface)
+        .border(1, line)
+        .shadow(cardShadow())
+        .content([&] {
+            u.row(rowId)
+                .size(w, secondaryNavHeight)
+                .padding(secondaryNavInset, 0)
+                .gap(secondaryNavGap)
+                .alignItems(eui::Align::CENTER)
+                .content(content)
+                .build();
+        })
+        .build();
+}
+constexpr float resultInset = 16, resultGap = 9, sectionTitleHeight = 27;
+constexpr float resultSummaryHeight = 72, resultTabHeight = 40;
+constexpr float resultTableHeaderHeight = 40, previewPaginationHeight = 32;
+constexpr float resultFixedHeight = 2 * resultInset + sectionTitleHeight + resultSummaryHeight +
+                                    resultTabHeight + 3 * resultGap;
+
+void section(Ui &u, const std::string &id, const std::string &title, float w,
+             std::function<void(float)> fn) {
+    const bool compact = id == "rules" || id == "targets" || id == "results";
+    const float inset = compact || w < 610 ? resultInset : 20.0f;
+    const float verticalInset = id == "summary" || id == "rules" ? 12.f
+                                : id == "targets"                ? 14.f
+                                                                 : inset;
+    const float contentGap = id == "summary" ? 4.f
+                             : id == "rules" ? 7.f
+                             : compact       ? resultGap
+                                             : 13.f;
+    components::card(u, id + ".card")
+        .width(w)
+        .wrapContentHeight()
+        .theme(tokens())
+        .padding(0)
+        .color(surface)
+        .radius(cardRadius)
+        .border(1, line)
+        .shadow(cardShadow())
+        .content([&] {
+            u.column(id)
+                .width(w)
+                .padding(inset, verticalInset)
+                .gap(contentGap)
+                .content([&] {
+                    if (id != "summary" && !title.empty())
+                        u.row(id + ".heading")
+                            .width(w - inset * 2)
+                            .gap(9)
+                            .alignItems(eui::Align::CENTER)
+                            .content([&] {
+                                u.rect(id + ".accent").size(3, 15).color(blue).radius(1.5f).build();
+                                text(u, id + ".title", title, w - inset * 2 - 12,
+                                     sectionTitleHeight, 17);
+                            })
+                            .build();
+                    fn(w - inset * 2);
+                })
+                .build();
+        })
+        .build();
+}
+// Errors stay beside the form until resolved.
+void notice(Ui &u, float w) {
+    if (state.message.empty())
+        return;
+    const bool softFailure =
+        state.status == Status::Infeasible || state.status == Status::SearchFailed;
+    const auto level = softFailure ? Level::Warning : Level::Error;
+    const bool stacked = w < 680;
+    const bool offerOptions = state.page != Page::Options;
+    constexpr float inset = 14, gap = 10;
+    const float contentWidth = w - 2 * inset;
+    const float actionsWidth = offerOptions ? 194.f : 92.f;
+    const float messageWidth = stacked ? contentWidth : contentWidth - actionsWidth - gap;
+    const auto message = [&] {
+        u.column("notice.copy")
+            .width(messageWidth)
+            .gap(4)
+            .content([&] {
+                text(u, "notice.title",
+                     state.status == Status::Infeasible     ? "约束冲突"
+                     : state.status == Status::SearchFailed ? "未找到满足约束的数据"
+                     : state.status == Status::ExportError  ? "CSV 导出失败"
+                                                            : "操作失败",
+                     messageWidth, 24, 15, levelColor(level));
+                u.text("notice.text")
+                    .width(messageWidth)
+                    .text(state.message)
+                    .fontSize(18)
+                    .lineHeight(24)
+                    .color(ink)
+                    .wrap()
+                    .maxWidth(messageWidth)
+                    .build();
+            })
+            .build();
+    };
+    const auto actions = [&] {
+        u.row("notice.actions")
+            .width(stacked ? contentWidth : actionsWidth)
+            .gap(gap)
+            .justifyContent(eui::Align::END)
+            .content([&] {
+                if (offerOptions)
+                    button(
+                        u, "fixoptions", "打开选项", 92,
+                        [] {
+                            state.navigate(Page::Options);
+                            state.configOffset = 0;
+                        },
+                        false, state.busy(), 36);
+                button(
+                    u, "showlogs", "查看日志", 92, [] { state.navigate(Page::Logs); }, false, false,
+                    36);
+            })
+            .build();
+    };
+    u.stack("notice.card")
+        .width(w)
+        .content([&] {
+            u.rect("notice.bg")
+                .width(eui::SizeValue::fill())
+                .height(eui::SizeValue::fill())
+                .ignoreLayout()
+                .color(levelSurface(level))
+                .border(1, softFailure ? "#E6D4A9" : "#EBC8C1")
+                .radius(cardRadius)
+                .build();
+            (stacked ? u.column("notice.row") : u.row("notice.row"))
+                .width(w)
+                .padding(inset, 12)
+                .gap(gap)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    message();
+                    actions();
+                })
+                .build();
+        })
+        .build();
+}
+void compactField(Ui &u, const std::string &id, const std::string &label, std::string &value,
+                  float w, const std::string &hint = "") {
+    u.column(id + ".field")
+        .width(w)
+        .gap(3)
+        .content([&] {
+            text(u, id + ".label", label, w, 18, 12, muted);
+            input(u, id, value, w, hint);
+        })
+        .build();
+}
+void inputs(Ui &u, float w) {
+    section(u, "rules", "生成设置", w, [&](float c) {
+        const float limitWidth = (c - 12) / 2;
+        field(u, "center", "数据中心", state.draft.center, c, "留空时自动确定");
+        u.row("limits")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                field(u, "lsl", "规格下限 LSL", state.draft.lsl, limitWidth, "输入数值");
+                field(u, "usl", "规格上限 USL", state.draft.usl, limitWidth, "输入数值");
+            })
+            .build();
+        text(u, "spechelp",
+             state.draft.compliance == 0 ? "规格内生成需要至少填写一侧规格限。"
+                                         : "当前允许测量值超出规格限。",
+             c, 20, 12, muted);
+    });
+    section(u, "targets", "指标约束", w, [&](float c) {
+        u.column("constraintrows")
+            .width(c)
+            .gap(2)
+            .content([&] {
+                for (int i = 0; i < 5; ++i) {
+                    auto &t = state.draft.targets[i];
+                    const std::string id = "target" + std::to_string(i);
+                    const float labelWidth = 84, modeWidth = 116,
+                                valueWidth = c - labelWidth - modeWidth - 24;
+                    u.row(id + ".row")
+                        .size(c, 61)
+                        .gap(12)
+                        .alignItems(eui::Align::CENTER)
+                        .content([&] {
+                            text(u, id + ".name", metricNames[i], labelWidth, 40, 14);
+                            combo(u, id + ".mode", modes, t.mode, modeWidth, [i](int mode) {
+                                state.draft.targets[i].mode = mode;
+                                state.changed();
+                            });
+                            if (t.mode) {
+                                const bool two = t.mode == 1 || t.mode == 2;
+                                const float f = two ? (valueWidth - 8) / 2 : valueWidth;
+                                u.row(id + ".values")
+                                    .width(valueWidth)
+                                    .gap(8)
+                                    .content([&] {
+                                        const std::string unit = i == 4 ? "" : " %";
+                                        compactField(u, id + ".first",
+                                                     (t.mode == 1   ? "目标值"
+                                                      : t.mode == 2 ? "下限"
+                                                                    : "阈值") +
+                                                         unit,
+                                                     t.first, f);
+                                        if (two)
+                                            compactField(
+                                                u, id + ".second",
+                                                t.mode == 1
+                                                    ? (i == 4 ? "误差（整数）" : "误差（百分点）")
+                                                    : ("上限" + unit),
+                                                t.second, f,
+                                                t.mode == 1 ? (i == 4 ? state.draft.ndcError
+                                                                      : state.draft.percentError)
+                                                            : "");
+                                    })
+                                    .build();
+                            } else
+                                text(u, id + ".unconstrained", "—", valueWidth, 40, 13, muted);
+                        })
+                        .build();
+                    if (i < 4)
+                        u.rect(id + ".divider").size(c, 1).color(line).build();
+                }
+            })
+            .build();
+    });
+}
+std::string condition(int i) {
+    const auto &t = state.draft.targets[i];
+    if (!t.mode)
+        return "不约束";
+    auto display = [&](const std::string &value) {
+        try {
+            return msa::fixed(msa::parse_number(native_ui::trim(value)), i == 4 ? 0 : 2);
+        } catch (const std::exception &) {
+            return std::string("—");
+        }
+    };
+    const std::string first = display(t.first);
+    if (t.mode == 1)
+        return first + " ± " +
+               display(t.second.empty() ? (i == 4 ? state.draft.ndcError : state.draft.percentError)
+                                        : t.second);
+    if (t.mode == 2)
+        return first + " ～ " + display(t.second);
+    return std::string(t.mode == 3 ? "≤ " : "≥ ") + first;
+}
+std::string boundText(double v, int dp) { return std::isfinite(v) ? msa::fixed(v, dp) : "∞"; }
+void review(Ui &u, float w, float tableHeight = 0) {
+    const bool hasResult = state.displayedResult();
+    Json cfg;
+    try {
+        cfg = hasResult ? state.result->config
+                        : native_ui::to_config(state.draft, native_ui::ConfigUse::Generation);
+    } catch (const std::exception &) {
+        cfg = nullptr;
+    }
+    const Json m = hasResult ? state.result->metrics : Json::object();
+    const Json status = hasResult ? msa::checks(m, cfg) : Json::object();
+    const bool detail = tableHeight > 0 || w >= 600;
+    const float rowHeight =
+        tableHeight > 0 ? (tableHeight - resultTableHeaderHeight) / metricNames.size() : 40.f;
+    constexpr std::array<float, 6> ratios{.15f, .21f, .21f, .14f, .12f, .17f};
+    constexpr auto left = eui::HorizontalAlign::Left;
+    constexpr auto right = eui::HorizontalAlign::Right;
+    constexpr auto center = eui::HorizontalAlign::Center;
+    auto verdictChip = [&](const std::string &id, const std::string &verdict, float width) {
+        const bool ok = verdict == "满足", neutral = verdict == "未约束";
+        badge(u, id, verdict, width,
+              ok        ? green
+              : neutral ? muted
+                        : levelColor(Level::Error),
+              ok        ? greenWash
+              : neutral ? surfaceDisabled
+                        : levelSurface(Level::Error));
+    };
+    auto row = [&](std::string id, std::array<std::string, 6> cells, bool header) {
+        const float height = header ? resultTableHeaderHeight : rowHeight;
+        u.stack(id + ".wrap")
+            .size(w, height)
+            .content([&] {
+                u.rect(id + ".bg")
+                    .size(w, height)
+                    .color(header ? tableHeader : (id.back() % 2 ? tableStripe : surface))
+                    .radius(header ? controlRadius : 0.f)
+                    .build();
+                u.row(id)
+                    .size(w, height)
+                    .padding(8)
+                    .alignItems(eui::Align::CENTER)
+                    .content([&] {
+                        for (int j = 0; j < 6; ++j) {
+                            const float width = (w - 16) * ratios[j];
+                            if (j == 5 && !header && cells[j] != "—") {
+                                u.row(id + ".verdict.cell")
+                                    .size(width, 28)
+                                    .justifyContent(eui::Align::CENTER)
+                                    .content([&] {
+                                        verdictChip(id + ".verdict", cells[j], width - 14);
+                                    })
+                                    .build();
+                            } else {
+                                u.text(id + "c" + std::to_string(j))
+                                    .size(width - 8, 26)
+                                    .margin(0, 0, 8, 0)
+                                    .text(cells[j])
+                                    .fontSize(header ? tableLabelFont : tableValueFont)
+                                    .color(header || j == 5 ? muted
+                                           : j == 3         ? blue
+                                                            : ink)
+                                    .horizontalAlign(j == 5   ? center
+                                                     : j >= 3 ? right
+                                                              : left)
+                                    .verticalAlign(eui::VerticalAlign::Center)
+                                    .clip()
+                                    .build();
+                            }
+                        }
+                    })
+                    .build();
+            })
+            .build();
+    };
+    if (detail)
+        row("reviewheader", {"指标", "目标条件", "接受范围", "实际值", "偏差", "判定"}, true);
+    for (int i = 0; i < 5; ++i) {
+        auto key = msa::metric_keys[i];
+        auto b = cfg.is_null() ? msa::Bounds{} : msa::acceptance(cfg, key);
+        const Json v = hasResult ? m[key] : Json(nullptr);
+        const Json t = cfg.is_null() ? Json(nullptr) : cfg["targets"][key];
+        const int dp = i == 4 ? 0 : 2;
+        std::string range = b ? boundText(b->first, dp) + "～" + boundText(b->second, dp) : "—",
+                    delta = "—";
+        if (native_ui::finite_metric(v) && !t.is_null() &&
+            (t["mode"] == "target" || t["mode"] == "between")) {
+            double preferred = t["mode"] == "target"
+                                   ? t["value"].get<double>()
+                                   : (t["min"].get<double>() + t["max"].get<double>()) / 2;
+            delta = native_ui::review_number(v.get<double>() - preferred, dp);
+            if (delta == "-0.00")
+                delta = "0.00";
+        }
+        std::string verdict = !hasResult                                     ? "—"
+                              : !v.is_null() && !native_ui::finite_metric(v) ? "数值异常"
+                              : status[key].is_null()                        ? "未约束"
+                              : v.is_null()                                  ? "不可计算"
+                              : status[key] == true                          ? "满足"
+                                                                             : "不满足";
+        auto actual = !hasResult ? std::string("—") : native_ui::review_number(v, dp);
+        if (detail)
+            row("review" + std::to_string(i),
+                {metricNames[i], condition(i), range, actual, delta, verdict}, false);
+        else {
+            const auto id = "compact" + std::to_string(i);
+            u.stack(id)
+                .width(w)
+                .content([&] {
+                    u.rect(id + ".bg")
+                        .width(eui::SizeValue::fill())
+                        .height(eui::SizeValue::fill())
+                        .ignoreLayout()
+                        .color(i % 2 == 0 ? surfaceSoft : surface)
+                        .radius(controlRadius)
+                        .build();
+                    u.column(id + ".content")
+                        .width(w)
+                        .padding(12, 6)
+                        .gap(3)
+                        .content([&] {
+                            u.row(id + ".headline")
+                                .size(w - 24, 28)
+                                .gap(10)
+                                .alignItems(eui::Align::CENTER)
+                                .content([&] {
+                                    text(u, "metric" + std::to_string(i), metricNames[i], 104, 28, 14);
+                                    text(u, id + ".actual", "实际值  " + actual, w - 248, 28,
+                                         14, hasResult ? blue : muted);
+                                    if (hasResult)
+                                        verdictChip(id + ".verdict", verdict, 96);
+                                })
+                                .build();
+                            u.text("condition" + std::to_string(i))
+                                .width(w - 24)
+                                .text("目标 " + condition(i) + "  ·  范围 " + range + "  ·  偏差 " +
+                                      delta)
+                                .wrap()
+                                .maxWidth(w - 24)
+                                .fontSize(16)
+                                .color(muted)
+                                .build();
+                        })
+                        .build();
+                })
+                .build();
+        }
+    }
+}
+void emptyDocumentIcon(Ui &u, const std::string &id) {
+    u.stack(id)
+        .size(40, 40)
+        .content([&] {
+            u.rect(id + ".bg").size(40, 40).radius(controlRadius).color(blueWash).build();
+            u.rect(id + ".page")
+                .position(11, 10)
+                .size(18, 20)
+                .radius(3)
+                .color(surface)
+                .border(1, blue)
+                .build();
+            u.rect(id + ".line1").position(15, 16).size(10, 1).color(blue).build();
+            u.rect(id + ".line2").position(15, 22).size(7, 1).color(blue).build();
+        })
+        .build();
+}
+void resultEmpty(Ui &u, const std::string &id, float w, const std::string &hint) {
+    constexpr float height = 85, inset = 14, gap = 12;
+    const float copyWidth = w - 2 * inset - 40 - gap;
+    u.stack(id)
+        .size(w, height)
+        .content([&] {
+            u.rect(id + ".bg")
+                .size(w, height)
+                .color(surfaceSoft)
+                .border(1, line)
+                .radius(controlRadius)
+                .build();
+            u.row(id + ".content")
+                .size(w, height)
+                .padding(inset, 0)
+                .gap(gap)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    emptyDocumentIcon(u, id + ".icon");
+                    u.column(id + ".copy")
+                        .width(copyWidth)
+                        .gap(4)
+                        .content([&] {
+                            text(u, id + ".title",
+                                 state.busy() ? "正在生成测量数据" : "暂无测量结果", copyWidth, 24,
+                                 15);
+                            text(u, id + ".hint", hint, copyWidth, 24, 13, muted);
+                        })
+                        .build();
+                })
+                .build();
+        })
+        .build();
+}
+struct PreviewColumns {
+    int first = 0, count = 0, pages = 0;
+};
+float previewLabelWidth(bool fixedPanel) { return fixedPanel ? 96.f : 106.f; }
+PreviewColumns previewColumns(const msa::Result &res, float w, bool fixedPanel) {
+    const int parts = res.config["design"]["parts"];
+    std::size_t maxDigits = 1;
+    for (const auto &row : res.matrix)
+        for (double v : row)
+            maxDigits = std::max(maxDigits,
+                                 msa::fixed(v, res.config["generation"]["decimal_places"]).size());
+    const float numericWidth =
+        core::TextPrimitive::measureTextWidth(std::string(maxDigits, '0'), {}, 17.5f, 400);
+    const int cols = std::clamp(
+        int((w - previewLabelWidth(fixedPanel)) / std::max(58.f, numericWidth + 10.f)), 1, parts);
+    const int pages = (parts + cols - 1) / cols;
+    state.previewPage = std::clamp(state.previewPage, 0, pages - 1);
+    const int first = state.previewPage * cols;
+    return {first, std::min(cols, parts - first), pages};
+}
+void preview(Ui &u, float w, const PreviewColumns &columns, float availableHeight) {
+    if (!state.displayedResult()) {
+        resultEmpty(u, "previewempty", w, "生成数据后，按配置的小数位查看测量值。");
+        return;
+    }
+    const auto &res = *state.result;
+    const int reps = res.config["design"]["replicates"];
+    const bool fixedPanel = availableHeight > 0;
+    const float labelWidth = previewLabelWidth(fixedPanel);
+    const float cell = (w - labelWidth) / columns.count;
+    const int rows = int(res.matrix.size());
+    const float minimumRowHeight = fixedPanel ? 26.f : 34.f;
+    const float tableHeight =
+        std::max(availableHeight, resultTableHeaderHeight + rows * minimumRowHeight);
+    const float cellHeight = (tableHeight - resultTableHeaderHeight) / std::max(1, rows);
+    const auto row = [&](int r) {
+        const auto id = "previewrow" + std::to_string(r);
+        const float rowHeight = r < 0 ? resultTableHeaderHeight : cellHeight;
+        u.stack(id + ".wrap")
+            .size(w, rowHeight)
+            .content([&] {
+                u.rect(id + ".bg")
+                    .size(w, rowHeight)
+                    .color(r < 0   ? tableHeader
+                           : r % 2 ? tableStripe
+                                   : surface)
+                    .radius(r < 0 ? controlRadius : 0.f)
+                    .build();
+                if (r >= 0 && r % reps == 0)
+                    u.rect(id + ".rule").size(w, 1).color(line).build();
+                u.row(id)
+                    .size(w, rowHeight)
+                    .content([&] {
+                        u.text("rowlabel" + std::to_string(r))
+                            .size(labelWidth - 8, rowHeight)
+                            .margin(8, 0, 0, 0)
+                            .text(r < 0 ? "操作员 / 次"
+                                        : std::string(1, char('A' + r / reps)) + " / " +
+                                              std::to_string(r % reps + 1))
+                            .fontSize(tableLabelFont)
+                            .color(muted)
+                            .verticalAlign(eui::VerticalAlign::Center)
+                            .build();
+                        for (int c = 0; c < columns.count; ++c)
+                            u.text("cell" + std::to_string(r) + "_" + std::to_string(c))
+                                .size(cell - 8, rowHeight)
+                                .margin(0, 0, 8, 0)
+                                .text(r < 0
+                                          ? std::to_string(columns.first + c + 1)
+                                          : msa::fixed(res.matrix[r][columns.first + c],
+                                                       res.config["generation"]["decimal_places"]))
+                                .fontSize(r < 0 ? tableLabelFont : tableValueFont)
+                                .color(r < 0 ? muted : ink)
+                                .horizontalAlign(eui::HorizontalAlign::Right)
+                                .verticalAlign(eui::VerticalAlign::Center)
+                                .clip()
+                                .build();
+                    })
+                    .build();
+            })
+            .build();
+    };
+    u.column("preview.table")
+        .size(w, tableHeight)
+        .content([&] {
+            for (int r = -1; r < rows; ++r)
+                row(r);
+        })
+        .build();
+}
+void studySummary(Ui &u, float w) {
+    section(u, "summary", "", w, [&](float c) {
+        u.row("study.summary")
+            .width(c)
+            .gap(10)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                u.column("study.caption")
+                    .width(c - 242)
+                    .gap(2)
+                    .content([&] {
+                        text(u, "study.label",
+                             state.draft.analysisMethod ? "交叉量具 R&R  /  ANOVA"
+                                                        : "交叉量具 R&R  /  Xbar-R",
+                             c - 242, 20, 12, blue);
+                        text(u, "study.design",
+                             state.draft.operators + " 人 × " + state.draft.replicates + " 次 × " +
+                                 state.draft.parts + " 件",
+                             c - 242, 31, 20);
+                    })
+                    .build();
+                button(
+                    u, "study.sample", "载入示例", 106, [] { state.sample(); }, false, state.busy(),
+                    36);
+                button(
+                    u, "study.options", "研究选项  →", 116,
+                    [] {
+                        state.navigate(Page::Options);
+                        state.optionsTab = 0;
+                        state.configOffset = 0;
+                    },
+                    false, false, 36);
+            })
+            .build();
+    });
+}
+void detailTable(Ui &u, const std::string &id, float w, const std::vector<std::string> &columns,
+                 const std::vector<std::vector<std::string>> &rows, float availableHeight = 0) {
+    auto theme = tokens();
+    theme.metrics.typography.label = tableValueFont;
+    theme.metrics.spacing.section = 7;
+    theme.metrics.control.segmented =
+        resultTableHeaderHeight - theme.metrics.spacing.hairline - theme.metrics.spacing.micro;
+    auto style = components::DataTableStyle(theme);
+    style.header = eui::Color(tableHeader);
+    style.row = eui::Color(surface);
+    style.rowAlt = eui::Color(tableStripe);
+    style.mutedText = eui::Color(muted);
+    style.accent = style.mutedText;
+    style.divider = eui::Color(line);
+    style.radius = controlRadius;
+    const float minimumHeight =
+        resultTableHeaderHeight + theme.metrics.spacing.hairline + float(rows.size()) * 42;
+    components::dataTable(u, id)
+        .size(w, std::max(availableHeight, minimumHeight))
+        .columns(columns)
+        .rows(rows)
+        .theme(theme)
+        .style(style)
+        .transition(transition())
+        .build();
+    for (size_t column = 0; column < columns.size(); ++column) {
+        if (auto *header = u.find(id + ".header." + std::to_string(column))) {
+            header->fontSize = tableLabelFont;
+            if (column > 0)
+                header->horizontalAlign = eui::HorizontalAlign::Right;
+        }
+        for (size_t row = 0; row < rows.size(); ++row)
+            if (auto *cell =
+                    u.find(id + ".cell." + std::to_string(row) + "." + std::to_string(column))) {
+                cell->wrap = true;
+                if (column > 0)
+                    cell->horizontalAlign = eui::HorizontalAlign::Right;
+            }
+    }
+}
+std::string componentName(const std::string &key) {
+    if (key == "EV")
+        return "重复性 EV";
+    if (key == "AV")
+        return "再现性 AV";
+    if (key == "GRR")
+        return "量具 R&R";
+    if (key == "PV")
+        return "部件间 PV";
+    if (key == "TV")
+        return "总变异 TV";
+    return key == "Operator" ? "操作员" : "交互作用";
+}
+void results(Ui &u, float w, bool summary = true, float contentHeight = 0) {
+    if (summary)
+        studySummary(u, w);
+    const bool hasResult = state.displayedResult();
+    const std::string title = state.retainedResult() ? "复核结果 · 上次成功结果"
+                              : !state.busy()        ? "复核结果"
+                              : hasResult            ? "复核结果 · 上次结果（更新中）"
+                                                     : "复核结果 · 正在生成";
+    section(u, "results", title, w, [&](float c) {
+        // Keep the same summary height and table throughout a task. A search
+        // updates the local budget rail instead of replacing the entire panel.
+        u.stack("result.summary")
+            .size(c, resultSummaryHeight)
+            .content([&] {
+                u.row("result.overview")
+                    .width(c)
+                    .gap(12)
+                    .content([&] {
+                        const std::array<int, 3> metrics{2, 3, 4};
+                        for (int i : metrics) {
+                            const auto id = "result.metric." + std::to_string(i);
+                            const float width = (c - 24) / 3;
+                            u.stack(id)
+                                .size(width, resultSummaryHeight)
+                                .content([&] {
+                                    u.rect(id + ".bg")
+                                        .size(width, resultSummaryHeight)
+                                        .color(i == 2 ? blueWash : surfaceSoft)
+                                        .border(1, i == 2 ? brandBorder : eui::Color(line))
+                                        .radius(controlRadius)
+                                        .build();
+                                    u.column(id + ".content")
+                                        .width(width)
+                                        .padding(12, 8)
+                                        .gap(2)
+                                        .content([&] {
+                                            text(u, id + ".label", metricNames[i], width - 24, 20,
+                                                 12, muted);
+                                            text(u, id + ".value",
+                                                 hasResult ? native_ui::review_number(
+                                                                 state.result
+                                                                     ->metrics[msa::metric_keys[i]],
+                                                                 i == 4 ? 0 : 2)
+                                                           : "—",
+                                                 width - 24, 34, 24,
+                                                 !hasResult ? muted
+                                                 : i == 2   ? blue
+                                                            : ink);
+                                        })
+                                        .build();
+                                })
+                                .build();
+                        }
+                    })
+                    .build();
+                u.stack("result.budget")
+                    .position(0, resultSummaryHeight - 3)
+                    .size(c, 3)
+                    .opacity(state.busy() ? 1.0f : 0.0f)
+                    .content([&] {
+                        // This shows the consumed candidate budget, not completion probability.
+                        const float budget =
+                            std::max(1.0f, float(std::atof(state.draft.attempts.c_str())));
+                        components::progress(u, "searchbudget")
+                            .size(c, 3)
+                            .value(state.ticks.load() / budget)
+                            .theme(tokens())
+                            .transition(transition())
+                            .build();
+                    })
+                    .build();
+            })
+            .build();
+        tabs(
+            u, "resulttabs",
+            state.draft.analysisMethod
+                ? std::vector<std::string>{"指标复核", "数据预览", "ANOVA 详情"}
+                : std::vector<std::string>{"指标复核", "数据预览", "分析详情"},
+            state.resultTab, c,
+            [](int i) {
+                state.resultTab = i;
+                state.resultOffset = 0;
+                menu.id.clear();
+                state.resultEntered = Clock::now();
+            },
+            resultTabHeight);
+        const bool fixedPanel = contentHeight > 0;
+        const auto columns = hasResult && state.resultTab == 1
+                                 ? previewColumns(*state.result, c, fixedPanel)
+                                 : PreviewColumns{};
+        const bool paginated = columns.pages > 1;
+        const float tableHeight =
+            contentHeight - (fixedPanel && paginated ? previewPaginationHeight + resultGap : 0.f);
+        const float progress = reveal(state.resultEntered);
+        auto content = u.column("result.content").width(c).opacity(.96f + .04f * progress);
+        if (progress < 1)
+            content.onFrame([](float) {});
+        const auto resultTab = [&](Ui &u, float c) {
+            if (state.resultTab == 0)
+                review(u, c, tableHeight);
+            else if (state.resultTab == 1)
+                preview(u, c, columns, tableHeight);
+            else {
+                if (!hasResult) {
+                    resultEmpty(u, "anova.pending", c, "生成后查看所选分析方法的统计结果。");
+                } else {
+                    const auto &metrics = state.result->metrics;
+                    if (metrics.contains("study")) {
+                        const auto &study = metrics["study"];
+                        std::vector<std::vector<std::string>> rows;
+                        for (const auto *key : {"EV", "AV", "GRR", "PV", "TV"}) {
+                            const auto &row = study["components"][key];
+                            rows.push_back({componentName(key),
+                                            native_ui::review_number(row["sd"], 6),
+                                            native_ui::review_number(row["study_variation_pct"], 2),
+                                            row["process_pct"].is_null()
+                                                ? "—"
+                                                : native_ui::review_number(row["process_pct"], 2)});
+                        }
+                        const bool hasMoreDetails = metrics.contains("misclassification") ||
+                                                    metrics.contains("confidence") ||
+                                                    metrics.contains("anova");
+                        detailTable(u, "study.table", c,
+                                    {"变异来源", "标准差 SD", "研究变异 %", "过程 %"}, rows,
+                                    hasMoreDetails ? 0.f : tableHeight);
+                    }
+                    if (metrics.contains("misclassification")) {
+                        const auto &probability = metrics["misclassification"];
+                        text(u, "misclassification.title", "误分类概率（正态模型）", c, 30, 14);
+                        const std::array<const char *, 4> keys{"bad_accepted", "good_rejected",
+                                                               "accept_given_bad",
+                                                               "reject_given_good"};
+                        const std::array<const char *, 4> labels{"不合格且被接受", "合格且被拒绝",
+                                                                 "不合格品被接受（条件）",
+                                                                 "合格品被拒绝（条件）"};
+                        for (std::size_t i = 0; i < keys.size(); ++i) {
+                            const auto &value = probability[keys[i]];
+                            text(u, std::string("misclassification.") + keys[i],
+                                 std::string(labels[i]) + "：" +
+                                     (value.is_null()
+                                          ? "不可计算"
+                                          : msa::fixed(100 * value.get<double>(), 6) + "%"),
+                                 c, 28, 13);
+                        }
+                    }
+                    if (metrics.contains("confidence")) {
+                        const auto &ci = metrics["confidence"];
+                        text(u, "confidence.title",
+                             "标准差置信限（" + native_ui::review_number(ci["level"], 2) + "% · " +
+                                 (ci["method"] == "Satterthwaite_variance_components"
+                                      ? "Satterthwaite"
+                                      : "MLS") +
+                                 "）",
+                             c, 30, 14);
+                        const auto limit = [](const msa::Json &v) {
+                            return v.is_null() ? std::string("—") : native_ui::review_number(v, 6);
+                        };
+                        std::vector<std::vector<std::string>> rows;
+                        for (const auto *key : {"EV", "AV", "GRR", "PV", "TV"}) {
+                            const auto &bounds = ci["stddev"][key];
+                            rows.push_back({componentName(key), limit(bounds["lower"]),
+                                            limit(bounds["upper"])});
+                        }
+                        detailTable(u, "confidence.table", c, {"变异来源", "置信下限", "置信上限"},
+                                    rows);
+                    }
+                    if (metrics.contains("anova")) {
+                        const auto &a = state.result->metrics["anova"];
+                        text(u, "anova.model",
+                             a["interaction_included"].get<bool>()
+                                 ? "最终模型保留部件 × 操作员交互项"
+                                 : "最终模型将交互项并入重复性误差",
+                             c, 30, 14);
+                        text(u, "anova.p",
+                             "完整模型交互项 P = " +
+                                 native_ui::review_number(a["interaction_p"], 6),
+                             c, 28, 13, muted);
+                        std::vector<std::vector<std::string>> anovaRows;
+                        for (const auto &row : a["table"]) {
+                            const auto source = row["source"].get<std::string>();
+                            std::vector<std::string> cells{
+                                source == "Part"            ? "部件"
+                                : source == "Operator"      ? "操作员"
+                                : source == "Part*Operator" ? "部件 × 操作员"
+                                : source == "Repeatability" ? "重复性误差"
+                                : source == "Total"         ? "合计"
+                                                            : source,
+                                row["df"].dump()};
+                            for (const auto *key : {"ss", "ms", "f", "p"})
+                                cells.push_back(row[key].is_null()
+                                                    ? "—"
+                                                    : native_ui::review_number(row[key], 6));
+                            anovaRows.push_back(std::move(cells));
+                        }
+                        if (c >= 900)
+                            detailTable(
+                                u, "anova.table", c,
+                                {"变异来源", "自由度 DF", "平方和 SS", "均方 MS", "F 值", "P 值"},
+                                anovaRows);
+                        else {
+                            // 窄面板按来源分组，数值不压缩、不省略有效位。
+                            for (size_t i = 0; i < anovaRows.size(); ++i) {
+                                const auto id = "anova.row" + std::to_string(i);
+                                const auto &cells = anovaRows[i];
+                                u.column(id)
+                                    .width(c)
+                                    .gap(6)
+                                    .padding(0, 6)
+                                    .content([&] {
+                                        text(u, id + ".source", cells[0] + " · DF = " + cells[1], c,
+                                             24, 14);
+                                        const std::array<const char *, 4> names{
+                                            "平方和 SS", "均方 MS", "F 值", "P 值"};
+                                        for (int pair = 0; pair < 2; ++pair)
+                                            u.row(id + ".pair" + std::to_string(pair))
+                                                .width(c)
+                                                .gap(12)
+                                                .content([&] {
+                                                    for (int j = pair * 2; j < pair * 2 + 2; ++j)
+                                                        u.text(id + ".value" + std::to_string(j))
+                                                            .width((c - 12) / 2)
+                                                            .text(std::string(names[j]) + "  " +
+                                                                  cells[j + 2])
+                                                            .fontSize(16)
+                                                            .color(muted)
+                                                            .wrap()
+                                                            .maxWidth((c - 12) / 2)
+                                                            .build();
+                                                })
+                                                .build();
+                                        u.rect(id + ".line").size(c, 1).color(line).build();
+                                    })
+                                    .build();
+                            }
+                        }
+                        text(u, "anova.components", "方差分量", c, 30, 14);
+                        std::vector<std::vector<std::string>> rows;
+                        for (const auto *key :
+                             {"EV", "Operator", "OperatorPart", "AV", "GRR", "PV", "TV"}) {
+                            rows.push_back(
+                                {componentName(key),
+                                 native_ui::review_number(a["variance_components"][key], 6),
+                                 native_ui::review_number(a["stddev"][key], 6),
+                                 native_ui::review_number(a["contribution_pct"][key], 2)});
+                        }
+                        detailTable(u, "anova.components.table", c,
+                                    {"变异来源", "方差分量", "标准差 SD", "%贡献"}, rows);
+                    }
+                }
+            }
+        };
+        content
+            .content([&] {
+                if (!fixedPanel || state.resultTab == 0) {
+                    resultTab(u, c);
+                    return;
+                }
+                // Keep all table edges aligned. The scroll rail fits in the card's right inset.
+                constexpr float scrollWidth = 6, scrollGap = 4;
+                components::scrollView(u, "result.scroll")
+                    .size(c + scrollWidth + scrollGap, tableHeight)
+                    .offset(state.resultOffset)
+                    .theme(tokens())
+                    .scrollbarWidth(scrollWidth)
+                    .scrollbarGap(scrollGap)
+                    .reserveScrollbar()
+                    .onChange([](float offset) { state.resultOffset = offset; })
+                    .content([&](Ui &v, float width, float) { resultTab(v, width); })
+                    .build();
+            })
+            .build();
+        if (paginated) {
+            u.row("preview.pagination")
+                .size(c, previewPaginationHeight)
+                .gap(8)
+                .justifyContent(eui::Align::END)
+                .content([&] {
+                    button(
+                        u, "prevcols", "上一组", 88,
+                        [] {
+                            if (state.previewPage > 0)
+                                --state.previewPage;
+                        },
+                        false, state.previewPage == 0, previewPaginationHeight);
+                    button(
+                        u, "nextcols", "下一组", 88,
+                        [lastPage = columns.pages - 1] {
+                            if (state.previewPage < lastPage)
+                                ++state.previewPage;
+                        },
+                        false, state.previewPage == columns.pages - 1, previewPaginationHeight);
+                })
+                .build();
+        }
+    });
+}
+void safe(std::function<void()> fn) {
+    try {
+        fn();
+    } catch (const std::exception &e) {
+        state.message = e.what();
+        state.feedback("操作失败，请查看日志", state.message, Level::Error);
+    }
+}
+void saveSettings() {
+    safe([] {
+        auto cfg = native_ui::to_config(state.draft);
+        const auto path = msa::config_path();
+        msa::save_config(cfg, path);
+        state.configDirty = false;
+        state.message.clear();
+        state.feedback("配置已保存", "配置已保存：" + path.u8string());
+    });
+}
+void exportData() {
+    if (!state.validResult())
+        return;
+    try {
+        const auto snapshot = *state.result;
+        const auto output =
+            msa::export_configured_csv(snapshot, native_ui::output_config(state.draft),
+                                       std::chrono::system_clock::now(), {}, msa::config_path());
+        state.status = Status::Success;
+        state.message.clear();
+        state.feedback("CSV 已导出", "CSV 已导出并复验：" + output.u8string());
+    } catch (const std::exception &e) {
+        state.status = Status::ExportError;
+        state.message = std::string("导出失败：") + e.what();
+        state.feedback("CSV 导出失败", state.message, Level::Error);
+    }
+}
+void paragraph(Ui &, const std::string &, const std::string &, float, const char *, float);
+void methodSettings(Ui &u, float w) {
+    section(u, "analysis", "分析方法", w, [&](float c) {
+        choiceChips(u, "analysis.method", {"Xbar-R（均值极差法）", "ANOVA（方差分析法）"},
+                    state.draft.analysisMethod, c, [](int i) {
+                        if (state.busy() || state.draft.analysisMethod == i)
+                            return;
+                        state.draft.analysisMethod = i;
+                        state.resultTab = 0;
+                        state.changed();
+                    });
+        if (!state.draft.analysisMethod)
+            paragraph(
+                u, "analysis.xbarr.note",
+                "用均值和极差估计重复性、再现性和部件间变异。交互项可用 ANOVA 分析。",
+                c, muted, 17.5f);
+        if (state.draft.analysisMethod) {
+            const float modeWidth = (c - 12) * .56f;
+            u.row("analysis.interaction.values")
+                .width(c)
+                .gap(12)
+                .content([&] {
+                    u.column("analysis.interaction.field")
+                        .width(modeWidth)
+                        .gap(5)
+                        .content([&] {
+                            text(u, "analysis.interaction.label", "部件 × 操作员交互项", modeWidth,
+                                 21, 13);
+                            combo(u, "analysis.interaction",
+                                  {"按 P 值判断", "保留交互项", "并入重复性误差"},
+                                  state.draft.interactionMode, modeWidth, [](int i) {
+                                      if (state.busy() || !state.draft.analysisMethod ||
+                                          state.draft.interactionMode == i)
+                                          return;
+                                      state.draft.interactionMode = i;
+                                      state.changed();
+                                  });
+                        })
+                        .build();
+                    const float alphaWidth = c - modeWidth - 12;
+                    u.column("analysis.alpha.control")
+                        .width(alphaWidth)
+                        .disabled(state.draft.interactionMode != 0)
+                        .content([&] {
+                            field(u, "analysis.alpha", "显著性水平 α", state.draft.interactionAlpha,
+                                  alphaWidth, "0 < α < 1");
+                        })
+                        .build();
+                })
+                .build();
+            paragraph(u, "analysis.note",
+                      state.draft.interactionMode == 0
+                          ? "P 值小于 α 时保留交互项，并计入再现性（AV）。否则将其并入重复性误差。"
+                          : "选择「按 P 值判断」时可设置显著性水平。",
+                      c, muted, 17.5f);
+        }
+    });
+}
+void designSettings(Ui &u, float w) {
+    section(u, "design", "研究设计", w, [&](float c) {
+        const float f = (c - 24) / 3;
+        u.row("designrow")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                u.column("ocol")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "olabel", "操作员数", f, 21, 13);
+                        segments(u, "operators", {"2 人", "3 人"},
+                                 state.draft.operators == "2" ? 0 : 1, f, [](int i) {
+                                     if (state.busy() ||
+                                         state.draft.operators == std::to_string(i + 2))
+                                         return;
+                                     state.draft.operators = std::to_string(i + 2);
+                                     state.changed();
+                                 });
+                    })
+                    .build();
+                u.column("rcol")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "rlabel", "重复测量次数", f, 21, 13);
+                        segments(u, "replicates", {"2 次", "3 次"},
+                                 state.draft.replicates == "2" ? 0 : 1, f, [](int i) {
+                                     if (state.busy() ||
+                                         state.draft.replicates == std::to_string(i + 2))
+                                         return;
+                                     state.draft.replicates = std::to_string(i + 2);
+                                     state.changed();
+                                 });
+                    })
+                    .build();
+                u.column("pcol")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "plabel", "部件数", f, 21, 13);
+                        stepper(u, "parts", state.draft.parts, f, 5, 10);
+                    })
+                    .build();
+            })
+            .build();
+        const int records = std::atoi(state.draft.operators.c_str()) *
+                            std::atoi(state.draft.replicates.c_str()) *
+                            std::atoi(state.draft.parts.c_str());
+        u.row("design.summary")
+            .width(c)
+            .gap(12)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                paragraph(u, "design.note", "每位操作员按相同次数测量所有部件。", c - 148,
+                          muted, 17.5f);
+                badge(u, "design.records", "共 " + std::to_string(records) + " 次测量", 136);
+            })
+            .build();
+    });
+}
+void generationRules(Ui &u, float w) {
+    section(u, "generation.rules", "生成规则", w, [&](float c) {
+        const float f = (c - 16) / 2;
+        u.row("generation.rules.values")
+            .width(c)
+            .gap(16)
+            .content([&] {
+                u.column("prioritycol")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "prioritylabel", "生成优先级", f, 21, 13);
+                        segments(u, "priority", {"中心优先", "指标优先"}, state.draft.priority, f,
+                                 [](int i) {
+                                     if (state.busy() || state.draft.priority == i)
+                                         return;
+                                     state.draft.priority = i;
+                                     state.changed();
+                                 });
+                    })
+                    .build();
+                u.column("strictrow")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "compliance.label.heading", "生成范围", f, 21, 13);
+                        toggle(u, "compliance", "规格内生成", state.draft.compliance == 0, f,
+                               [](bool strict) {
+                                   const int mode = strict ? 0 : 1;
+                                   if (state.busy() || state.draft.compliance == mode)
+                                       return;
+                                   state.draft.compliance = mode;
+                                   state.changed();
+                               });
+                    })
+                    .build();
+            })
+            .build();
+        u.row("generation.rules.hints")
+            .width(c)
+            .gap(16)
+            .content([&] {
+                paragraph(u, "priority.note",
+                          state.draft.priority == 0 && !native_ui::trim(state.draft.center).empty()
+                              ? "优先接近设定的数据中心。"
+                          : state.draft.priority == 0 ? "在「数据」页填写数据中心后生效。"
+                                                      : "优先接近设定的目标指标。",
+                          f, muted, 17.5f);
+                paragraph(u, "stricthint",
+                          state.draft.compliance == 0 ? "在「数据」页填写至少一侧规格限。"
+                                                      : "允许测量值超出规格限。",
+                          f, muted, 17.5f);
+            })
+            .build();
+    });
+}
+void evaluationSettings(Ui &u, float w) {
+    section(u, "analysis.evaluation", "评价口径", w, [&](float c) {
+        u.row("analysis.evaluation.values")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                field(u, "multiplier", "研究变异倍数 k", state.draft.multiplier, (c - 12) / 2,
+                      "默认 6");
+                field(u, "analysis.tolerance", "分析容差", state.draft.analysisTolerance,
+                      (c - 12) / 2, "可选，用于 P/T");
+            })
+            .build();
+        paragraph(u, "analysis.tolerance.note",
+                  "研究变异 = k × 标准差。分析容差用于计算 P/T，留空时按规格限计算，单侧规格使用半研究变异。",
+                  c, muted, 17.5f);
+    });
+}
+void processSettings(Ui &u, float w) {
+    section(u, "analysis.process", "历史过程参考", w, [&](float c) {
+        const float f = (c - 24) * .29f, sourceWidth = c - 24 - 2 * f;
+        u.row("analysis.historical.values")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                field(u, "analysis.historical.sd", "历史标准差（1σ）", state.draft.historicalSd,
+                      f, "选填，须大于 0");
+                field(u, "analysis.historical.mean", "历史均值", state.draft.historicalMean, f,
+                      "默认测量均值");
+                u.column("analysis.process.field")
+                    .width(sourceWidth)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "analysis.process.label", "过程变异估计来源", sourceWidth, 21, 13);
+                        combo(u, "analysis.process.source", {"优先使用历史标准差", "按本次研究估计"},
+                              state.draft.processVariation, sourceWidth, [](int i) {
+                                  if (state.busy() || state.draft.processVariation == i)
+                                      return;
+                                  state.draft.processVariation = i;
+                                  state.changed();
+                              });
+                    })
+                    .build();
+            })
+            .build();
+        paragraph(u, "analysis.process.note",
+                  "历史标准差留空或小于量具 R&R 的标准差时，采用本次研究的估计。历史均值用于误分类概率和单侧规格评价。",
+                  c, muted, 17.5f);
+    });
+}
+void generationSettings(Ui &u, float w) {
+    section(u, "generation", "生成参数", w, [&](float c) {
+        const float f = (c - 12) / 2;
+        u.row("precisionrow")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                u.column("decimals.field")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "decimals.label", "小数位数", f, 21, 13);
+                        stepper(u, "decimals", state.draft.decimals, f, 0, 10);
+                    })
+                    .build();
+                u.column("scalecol")
+                    .width(f)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "scalelabel", "生成尺度", f, 21, 13);
+                        combo(u, "scale", {"自动确定", "参考总变异"}, state.draft.scale, f,
+                              [](int i) {
+                                  if (state.busy() || state.draft.scale == i)
+                                      return;
+                                  state.draft.scale = i;
+                                  state.changed();
+                              });
+                    })
+                    .build();
+            })
+            .build();
+        const bool showReference = state.draft.scale == 1 ||
+                                   native_ui::trim(state.draft.lsl).empty() ||
+                                   native_ui::trim(state.draft.usl).empty();
+        u.row("generation.references")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                if (showReference)
+                    field(u, "reference", "参考总变异标准差（TV_SD）", state.draft.reference, f,
+                          "留空时使用历史标准差");
+                field(u, "seed", "数据生成种子", state.draft.seed, showReference ? f : c,
+                      "留空则自动选取");
+            })
+            .build();
+        paragraph(u, "generation.note",
+                  "小数位数用于生成测量值和导出 CSV。按相同参数生成时，固定种子可复现数据。",
+                  c, muted, 17.5f);
+    });
+}
+void statisticsSettings(Ui &u, float w) {
+    section(u, "analysis.statistics", "统计推断", w, [&](float c) {
+        const bool anova = state.draft.analysisMethod == 1;
+        const bool hasSpec =
+            !native_ui::trim(state.draft.lsl).empty() || !native_ui::trim(state.draft.usl).empty();
+        const float f = (c - 12) / 2;
+        u.row("analysis.statistics.switches")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                u.column("analysis.misclassification.control")
+                    .width(f)
+                    .disabled(!anova || !hasSpec)
+                    .content([&] {
+                        toggle(
+                            u, "analysis.misclassification", "计算误分类概率",
+                            state.draft.misclassification, f,
+                            [](bool enabled) {
+                                if (state.busy() || state.draft.analysisMethod != 1 ||
+                                    (native_ui::trim(state.draft.lsl).empty() &&
+                                     native_ui::trim(state.draft.usl).empty()) ||
+                                    state.draft.misclassification == enabled)
+                                    return;
+                                state.draft.misclassification = enabled;
+                                state.changed();
+                            },
+                            !anova || !hasSpec);
+                    })
+                    .build();
+                u.column("analysis.confidence.control")
+                    .width(f)
+                    .disabled(!anova)
+                    .content([&] {
+                        toggle(
+                            u, "analysis.confidence", "计算置信区间", state.draft.confidenceEnabled,
+                            f, [](bool enabled) {
+                                if (state.busy() || state.draft.analysisMethod != 1 ||
+                                    state.draft.confidenceEnabled == enabled)
+                                    return;
+                                state.draft.confidenceEnabled = enabled;
+                                state.changed();
+                            },
+                            !anova);
+                    })
+                    .build();
+            })
+            .build();
+        if (!anova)
+            paragraph(u, "statistics.note", "切换到 ANOVA 后可设置误分类概率和置信区间。", c,
+                      muted, 17.5f);
+        else
+            u.row("analysis.statistics.hints")
+                .width(c)
+                .gap(12)
+                .content([&] {
+                    paragraph(u, "statistics.note",
+                              hasSpec ? "估计测量判定与实际合格状态不一致的概率。"
+                                      : "在「数据」页填写规格限后可用。",
+                              f, muted, 17.5f);
+                    if (!state.draft.confidenceEnabled)
+                        paragraph(u, "analysis.confidence.note", "开启后可设置信水平和估计方法。",
+                                  f, muted, 17.5f);
+                })
+                .build();
+        if (state.draft.confidenceEnabled) {
+            u.column("analysis.confidence.options")
+                .width(c)
+                .gap(13)
+                .disabled(!anova)
+                .content([&] {
+                    constexpr float gap = 12;
+                    const bool inlineBounds = c >= 500;
+                    const float boundWidth = inlineBounds ? std::max(204.f, c * .39f) : c;
+                    const float levelWidth = inlineBounds ? 88.f : (c - gap) * .4f;
+                    const float methodWidth =
+                        c - levelWidth - gap - (inlineBounds ? boundWidth + gap : 0.f);
+                    const auto boundField = [&] {
+                        u.column("analysis.confidence.bound.field")
+                            .width(boundWidth)
+                            .gap(5)
+                            .content([&] {
+                                text(u, "analysis.confidence.bound.label", "置信限类型", boundWidth,
+                                     21, 13);
+                                segments(u, "analysis.confidence.bound",
+                                         {"双侧区间", "单侧下限", "单侧上限"},
+                                         state.draft.confidenceBound, boundWidth, [](int i) {
+                                             if (state.busy() || state.draft.analysisMethod != 1 ||
+                                                 !state.draft.confidenceEnabled ||
+                                                 state.draft.confidenceBound == i)
+                                                 return;
+                                             state.draft.confidenceBound = i;
+                                             state.changed();
+                                         });
+                            })
+                            .build();
+                    };
+                    u.row("analysis.confidence.values")
+                        .width(c)
+                        .gap(gap)
+                        .content([&] {
+                            u.column("analysis.confidence.method.field")
+                                .width(methodWidth)
+                                .gap(5)
+                                .content([&] {
+                                    text(u, "analysis.confidence.method.label", "置信区间估计方法",
+                                         methodWidth, 21, 13);
+                                    combo(u, "analysis.confidence.method",
+                                          {"MLS（Minitab）", "Satterthwaite（JMP）"},
+                                          state.draft.confidenceMethod, methodWidth, [](int i) {
+                                              if (state.busy() || state.draft.analysisMethod != 1 ||
+                                                  !state.draft.confidenceEnabled ||
+                                                  state.draft.confidenceMethod == i)
+                                                  return;
+                                              state.draft.confidenceMethod = i;
+                                              state.changed();
+                                          });
+                                })
+                                .build();
+                            field(u, "analysis.confidence.level", "置信水平（%）",
+                                  state.draft.confidenceLevel, levelWidth, "0.01～99.99");
+                            if (inlineBounds)
+                                boundField();
+                        })
+                        .build();
+                    if (!inlineBounds)
+                        boundField();
+                })
+                .build();
+        }
+    });
+}
+void runOrderChoice(Ui &u, const std::string &id, const std::string &label, bool value, bool radio,
+                    bool disabled, float w, std::function<void(bool)> change) {
+    u.column(id + ".control")
+        .width(w)
+        .disabled(disabled)
+        .content([&] {
+            if (!radio) {
+                checkOption(u, id, label, value, w, change, disabled);
+                return;
+            }
+            auto style = components::RadioStyle(tokens());
+            if (disabled) {
+                style.text = eui::Color(muted);
+                style.selected = eui::Color("#91A7C9");
+                style.outerHover = style.outer;
+                style.rowHover = style.rowPressed = eui::Color("#00000000");
+            }
+            const auto select = [disabled, change](bool next) {
+                if (!disabled)
+                    change(next);
+            };
+            components::radio(u, id)
+                .size(w, 36)
+                .selected(value)
+                .text(label)
+                .fontSize(18)
+                .dotSize(18)
+                .theme(tokens())
+                .style(style)
+                .transition(transition(.14f))
+                .onChange(select)
+                .build();
+            keyboard(u, id + ".hit", [select, disabled](const eui::KeyEvent &key) {
+                if (disabled || !activate(key))
+                    return false;
+                select(true);
+                return true;
+            });
+            if (auto *hit = u.find(id + ".hit"))
+                hit->focusable = !disabled;
+            if (!state.motion)
+                if (auto *mark = u.find(id + ".inner"))
+                    mark->transition.durationSeconds = 0;
+        })
+        .build();
+}
+void searchSettings(Ui &u, float w, float elapsed = reveal(state.advancedChanged)) {
+    section(u, "advanced", "约束与搜索", w, [&](float c) {
+        const float f = (c - 12) / 2;
+        u.row("target.defaults")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                field(u, "percenterror", "百分比误差（百分点）", state.draft.percentError, f);
+                field(u, "ndcerror", "ndc 允许误差", state.draft.ndcError, f);
+            })
+            .build();
+        paragraph(u, "target.defaults.note",
+                  "目标值未单独填写误差时，使用这里的默认值。ndc 的允许误差须为整数。",
+                  c, muted, 17.5f);
+        const float expanded =
+            state.advancedFrom + ((state.advanced ? 1.0f : 0.0f) - state.advancedFrom) * elapsed;
+        u.row("advanced.header")
+            .width(c)
+            .gap(12)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                button(
+                    u, "advancedtoggle", state.advanced ? "收起搜索预算  ▴" : "展开搜索预算  ▾", 156,
+                    [expanded] {
+                        if (state.busy())
+                            return;
+                        state.advancedFrom = expanded;
+                        state.advanced = !state.advanced;
+                        state.advancedChanged = Clock::now();
+                    },
+                    false, state.busy(), 36);
+                paragraph(u, "advanced.note", "可设置候选数据集上限和搜索时限。", c - 168, muted,
+                          17.5f);
+            })
+            .build();
+        if (expanded > 0 || state.advanced) {
+            constexpr float fieldRowHeight = 66;
+            auto panel = u.column("advanced.reveal")
+                             .size(c, fieldRowHeight * expanded)
+                             .clip()
+                             .disabled(!state.advanced || expanded < .999f);
+            if (elapsed < 1)
+                panel.onFrame([](float) {});
+            panel
+                .content([&] {
+                    u.row("advancedrow")
+                        .width(c)
+                        .gap(12)
+                        .content([&] {
+                            field(u, "attempts", "候选数据集上限", state.draft.attempts, f);
+                            field(u, "timeout", "搜索时限（秒）", state.draft.timeout, f);
+                        })
+                        .build();
+                })
+                .build();
+        }
+    });
+}
+void exportSettings(Ui &u, float w) {
+    section(u, "output", "CSV 格式", w, [&](float c) {
+        const bool wideFormat = state.draft.csvFormat == 0;
+        u.column("csvformat.field")
+            .width(c)
+            .gap(5)
+            .content([&] {
+                text(u, "csvformat.label", "导出格式", c, 21, 13);
+                combo(u, "csvformat", {"默认（宽表）", "Minitab", "SPSS", "JMP 19", "Origin", "MATLAB"},
+                      state.draft.csvFormat, c, [](int i) {
+                          if (state.busy() || state.draft.csvFormat == i)
+                              return;
+                          state.draft.csvFormat = i;
+                          state.outputChanged();
+                      });
+            })
+            .build();
+        paragraph(u, "outputformat",
+                  wideFormat
+                      ? "宽表按部件分列。每行包含一位操作员在同一轮测得的全部数值。"
+                      : "长表每行记录一次测量，按实际运行顺序排列。五种软件共用此布局。",
+                  c, muted, 17.5f);
+        const std::string columns = std::string(state.draft.storeStandardOrder ? "StdOrder  ·  " : "") +
+                                    "Operator  ·  Part  ·  Trial  ·  Measurement";
+        if (!wideFormat)
+            paragraph(u, "output.columnNames", columns, c, ink, 17.5f);
+        u.rect("output.divider").size(c, 1).color(line).build();
+        runOrderChoice(u, "runorder.standard", "保留标准运行序号（StdOrder）",
+                       state.draft.storeStandardOrder, false, wideFormat, c, [](bool checked) {
+                           if (state.busy() || state.draft.csvFormat == 0 ||
+                               state.draft.storeStandardOrder == checked)
+                               return;
+                           state.draft.storeStandardOrder = checked;
+                           state.outputChanged();
+                       });
+        paragraph(u, "runorder.standard.note",
+                  wideFormat ? "选择任一长表格式后可添加 StdOrder。"
+                             : "StdOrder 记录随机化前的序号，Trial 记录实际重复测量轮次。",
+                  c, muted, 17.5f);
+    });
+}
+void fileSettings(Ui &u, float w) {
+    section(u, "output.files", "文件保存", w, [&](float c) {
+        const auto directory = [&](float width) {
+            u.column("output.directory.field")
+                .width(width)
+                .gap(5)
+                .content([&] {
+                    text(u, "dirlabel", "输出目录", width, 21, 13);
+                    u.row("dirrow")
+                        .width(width)
+                        .gap(10)
+                        .content([&] {
+                            input(u, "directory", state.draft.directory, width - 106,
+                                  msa::config_path().parent_path().u8string(), true);
+                            button(u, "choosedirectory", "选择目录", 96, [] {
+                                if (state.busy())
+                                    return;
+                                safe([] {
+                                    if (auto p = platform::choose(false, true)) {
+                                        if (state.draft.directory == p->u8string())
+                                            return;
+                                        state.draft.directory = p->u8string();
+                                        state.outputChanged();
+                                    }
+                                });
+                            });
+                        })
+                        .build();
+                })
+                .build();
+        };
+        const auto filename = [&](float width) {
+            field(u, "filename", "CSV 文件名模板", state.draft.filename, width, "msa_data.csv", true);
+        };
+        const auto collision = [&](float width) {
+            u.column("output.collision.field")
+                .width(width)
+                .gap(5)
+                .content([&] {
+                    text(u, "collision.label", "同名文件处理", width, 21, 13);
+                    segments(u, "collision", {"追加序号", "覆盖文件"}, state.draft.existingFile,
+                             width, [](int i) {
+                                 if (state.busy() || state.draft.existingFile == i)
+                                     return;
+                                 state.draft.existingFile = i;
+                                 state.outputChanged();
+                             });
+                })
+                .build();
+        };
+        const auto note = [&](float width) {
+            paragraph(u, "silentoutput",
+                      state.draft.existingFile == 0
+                          ? "目录留空或填写相对路径时，以配置目录为基准。同名时追加序号。"
+                          : "目录留空或填写相对路径时，以配置目录为基准。同名时会替换原文件。",
+                      width, muted, 17.5f);
+        };
+        if (c >= 760) {
+            u.row("output.files.location")
+                .width(c)
+                .gap(20)
+                .content([&] {
+                    directory((c - 20) * .6f);
+                    filename((c - 20) * .4f);
+                })
+                .build();
+            u.row("output.files.policy")
+                .width(c)
+                .gap(20)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    collision(340);
+                    note(c - 360);
+                })
+                .build();
+        } else {
+            directory(c);
+            filename(c);
+            collision(c);
+            note(c);
+        }
+    });
+}
+void runOrderSettings(Ui &u, float w) {
+    section(u, "runorder", "运行顺序", w, [&](float c) {
+        const bool disabled = state.draft.csvFormat == 0;
+        const std::array<std::string, 3> names{"标准顺序", "全部随机化", "操作员内随机化"};
+        const std::array<float, 3> widths{c * .27f, c * .31f, c - 16 - c * .58f};
+        u.row("runorder.modes")
+            .width(c)
+            .gap(8)
+            .content([&] {
+                for (int i = 0; i < 3; ++i)
+                    runOrderChoice(u, "runorder.mode." + std::to_string(i), names[i],
+                                   state.draft.runMode == i, true, disabled, widths[i],
+                                   [i](bool selected) {
+                                       if (!selected || state.busy() || state.draft.csvFormat == 0 ||
+                                           state.draft.runMode == i)
+                                           return;
+                                       state.draft.runMode = i;
+                                       state.outputChanged();
+                                   });
+            })
+            .build();
+        paragraph(u, "runorder.explanation",
+                  disabled ? "请选择任一长表格式，以设置逐条测量的运行顺序。"
+                  : state.draft.runMode == 0 ? "依次按重复测量轮次、部件、操作员排列。"
+                  : state.draft.runMode == 1 ? "打乱所有测量记录，可跨轮次和操作员排列。"
+                                              : "每轮按操作员分组，各组独立打乱部件顺序。",
+                  c, muted, 17.5f);
+        u.rect("runorder.divider").size(c, 1).color(line).build();
+        u.row("runorder.values")
+            .width(c)
+            .gap(12)
+            .alignItems(eui::Align::END)
+            .content([&] {
+                constexpr float operatorsWidth = 204;
+                runOrderChoice(u, "runorder.operators", "随机化操作员顺序", state.draft.randomOperators,
+                               false, disabled || state.draft.runMode != 2, operatorsWidth,
+                               [](bool checked) {
+                                   if (state.busy() || state.draft.csvFormat == 0 ||
+                                       state.draft.runMode != 2 || state.draft.randomOperators == checked)
+                                       return;
+                                   state.draft.randomOperators = checked;
+                                   state.outputChanged();
+                               });
+                const float seedWidth = c - operatorsWidth - 12;
+                const bool seedDisabled = disabled || state.draft.runMode == 0;
+                u.column("runorder.seed.control")
+                    .width(seedWidth)
+                    .disabled(seedDisabled)
+                    .content([&] {
+                        field(u, "runorder.seed", "运行顺序种子", state.draft.runSeed, seedWidth,
+                              seedDisabled ? "随机化时可用" : "选填正整数，留空自动选取", true);
+                    })
+                    .build();
+            })
+            .build();
+        if (!disabled)
+            paragraph(u, "runorder.availability",
+                      state.draft.runMode == 0   ? "选择随机化后可填写种子，复现相同的运行顺序。"
+                      : state.draft.runMode == 1 ? "选择「操作员内随机化」后可单独打乱操作员顺序。"
+                                                 : "勾选后随机确定一次操作员顺序，各轮次沿用。",
+                      c, muted, 17.5f);
+    });
+}
+void pathSettings(Ui &u, float w) {
+    section(u, "configpath", "配置管理", w, [&](float c) {
+        const auto configPath = platform::compatibilityConfig();
+        std::error_code directoryError;
+        const bool directoryExists = std::filesystem::is_directory(configPath.parent_path(),
+                                                                    directoryError);
+        const auto location = [&](float width) {
+            u.column("configpath.location")
+                .width(width)
+                .gap(6)
+                .content([&] {
+                    paragraph(u, "configpathhint", "下次启动时读取此配置文件。", width,
+                              muted, 17.5f);
+                    u.stack("configpath.file")
+                        .width(width)
+                        .content([&] {
+                            u.rect("configpath.file.bg")
+                                .width(eui::SizeValue::fill())
+                                .height(eui::SizeValue::fill())
+                                .ignoreLayout()
+                                .color(surfaceSoft)
+                                .border(1, line)
+                                .radius(controlRadius)
+                                .build();
+                            u.column("configpath.file.body")
+                                .width(width)
+                                .padding(10, 8)
+                                .content([&] {
+                                    paragraph(u, "path", configPath.u8string(), width - 20, ink,
+                                              17.5f);
+                                })
+                                .build();
+                        })
+                        .build();
+                })
+                .build();
+        };
+        const auto actions = [&](float width) {
+            u.row("pathbuttons")
+                .width(width)
+                .gap(10)
+                .content([&] {
+                    const float bw = std::min(140.f, (width - 10) / 2);
+                    button(u, "copypath", "复制路径", bw, [configPath] {
+                        safe([&] {
+                            platform::clipboard(configPath.wstring());
+                            state.feedback("配置文件路径已复制");
+                        });
+                    });
+                    button(
+                        u, "opendir", "打开目录", bw,
+                        [configPath] {
+                            safe([&] { platform::openDirectory(configPath.parent_path()); });
+                        },
+                        false, !directoryExists);
+                })
+                .build();
+        };
+        if (c >= 760) {
+            u.row("configpath.row")
+                .width(c)
+                .gap(24)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    location(c - 314);
+                    actions(290);
+                })
+                .build();
+        } else {
+            location(c);
+            actions(c);
+        }
+        if (!directoryExists)
+            paragraph(u, "configpath.unavailable", "首次保存配置时会创建目录。", c,
+                      muted, 17.5f);
+    });
+}
+constexpr float optionsGridMinWidth = 1100;
+
+void pairedCards(Ui &u, const std::string &id, float w, const char *leftId,
+                 const std::function<void(Ui &, float)> &left, const char *rightId,
+                 const std::function<void(Ui &, float)> &right,
+                 float splitWidth = optionsGridMinWidth) {
+    if (w < splitWidth) {
+        left(u, w);
+        right(u, w);
+        return;
+    }
+    constexpr float gap = 20;
+    const float column = (w - gap) / 2;
+    Ui measure;
+    measure.begin(id + ".measure");
+    left(measure, column);
+    right(measure, column);
+    measure.end();
+    measure.layout(column, 0);
+    const float leftHeight = measure.find(leftId)->frame.height;
+    const float rightHeight = measure.find(rightId)->frame.height;
+    const float rowHeight = std::max(leftHeight, rightHeight);
+    const auto alignCard = [&](const char *bodyId, float naturalHeight) {
+        auto &body = *u.find(bodyId);
+        body.minLayoutHeight = rowHeight;
+        // Keep the title and first group aligned across the row.
+        if (body.children.size() <= 2)
+            return;
+        const float gaps = static_cast<float>(body.children.size() - 2);
+        const float extra = std::min(16.f, (rowHeight - naturalHeight) / gaps);
+        for (size_t i = 2; i < body.children.size(); ++i)
+            body.children[i]->margin.top += extra;
+    };
+    u.row(id)
+        .width(w)
+        .gap(gap)
+        .content([&] {
+            left(u, column);
+            right(u, column);
+            alignCard(leftId, leftHeight);
+            alignCard(rightId, rightHeight);
+        })
+        .build();
+}
+void config(Ui &u, float w, float disclosureProgress = reveal(state.advancedChanged)) {
+    if (state.optionsTab == 0) {
+        pairedCards(u, "options.study.definition", w, "design", designSettings, "generation.rules",
+                    generationRules);
+        pairedCards(
+            u, "options.study.generation", w, "generation", generationSettings, "advanced",
+            [disclosureProgress](Ui &v, float c) { searchSettings(v, c, disclosureProgress); });
+    } else if (state.optionsTab == 1) {
+        if (w >= optionsGridMinWidth) {
+            pairedCards(u, "options.analysis.method", w, "analysis", methodSettings,
+                        "analysis.process", processSettings);
+            pairedCards(u, "options.analysis.evaluation", w, "analysis.evaluation",
+                        evaluationSettings, "analysis.statistics", statisticsSettings);
+        } else {
+            methodSettings(u, w);
+            evaluationSettings(u, w);
+            processSettings(u, w);
+            statisticsSettings(u, w);
+        }
+    } else if (state.optionsTab == 2) {
+        pairedCards(u, "options.output", w, "output", exportSettings, "runorder", runOrderSettings);
+        fileSettings(u, w);
+    }
+    pathSettings(u, w);
+}
+void optionsPage(Ui &u, float w, float h) {
+    const float navigationWidth = w - tokens().metrics.control.scrollbar - scrollGutter;
+    constexpr float titleWidth = 66;
+    const float disclosureProgress = reveal(state.advancedChanged);
+    u.column("options.page")
+        .size(w, h)
+        .gap(sectionGap)
+        .content([&] {
+            navigationCard(u, "options.navigation", "options.intro", navigationWidth, [&] {
+                text(u, "options.title", "选项", titleWidth, 38, 16);
+                const float tabsWidth =
+                    navigationWidth - titleWidth - secondaryNavGap - 2 * secondaryNavInset;
+                tabs(
+                    u, "options.tabs", {"研究", "分析", "导出"}, state.optionsTab,
+                    std::min(tabsWidth, 378.f),
+                    [](int i) {
+                        state.optionsTab = i;
+                        state.configOffset = 0;
+                        menu.id.clear();
+                    },
+                    38);
+            });
+            components::scrollView(u, "configscroll")
+                .size(w, h - secondaryNavHeight - sectionGap)
+                .offset(state.configOffset)
+                .theme(tokens())
+                .scrollbarGap(scrollGutter)
+                .reserveScrollbar()
+                .transition(transition(.12f))
+                .onChange([](float offset) {
+                    state.configOffset = offset;
+                    menu.id.clear();
+                })
+                .content([disclosureProgress](Ui &v, float cw, float) {
+                    v.column("configcontent")
+                        .width(cw)
+                        .gap(16)
+                        .padding(0, 0, 0, 12)
+                        .disabled(state.busy())
+                        .content([&] {
+                            notice(v, cw);
+                            config(v, cw, disclosureProgress);
+                        })
+                        .build();
+                })
+                .build();
+        })
+        .build();
+}
+void menuOverlay(Ui &u, const eui::Screen &screen) {
+    if (menu.id.empty())
+        return;
+    if (menu.items.empty() || screen.width <= 24 || screen.height <= 24) {
+        menu.id.clear();
+        return;
+    }
+    constexpr float rowHeight = 38, inset = 4, maxHeight = 388;
+    const float contentHeight = float(menu.items.size()) * rowHeight;
+    float h = std::min({contentHeight + inset * 2, maxHeight, screen.height - 16});
+    const float w = std::min(std::max(138.0f, menu.anchor.width), screen.width - 16);
+    const float below = std::max(0.f, screen.height - 8 - menu.anchor.y - menu.anchor.height - 4);
+    const float above = std::max(0.f, menu.anchor.y - 12);
+    const bool upward = h > below && above > below;
+    const float available = upward ? above : below;
+    if (available >= rowHeight + inset * 2)
+        h = std::min(h, available);
+    float x = std::clamp(menu.anchor.x, 8.0f, std::max(8.0f, screen.width - w - 8)),
+          y = upward ? menu.anchor.y - h - 4 : menu.anchor.y + menu.anchor.height + 4;
+    y = std::clamp(y, 8.f, std::max(8.f, screen.height - h - 8));
+    const float viewport = h - inset * 2;
+    if (std::fabs(menu.viewportHeight - viewport) > .01f)
+        menu.revealHighlighted = true;
+    menu.viewportHeight = viewport;
+    menu.highlighted = std::clamp(menu.highlighted, 0, int(menu.items.size()) - 1);
+    const float maximum = std::max(0.f, contentHeight - viewport);
+    menu.offset = std::clamp(menu.offset, 0.f, maximum);
+    if (menu.revealHighlighted) {
+        const float top = menu.highlighted * rowHeight;
+        if (top < menu.offset)
+            menu.offset = top;
+        else if (top + rowHeight > menu.offset + viewport)
+            menu.offset = top + rowHeight - viewport;
+        menu.offset = std::clamp(menu.offset, 0.f, maximum);
+        menu.revealHighlighted = false;
+    }
+    const auto owner = menu.id;
+    u.rect("menubackdrop")
+        .size(screen.width, screen.height)
+        .color("#00000000")
+        .zIndex(1000)
+        .preserveFocusOnPress()
+        .onClick([] { menu.id.clear(); })
+        .build();
+    u.stack("menubox")
+        .position(x, y)
+        .size(w, h)
+        .zIndex(1001)
+        .content([&] {
+            u.rect("menubg")
+                .size(w, h)
+                .color(surface)
+                .radius(controlRadius)
+                .border(1, line)
+                .shadow(20, 0, 6, "#182C4526")
+                .build();
+            components::scrollView(u, "menuoverlay")
+                .position(inset, inset)
+                .size(w - inset * 2, viewport)
+                .offset(menu.offset)
+                .step(rowHeight)
+                .scrollbarWidth(8)
+                .scrollbarGap(4)
+                .theme(tokens())
+                .zIndex(1002)
+                .onChange([owner](float next) {
+                    if (menu.id == owner) {
+                        menu.offset = next;
+                        menu.revealHighlighted = false;
+                    }
+                })
+                .content([owner](Ui &v, float width, float) {
+                    for (int i = 0; i < int(menu.items.size()); ++i) {
+                        std::string id = "menuitem" + std::to_string(i);
+                        v.stack(id + ".wrap")
+                            .size(width, 38)
+                            .content([&] {
+                                v.rect(id)
+                                    .size(width, 38)
+                                    .states(i == menu.highlighted ? blueWash : surface,
+                                            i == menu.highlighted ? blueWashActive : surfaceHover,
+                                            i == menu.highlighted ? blueWashActive : surfacePressed)
+                                    .radius(6)
+                                    .transition(transition(.12f))
+                                    .preserveFocusOnPress()
+                                    .onClick([i, owner] {
+                                        if (menu.id != owner || i >= int(menu.items.size()))
+                                            return;
+                                        auto fn = menu.select;
+                                        menu.id.clear();
+                                        if (fn)
+                                            fn(i);
+                                    })
+                                    .build();
+                                v.text(id + ".text")
+                                    .position(12, 0)
+                                    .size(std::max(1.f, width - 24), 38)
+                                    .text(menu.items[i])
+                                    .fontSize(controlFont)
+                                    .color(i == menu.highlighted ? blue : ink)
+                                    .verticalAlign(eui::VerticalAlign::Center)
+                                    .clip()
+                                    .build();
+                            })
+                            .build();
+                    }
+                })
+                .build();
+            // 拖动菜单滚动条后仍让方向键作用于原下拉框。
+            for (const auto *id : {"menuoverlay", "menuoverlay.scroll.track",
+                                   "menuoverlay.scroll.thumb"})
+                if (auto *node = u.find(id))
+                    node->preserveFocusOnPress = true;
+        })
+        .build();
+}
+void paragraph(Ui &u, const std::string &id, const std::string &content, float w,
+               const char *color = muted, float fontSize = 19) {
+    u.text(id).width(w).text(content).wrap().maxWidth(w).fontSize(fontSize).color(color).build();
+}
+void helpText(Ui &u, const std::string &id, const std::string &copy, float w,
+              const char *color = ink) {
+    u.text(id)
+        .width(w)
+        .text(copy)
+        .wrap()
+        .maxWidth(w)
+        .fontSize(19)
+        .lineHeight(27)
+        .color(color)
+        .build();
+}
+void copyFilenameVariable(const std::string &token) {
+    try {
+        platform::clipboard(platform::wide(token));
+        state.hint("已复制 " + token);
+    } catch (const std::exception &error) {
+        state.feedback("复制失败，请重试", error.what(), Level::Error);
+    }
+}
+void filenameVariableHelp(Ui &u, const msa::FilenameVariable &variable, float w) {
+    const auto id = std::string("help.variable.") + variable.name;
+    const auto tokenWidth = [](const std::string &token) {
+        float width = 24;
+        for (const unsigned char c : token)
+            if ((c & 0xC0) != 0x80)
+                width += c < 0x80 ? 10.f : 18.f;
+        return width;
+    };
+    const auto name = std::string("[") + variable.name + "]";
+    const auto alias = *variable.alias ? "[" + std::string(variable.alias) + "]" : std::string{};
+    const float nameWidth = tokenWidth(name), aliasWidth = alias.empty() ? 0 : tokenWidth(alias);
+    const bool wide = w >= 760;
+    const float tokenColumn = wide ? 312.f : 160.f;
+    const float descriptionWidth = w - tokenColumn - 12;
+    constexpr float exampleWidth = 206;
+    const auto description = [&](float width) {
+        helpText(u, id + ".description", variable.description, width);
+    };
+    const auto example = [&](float width) {
+        helpText(u, id + ".example", std::string("示例 ") + variable.example, width, muted);
+    };
+    u.row(id)
+        .width(w)
+        .gap(12)
+        .alignItems(eui::Align::CENTER)
+        .content([&] {
+            (wide ? u.row(id + ".tokens") : u.column(id + ".tokens"))
+                .width(tokenColumn)
+                .gap(wide ? 8.f : 5.f)
+                .content([&] {
+                    button(
+                        u, id + ".copy", name, nameWidth, [name] { copyFilenameVariable(name); },
+                        false, false, 32);
+                    if (!alias.empty())
+                        button(
+                            u, id + ".alias", alias, aliasWidth,
+                            [alias] { copyFilenameVariable(alias); }, false, false, 32);
+                })
+                .build();
+            if (wide) {
+                description(descriptionWidth - exampleWidth - 12);
+                example(exampleWidth);
+            } else {
+                u.column(id + ".detail")
+                    .width(descriptionWidth)
+                    .content([&] {
+                        description(descriptionWidth);
+                        example(descriptionWidth);
+                    })
+                    .build();
+            }
+        })
+        .build();
+}
+std::string levelName(Level level) {
+    return level == Level::Error ? "错误" : level == Level::Warning ? "警告" : "信息";
+}
+constexpr float dataCardSpacing = sectionGap;
+
+float dataResultContentHeight(float left, float right) {
+    // Use the input cards' measured height at this width as the desktop baseline.
+    Ui measure;
+    measure.begin("data.column.measure");
+    measure.row("columns")
+        .gap(16)
+        .content([&] {
+            measure.column("form")
+                .width(left)
+                .gap(dataCardSpacing)
+                .content([&] { inputs(measure, left); })
+                .build();
+            studySummary(measure, right);
+        })
+        .build();
+    measure.end();
+    measure.layout(left + right + 16, 0);
+    return measure.find("form")->frame.height - measure.find("summary.card")->frame.height -
+           dataCardSpacing - resultFixedHeight;
+}
+
+void dataPage(Ui &u, float w, float h) {
+    // ScrollView measures and builds its content at the same width with the reserved scrollbar.
+    std::optional<float> resultHeight;
+    components::scrollView(u, "generatescroll")
+        .size(w, h)
+        .offset(state.generateOffset)
+        .theme(tokens())
+        .scrollbarGap(scrollGutter)
+        .reserveScrollbar()
+        .onChange([](float offset) {
+            state.generateOffset = offset;
+            menu.id.clear();
+        })
+        .content([&resultHeight](Ui &v, float cw, float) {
+            v.column("generationcontent")
+                .width(cw)
+                .gap(dataCardSpacing)
+                .padding(0, 0, 0, 10)
+                .content([&] {
+                    notice(v, cw);
+                    if (cw >= 1080) {
+                        const float left = std::clamp(cw * .38f, 460.f, 500.f),
+                                    right = cw - left - 16;
+                        if (!resultHeight)
+                            resultHeight = dataResultContentHeight(left, right);
+                        v.row("split")
+                            .width(cw)
+                            .gap(16)
+                            .content([&] {
+                                v.column("inputcolumn")
+                                    .width(left)
+                                    .gap(dataCardSpacing)
+                                    .disabled(state.busy())
+                                    .content([&] { inputs(v, left); })
+                                    .build();
+                                v.column("resultcolumn")
+                                    .width(right)
+                                    .gap(dataCardSpacing)
+                                    .content([&] { results(v, right, true, *resultHeight); })
+                                    .build();
+                            })
+                            .build();
+                    } else {
+                        studySummary(v, cw);
+                        v.column("inputcolumn")
+                            .width(cw)
+                            .gap(dataCardSpacing)
+                            .disabled(state.busy())
+                            .content([&] { inputs(v, cw); })
+                            .build();
+                        results(v, cw, false);
+                    }
+                })
+                .build();
+        })
+        .build();
+}
+constexpr float compactLogsWidth = 880, narrowLogsWidth = 520, logVerticalInset = 12,
+                logTitleHeight = 46, logToolbarGap = 8, logTableInset = 12,
+                logMinimumRowsHeight = 72;
+
+float logToolsHeight(float w) {
+    return w < narrowLogsWidth ? 2 * controlHeight + logToolbarGap : controlHeight;
+}
+
+float logHeaderHeight(float w) {
+    return logVerticalInset * 2 + logTitleHeight +
+           (w < compactLogsWidth ? logToolbarGap + logToolsHeight(w) : 0.f);
+}
+
+float minimumLogPanelHeight(float w) {
+    return logHeaderHeight(w) + sectionGap + logTableInset * 2 + resultTableHeaderHeight +
+           logMinimumRowsHeight;
+}
+
+void logsPanel(Ui &u, float w, float h) {
+    const auto count = [](Level level) {
+        return std::count_if(state.logs.begin(), state.logs.end(),
+                             [level](const LogEntry &entry) { return entry.level == level; });
+    };
+    const auto matches = [](const LogEntry &entry) {
+        return state.logFilter == 0 ||
+               (state.logFilter == 1 ? entry.level == Level::Warning : entry.level == Level::Error);
+    };
+    const auto shown = std::count_if(state.logs.begin(), state.logs.end(), matches);
+    const std::vector<std::string> filters{"全部 " + std::to_string(state.logs.size()),
+                                           "警告 " + std::to_string(count(Level::Warning)),
+                                           "错误 " + std::to_string(count(Level::Error))};
+    const auto copy = [matches] {
+        safe([matches] {
+            std::string content;
+            for (const auto &entry : state.logs)
+                if (matches(entry))
+                    content +=
+                        entry.time + " [" + levelName(entry.level) + "] " + entry.message + "\r\n";
+            if (content.empty())
+                return;
+            platform::clipboard(platform::wide(content));
+            state.logsCopied = true;
+            state.hint("已复制当前显示的日志");
+        });
+    };
+
+    const bool compact = w < compactLogsWidth;
+    constexpr float inset = 16;
+    constexpr float panelGap = sectionGap;
+    const float toolsHeight = logToolsHeight(w), headerHeight = logHeaderHeight(w);
+    const float controlsWidth = w - inset * 2;
+    constexpr float captionWidth = 192;
+    const float toolsWidth = compact ? controlsWidth : controlsWidth - captionWidth - inset;
+    const float followWidth = compact ? 124.f : 138.f;
+    const float copyWidth = compact ? 126.f : 138.f;
+    const float filtersWidth =
+        std::min(300.f, toolsWidth - followWidth - copyWidth - 3 * logToolbarGap);
+    const auto heading = [&] {
+        u.row("logs.heading")
+            .size(compact ? controlsWidth : captionWidth, logTitleHeight)
+            .alignItems(eui::Align::CENTER)
+            .gap(9)
+            .content([&] {
+                u.rect("logs.heading.accent").size(3, 18).color(blue).radius(1.5f).build();
+                u.column("logs.heading.copy")
+                    .width(captionWidth - 12)
+                    .gap(2)
+                    .content([&] {
+                        text(u, "logs.title", "运行日志", captionWidth - 12, 26, 17);
+                        text(u, "logs.retention",
+                             "本次运行最多保留 " + std::to_string(logLimit) + " 条",
+                             captionWidth - 12, 18, 11, muted);
+                    })
+                    .build();
+            })
+            .build();
+    };
+    const auto filterControl = [&](float width) {
+        segments(
+            u, "logfilter", filters, state.logFilter, width,
+            [](int i) {
+                state.logFilter = i;
+                state.logsCopied = false;
+                state.logOffset = 0;
+                state.followLogs = false;
+            },
+            38);
+    };
+    const auto actions = [&] {
+        toggle(u, "logfollow", "跟随最新", state.followLogs, followWidth, [](bool follow) {
+            state.followLogs = follow;
+            if (follow)
+                state.logOffset = 1000000;
+        });
+        button(u, "copylogs", state.logsCopied ? "已复制日志" : "复制当前日志", copyWidth, copy,
+               false, shown == 0, 38);
+    };
+    const auto toolbar = [&] {
+        if (w < narrowLogsWidth) {
+            u.column("logs.toolbar")
+                .size(toolsWidth, toolsHeight)
+                .gap(logToolbarGap)
+                .content([&] {
+                    filterControl(toolsWidth);
+                    u.row("logs.toolbar.actions")
+                        .size(toolsWidth, controlHeight)
+                        .gap(logToolbarGap)
+                        .justifyContent(eui::Align::END)
+                        .alignItems(eui::Align::CENTER)
+                        .content(actions)
+                        .build();
+                })
+                .build();
+            return;
+        }
+        u.row("logs.toolbar")
+            .size(toolsWidth, toolsHeight)
+            .gap(logToolbarGap)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                filterControl(filtersWidth);
+                u.rect("logs.toolbar.space")
+                    .width(eui::SizeValue::fill())
+                    .height(1)
+                    .color("#00000000")
+                    .build();
+                actions();
+            })
+            .build();
+    };
+
+    constexpr float tableHeaderHeight = resultTableHeaderHeight, rowMinimum = 46;
+    constexpr float cellInset = 14, timeWidth = 84, levelWidth = 58, cellGap = 12;
+    constexpr float barWidth = 6, barGap = 4;
+    const float tableWidth = w - logTableInset * 2;
+    const float messageWidth = tableWidth - cellInset * 2 - timeWidth - levelWidth - cellGap * 2;
+    const auto rows = [&](Ui &v, float, float) {
+        if (!shown) {
+            v.row("logs.empty.state")
+                .width(tableWidth)
+                .minHeight(108)
+                .padding(cellInset, 16)
+                .gap(12)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    emptyDocumentIcon(v, "logs.empty.icon");
+                    const float width = tableWidth - cellInset * 2 - 52;
+                    v.column("logs.empty.copy")
+                        .width(width)
+                        .gap(4)
+                        .content([&] {
+                            text(v, "logs.empty.title",
+                                 state.logFilter == 0   ? "暂无运行记录"
+                                 : state.logFilter == 1 ? "暂无警告"
+                                                        : "暂无错误",
+                                 width, 24, 15);
+                            paragraph(v, "logs.empty",
+                                      state.logFilter == 0
+                                          ? "生成、保存和导出后的操作记录会显示在这里。"
+                                          : "可切换到「全部」查看本次运行的记录。",
+                                      width, muted, 16);
+                        })
+                        .build();
+                })
+                .build();
+            return;
+        }
+        bool alternate = false;
+        for (const auto &entry : state.logs) {
+            if (!matches(entry))
+                continue;
+            const auto id = "log." + std::to_string(entry.sequence);
+            v.stack(id + ".wrap")
+                .width(tableWidth)
+                .content([&] {
+                    v.rect(id + ".bg")
+                        .width(eui::SizeValue::fill())
+                        .height(eui::SizeValue::fill())
+                        .ignoreLayout()
+                        .color(alternate ? tableStripe : surface)
+                        .build();
+                    v.row(id)
+                        .width(tableWidth)
+                        .minHeight(rowMinimum)
+                        .padding(cellInset, 9)
+                        .gap(cellGap)
+                        .content([&] {
+                            text(v, id + ".time", entry.time, timeWidth, 28, 12, muted);
+                            badge(v, id + ".level", levelName(entry.level), levelWidth,
+                                  levelColor(entry.level), levelSurface(entry.level));
+                            v.text(id + ".message")
+                                .width(messageWidth)
+                                .minHeight(28)
+                                .text(entry.message)
+                                .fontSize(tableValueFont)
+                                .lineHeight(24)
+                                .color(ink)
+                                .verticalAlign(eui::VerticalAlign::Center)
+                                .wrap()
+                                .maxWidth(messageWidth)
+                                .build();
+                        })
+                        .build();
+                })
+                .build();
+            alternate = !alternate;
+        }
+    };
+
+    const float available = std::max(
+        logMinimumRowsHeight, h - headerHeight - panelGap - logTableInset * 2 - tableHeaderHeight);
+    float bodyHeight = available;
+    // A short log should stop after its last row. Measure only when rows might fit.
+    if (static_cast<float>(shown) * rowMinimum < available) {
+        Ui measure;
+        measure.begin("logs.measure");
+        measure.column("rows")
+            .width(tableWidth)
+            .content([&] { rows(measure, tableWidth, available); })
+            .build();
+        measure.end();
+        measure.layout(tableWidth, 0);
+        bodyHeight = std::min(available, measure.find("rows")->frame.height);
+    }
+    const float tableHeight = logTableInset * 2 + tableHeaderHeight + bodyHeight;
+    u.column("logs.page")
+        .size(w, h)
+        .gap(panelGap)
+        .content([&] {
+            components::card(u, "logs.controls.card")
+                .size(w, headerHeight)
+                .theme(tokens())
+                .padding(0)
+                .color(surface)
+                .radius(cardRadius)
+                .border(1, line)
+                .shadow(cardShadow())
+                .content([&] {
+                    if (compact)
+                        u.column("logs.controls")
+                            .size(w, headerHeight)
+                            .padding(inset, logVerticalInset)
+                            .gap(logToolbarGap)
+                            .content([&] {
+                                heading();
+                                toolbar();
+                            })
+                            .build();
+                    else
+                        u.row("logs.controls")
+                            .size(w, headerHeight)
+                            .padding(inset, logVerticalInset)
+                            .gap(inset)
+                            .alignItems(eui::Align::CENTER)
+                            .content([&] {
+                                heading();
+                                toolbar();
+                            })
+                            .build();
+                })
+                .build();
+            components::card(u, "logs.card")
+                .size(w, tableHeight)
+                .theme(tokens())
+                .padding(0)
+                .color(surface)
+                .radius(cardRadius)
+                .border(1, line)
+                .shadow(cardShadow())
+                .content([&] {
+                    u.column("logs.table")
+                        .size(w, tableHeight)
+                        .padding(logTableInset)
+                        .content([&] {
+                            u.stack("logs.table.heading")
+                                .size(tableWidth, tableHeaderHeight)
+                                .content([&] {
+                                    u.rect("logs.table.surface")
+                                        .size(tableWidth, tableHeaderHeight)
+                                        .color(tableHeader)
+                                        .radius(controlRadius)
+                                        .build();
+                                    u.row("logs.table.labels")
+                                        .size(tableWidth, tableHeaderHeight)
+                                        .padding(cellInset, 0)
+                                        .gap(cellGap)
+                                        .alignItems(eui::Align::CENTER)
+                                        .content([&] {
+                                            text(u, "logs.table.time", "时间", timeWidth, 28, 12,
+                                                 muted);
+                                            u.text("logs.table.level")
+                                                .size(levelWidth, 28)
+                                                .text("级别")
+                                                .fontSize(tableLabelFont)
+                                                .color(muted)
+                                                .horizontalAlign(eui::HorizontalAlign::Center)
+                                                .verticalAlign(eui::VerticalAlign::Center)
+                                                .build();
+                                            text(u, "logs.table.message", "操作记录", messageWidth,
+                                                 28, 12, muted);
+                                        })
+                                        .build();
+                                })
+                                .build();
+                            components::scrollView(u, "logscroll")
+                                .size(tableWidth + barWidth + barGap, bodyHeight)
+                                .offset(state.logOffset)
+                                .theme(tokens())
+                                .scrollbarWidth(barWidth)
+                                .scrollbarGap(barGap)
+                                .reserveScrollbar()
+                                .onChange([&u](float offset) {
+                                    state.logOffset = offset;
+                                    const auto *scroll = u.find("logscroll");
+                                    state.followLogs =
+                                        scroll && offset >= scroll->scrollMaxOffset - 1;
+                                    menu.id.clear();
+                                })
+                                .content(rows)
+                                .build();
+                        })
+                        .build();
+                })
+                .build();
+        })
+        .build();
+}
+
+void logsPage(Ui &u, float w, float h) {
+    if (h >= minimumLogPanelHeight(w)) {
+        state.logPageOffset = 0;
+        logsPanel(u, w, h);
+        return;
+    }
+    components::scrollView(u, "logs.page.scroll")
+        .size(w, h)
+        .offset(state.logPageOffset)
+        .theme(tokens())
+        .scrollbarWidth(6)
+        .scrollbarGap(4)
+        .reserveScrollbar()
+        .onChange([](float offset) {
+            state.logPageOffset = offset;
+            menu.id.clear();
+        })
+        .content(
+            [](Ui &v, float width, float) { logsPanel(v, width, minimumLogPanelHeight(width)); })
+        .build();
+}
+
+void helpSubheading(Ui &u, const std::string &id, const std::string &title, float w) {
+    u.column(id + ".rule")
+        .width(w)
+        .gap(7)
+        .content([&] {
+            u.rect(id + ".divider").size(w, 1).color(line).build();
+            text(u, id, title, w, 25, 15, blue);
+        })
+        .build();
+}
+void helpExample(Ui &u, const std::string &id, const std::string &copy, float w) {
+    components::card(u, id + ".card")
+        .width(w)
+        .wrapContentHeight()
+        .theme(tokens())
+        .padding(0)
+        .radius(controlRadius)
+        .color(surfaceSoft)
+        .border(1, line)
+        .shadow({})
+        .content([&] {
+            u.column(id + ".inset")
+                .width(w)
+                .padding(12, 8)
+                .content([&] { helpText(u, id, copy, w - 24, ink); })
+                .build();
+        })
+        .build();
+}
+void helpPage(Ui &u, float w, float h) {
+    const std::vector<std::string> topics{"快速入门",   "分析指标", "CSV 导出",
+                                          "文件名变量", "命令行",   "结果图表"};
+    const auto changeTopic = [](int topic) {
+        if (state.helpTopic == topic)
+            return;
+        state.helpTopic = topic;
+        state.helpOffset = 0;
+        menu.id.clear();
+    };
+    constexpr float columnLimit = 940.f;
+    const float readingWidth = std::min(w, columnLimit);
+    const float cardWidth = readingWidth - tokens().metrics.control.scrollbar - scrollGutter;
+    const bool compact = w < 700;
+    u.column("help.layout")
+        .size(w, h)
+        .gap(sectionGap)
+        .alignItems(eui::Align::CENTER)
+        .content([&] {
+            u.row("help.navigation.row")
+                .width(readingWidth)
+                .content([&] {
+                    navigationCard(u, "help.navigation", "help.heading", cardWidth, [&] {
+                        const float labelWidth = compact ? 60.f : 121.f;
+                        const float topicsWidth =
+                            cardWidth - labelWidth - secondaryNavGap - 2 * secondaryNavInset;
+                        text(u, "help.title", compact ? "主题" : "帮助主题", labelWidth, 38, 16);
+                        if (compact)
+                            combo(u, "help.topics", topics, state.helpTopic, topicsWidth,
+                                  changeTopic);
+                        else
+                            tabs(u, "help.topics", topics, state.helpTopic, topicsWidth,
+                                 changeTopic, 38);
+                    });
+                })
+                .build();
+            components::scrollView(u, "helpscroll")
+                .size(readingWidth, std::max(74.f, h - secondaryNavHeight - sectionGap))
+                .offset(state.helpOffset)
+                .theme(tokens())
+                .scrollbarGap(scrollGutter)
+                .reserveScrollbar()
+                .onChange([](float offset) {
+                    state.helpOffset = offset;
+                    menu.id.clear();
+                })
+                .content([&](Ui &v, float cw, float) {
+                    v.column("help.page")
+                        .width(cw)
+                        .gap(sectionGap)
+                        .padding(0, 0, 0, 10)
+                        .content([&] {
+                            if (state.helpTopic == 5) {
+                                section(v, "help.charts", "查看、编辑与导出图表", cw, [&](float c) {
+                                    helpText(v, "help.charts.source",
+                                             "在「图表」页选择「当前结果」，或通过「导入 "
+                                             "CSV」查看已有测量数据。",
+                                             c);
+                                    button(v, "help.charts.open", "打开图表页", 152,
+                                           [] { state.navigate(Page::Charts); });
+                                    helpSubheading(v, "help.charts.view.title", "选择图表", c);
+                                    helpText(v, "help.charts.text",
+                                             "在预览上方选择变异分量、按部件测量、按操作员分布、极"
+                                             "差控制图、"
+                                             "均值控制图、交互作用图或直方图。控制限的计算口径见各"
+                                             "图说明。",
+                                             c);
+                                    helpSubheading(v, "help.charts.edit.title", "编辑外观", c);
+                                    helpText(v, "help.charts.edit",
+                                             "点击「编辑图表」可调整标题、坐标轴、颜色、线宽、点大"
+                                             "小、纵轴范围、网格和图例。"
+                                             "点击「应用编辑」更新预览和导出外观。点击「撤销草稿」"
+                                             "恢复上次应用的外观。",
+                                             c);
+                                    helpSubheading(v, "help.charts.export.title", "保存图表文件",
+                                                   c);
+                                    helpText(v, "help.charts.export",
+                                             "在「图表导出」选择图表、格式和保存位置，再点击「导出"
+                                             "图表」。单图和"
+                                             "组合图均支持 PNG、JPEG 和 "
+                                             "PDF，重名时会追加序号。导出前请处理所选图表"
+                                             "的编辑草稿。PDF "
+                                             "中的中文随图表保留为高分辨率图像，页幅随尺寸和分辨率"
+                                             "变化。",
+                                             c);
+                                });
+                            } else if (state.helpTopic == 0) {
+                                section(v, "help.workflow", "开始使用", cw, [&](float c) {
+                                    const auto step = [&](const std::string &id,
+                                                          const std::string &number,
+                                                          const std::string &title,
+                                                          const std::string &detail) {
+                                        if (number != "1")
+                                            v.rect(id + ".divider").size(c, 1).color(line).build();
+                                        v.row(id + ".row")
+                                            .width(c)
+                                            .gap(12)
+                                            .content([&] {
+                                                badge(v, id + ".number", number, 40);
+                                                v.column(id + ".content")
+                                                    .width(c - 52)
+                                                    .gap(4)
+                                                    .content([&] {
+                                                        text(v, id + ".title", title, c - 52, 26,
+                                                             15);
+                                                        helpText(v, id, detail, c - 52);
+                                                    })
+                                                    .build();
+                                            })
+                                            .build();
+                                    };
+                                    step("help.step1", "1", "设置研究设计",
+                                         "在「选项 → "
+                                         "研究」设置操作员数、重复测量次数、部件数和生成规则。"
+                                         "然后在「分析」页选择方法。");
+                                    step("help.step2", "2", "填写生成条件",
+                                         "在「数据」页填写规格限和指标约束。数据中心可留空。"
+                                         "开启规格内生成时，请至少填写一侧规格限。");
+                                    step("help.step3", "3", "生成并复核",
+                                         "点击「生成数据」。在「指标复核」比较实际值与约束范围，"
+                                         "在「数据预览」核对记录。生成期间可查看日志，也可从底栏取"
+                                         "消。"
+                                         "测量系统是否合格需结合实际研究判断。");
+                                    step("help.step4", "4", "导出数据与保存配置",
+                                         "在「选项 → "
+                                         "导出」设置格式、目录和文件名，再回到「数据」导出 CSV。"
+                                         "修改研究、分析或生成条件后，请重新生成。"
+                                         "点击「保存配置」可在下次启动时沿用当前设置。");
+                                    button(
+                                        v, "sample", "载入示例配置", 156,
+                                        [] {
+                                            if (state.busy())
+                                                return;
+                                            state.sample();
+                                            state.navigate(Page::Data);
+                                        },
+                                        false, state.busy());
+                                });
+                            }
+                            if (state.helpTopic == 1) {
+                                section(v, "help.analysis", "分析方法", cw, [&](float c) {
+                                    helpText(
+                                        v, "help.analysis.select",
+                                        "在「选项 → 分析」选择 Xbar-R（均值极差法）或 "
+                                        "ANOVA（方差分析法）。"
+                                        "两者均适用于平衡交叉量具 R&R "
+                                        "研究：每名操作员测量全部部件，"
+                                        "每个「操作员＋部件」组合的重复测量次数相同。估计方法不"
+                                        "同，同组数据的结果可能不同。",
+                                        c);
+                                    button(v, "help.analysis.open", "前往分析选项", 160, [] {
+                                        state.optionsTab = 1;
+                                        state.configOffset = 0;
+                                        state.navigate(Page::Options);
+                                    });
+                                    helpSubheading(v, "help.xbarr.title", "Xbar-R（均值极差法）",
+                                                   c);
+                                    helpText(
+                                        v, "help.xbarr.components",
+                                        "使用各「操作员＋部件」组合的极差估计重复性 EV；使用操作员"
+                                        "均值的极差并扣除重复性影响估计再现性 "
+                                        "AV；使用部件均值的极差估计"
+                                        "部件间变异 PV。GRR 合并 EV 与 AV，TV 合并 GRR 与 PV；AV "
+                                        "校正后的方差"
+                                        "小于零时取零。",
+                                        c);
+                                    helpText(v, "help.xbarr.scope",
+                                             "不单独估计部件×操作员交互作用，不输出 ANOVA "
+                                             "表或交互项 P 值。"
+                                             "交互项设置、误分类概率和方差分量置信区间仅在 ANOVA "
+                                             "方法下生效。",
+                                             c);
+                                    helpSubheading(v, "help.anova.title", "ANOVA（方差分析法）", c);
+                                    helpText(v, "help.anova.model",
+                                             "采用平衡交叉双随机效应模型，部件和操作员均为随机因子"
+                                             "。通过平方和、"
+                                             "自由度及均方估计重复性、操作员、部件和部件×操作员交"
+                                             "互的方差分量。",
+                                             c);
+                                    helpText(
+                                        v, "help.anova.interaction",
+                                        "默认按 P 值判断，显著性水平 α=0.05。完整模型的交互项 P<α "
+                                        "时保留。"
+                                        "P≥α 或 P "
+                                        "值不可计算时，将交互项的平方和与自由度并入重复性误差。"
+                                        "也可直接选择「保留交互项」或「将交互项并入重复性误差」。",
+                                        c);
+                                    helpText(
+                                        v, "help.anova.components",
+                                        "负方差分量逐项置零。再现性 AV "
+                                        "包括操作员分量和保留的交互分量；"
+                                        "量具 R&R（GRR）包括重复性与再现性。%Study Var "
+                                        "为标准差之比，"
+                                        "%Contribution（百分比贡献）为方差之比，两者不能混用。",
+                                        c);
+                                    helpText(v, "help.anova.report",
+                                             "在「分析详情」查看均值极差法的计算结果。「ANOVA "
+                                             "详情」还显示最终模型、"
+                                             "完整模型的交互项 P 值、ANOVA 表及方差分量。"
+                                             "修改分析方法或交互项设置后，请重新生成。",
+                                             c);
+                                    helpSubheading(v, "help.anova.software.title", "跨软件比较", c);
+                                    helpText(
+                                        v, "help.anova.software",
+                                        "跨软件对标须使用相同的完整记录和分析方法，并统一研究变异倍"
+                                        "数、规格限及容差。"
+                                        "ANOVA 还须统一随机效应模型、交互项、EMS "
+                                        "均方估计和负分量处理规则。"
+                                        "REML、Bayesian 或固定效应 ANOVA "
+                                        "的结果不能直接视为同一统计口径。"
+                                        "Trial 与 StdOrder 用于追溯记录，均不作为额外分析因子。",
+                                        c);
+                                });
+                                section(
+                                    v, "help.process", "分析口径、历史参数与置信区间", cw,
+                                    [&](float c) {
+                                        helpSubheading(v, "help.process.tolerance.title",
+                                                       "P/T 与分析容差", c);
+                                        helpExample(v, "help.process.tolerance.formula",
+                                                    "填写分析容差：P/T% = 100 × k × GRR_SD ÷ 容差\n"
+                                                    "仅有单侧规格：P/T% = 100 × (k/2) × GRR_SD ÷ "
+                                                    "|规格限 − 均值|",
+                                                    c);
+                                        helpText(v, "help.process.tolerance",
+                                                 "分析容差留空时，若有双侧规格，第一式的容差取 USL "
+                                                 "− LSL；"
+                                                 "只有单侧规格则使用第二式。k 为研究变异倍数。"
+                                                 "历史均值留空时使用实际测量均值；规格限与均值相同"
+                                                 "时，单侧 P/T 不可计算。"
+                                                 "「规格内生成」仍使用生成设置中的规格限。",
+                                                 c);
+                                        helpSubheading(v, "help.process.history.title",
+                                                       "历史标准差与过程变异来源", c);
+                                        helpText(v, "help.process.history",
+                                                 "选择「优先使用历史标准差」后，若历史 "
+                                                 "SD≥GRR_SD，则 TV_SD 取历史 SD，"
+                                                 "PV_SD=√(TV_SD²−GRR_SD²)。历史 SD 小于 GRR_SD "
+                                                 "时使用本次研究估计。"
+                                                 "选择「按本次研究估计」时，TV 和 PV "
+                                                 "始终由本次研究估计。"
+                                                 "填写历史标准差后，%Process "
+                                                 "显示各分量标准差相对历史标准差的百分比。",
+                                                 c);
+                                        helpSubheading(v, "help.process.classification.title",
+                                                       "误分类概率（仅 ANOVA）", c);
+                                        helpText(
+                                            v, "help.process.classification",
+                                            "在「统计推断」开启「计算误分类概率」；至少需要一个规"
+                                            "格限，并假设真实部件与测量误差相互"
+                                            "独立且服从正态分布。"
+                                            "联合概率与条件概率分别报告；条件事件的概率为零时"
+                                            "，条件概率不可计算。"
+                                            "历史 SD≥GRR_SD "
+                                            "时使用历史过程波动，否则使用研究部件变异；"
+                                            "这一规则独立于 %Study Var 的过程变异来源设置。",
+                                            c);
+                                        helpSubheading(v, "help.process.confidence.title",
+                                                       "置信区间（仅 ANOVA）", c);
+                                        helpText(
+                                            v, "help.process.confidence",
+                                            "在「统计推断」开启「计算置信区间」，选择估计方法、置"
+                                            "信水平及置信限类型。支持方差分量、标准差、研究变"
+                                            "异、P/T 和 %Process "
+                                            "的双侧或单侧置信限。"
+                                            "重复性采用卡方精确区间；其他分量默认采用 MLS "
+                                            "近似，也可选择 JMP EMS 使用的"
+                                            "Satterthwaite "
+                                            "近似。MLS 的最低适用水平取决于操作员人数和单/双侧"
+                                            "类型，超出范围时会提示下界；需要更低水平时请显式"
+                                            "选择 Satterthwaite，程序不会自动更换方法。"
+                                            "零方差或边界情形的部分置信限可能不可计算，"
+                                            "显示为「—」。"
+                                            "当前不提供 %Contribution、%Study Var 和 ndc "
+                                            "的比值置信区间，不能将分量置信限直接相除替代。",
+                                            c);
+                                        helpSubheading(v, "help.process.compatibility.title",
+                                                       "校对软件设置", c);
+                                        helpText(
+                                            v, "help.process.compatibility",
+                                            "对标时还需统一均值、历史标准差、过程变异来源、置信水平"
+                                            "和区间算法。"
+                                            "MATLAB 原生应用将缺失侧视为无穷规格，与本程序的单侧 "
+                                            "P/T 定义不同。"
+                                            "各软件的默认模型、估计方法和 ndc 取整规则也可能不同。",
+                                            c);
+                                    });
+                            }
+                            if (state.helpTopic == 0 || state.helpTopic == 1) {
+                                section(v, "help.constraints", "约束模式与单位", cw, [&](float c) {
+                                    const std::array<std::pair<std::string, std::string>, 5> rows{
+                                        {{"不约束", "不以该指标筛选数据，仍显示其实际计算结果。"},
+                                         {"目标值", "目标值 ± 允许误差；误差留空时采用默认误差。"},
+                                         {"区间",
+                                          "接受下限至上限之间的值，含两端；不额外叠加误差。"},
+                                         {"不高于", "实际值不超过填写的阈值。"},
+                                         {"不低于", "实际值不低于填写的阈值。"}}};
+                                    for (size_t i = 0; i < rows.size(); ++i)
+                                        v.row("help.mode" + std::to_string(i))
+                                            .width(c)
+                                            .gap(12)
+                                            .content([&] {
+                                                badge(v, "help.mode.name" + std::to_string(i),
+                                                      rows[i].first, 84);
+                                                helpText(v, "help.mode.desc" + std::to_string(i),
+                                                         rows[i].second, c - 96);
+                                            })
+                                            .build();
+                                    helpSubheading(v, "help.units.title", "百分比与允许误差", c);
+                                    helpText(
+                                        v, "help.units",
+                                        "EV/TV%、AV/TV%、GRR/TV% 以总变异的标准差 TV_SD "
+                                        "为分母，对应 Minitab 的"
+                                        " %Study Var。百分比指标的允许误差以「百分点」为单位，例如 "
+                                        "10±0.1 表示"
+                                        "接受 "
+                                        "9.90%～10.10%"
+                                        "。ndc（可区分类别数）的目标值与允许误差均使用整数。"
+                                        "误差填 0 表示零误差，留空则使用默认允许误差。",
+                                        c);
+                                    helpSubheading(v, "help.sd.title", "标准差与研究变异", c);
+                                    helpText(v, "help.sd",
+                                             "EV（重复性）、AV（再现性）、GRR（量具 "
+                                             "R&R）、PV（部件间变异）和"
+                                             " TV（总变异）以标准差 SD（1σ）表示。研究变异为 "
+                                             "k×SD，k 默认取 6。"
+                                             "研究变异倍数影响研究变异及 P/T，不改变标准差本身。",
+                                             c);
+                                    helpSubheading(v, "help.display.title", "显示精度", c);
+                                    helpText(v, "help.display",
+                                             "指标复核中的百分比、目标范围与偏差显示两位小数，ndc "
+                                             "显示整数；约束判定仍使用原始精度。数据预览和 CSV "
+                                             "保持配置指定的小数位。",
+                                             c);
+                                });
+                            }
+                            if (state.helpTopic == 0) {
+                                section(v, "help.rules", "生成规则与尺度", cw, [&](float c) {
+                                    helpText(
+                                        v, "help.priority",
+                                        "中心优先和指标优先决定候选数据的优化侧重，最终结果都"
+                                        "必须满足已设置的指标约束。"
+                                        "开启「规格内生成」时，全部测量值必须位于已设置的规格限"
+                                        "内；关闭后允许超出规格限。",
+                                        c);
+                                    helpSubheading(v, "help.reference.title", "参考尺度与生成种子",
+                                                   c);
+                                    helpText(
+                                        v, "help.reference",
+                                        "缺少双侧规格或显式选择参考尺度时，需要提供参考总变异标准"
+                                        "差（TV_SD）或历史标准差。"
+                                        "数据生成种子位于「选项 → 研究 → "
+                                        "生成参数」：固定种子在相同程序版本"
+                                        "、相同参数且搜索未被"
+                                        "超时截断时可复现；留空时每次生成自动选择种子。搜索超"
+                                        "时或次数耗尽不代表数学上无解。",
+                                        c);
+                                });
+                            }
+                            if (state.helpTopic == 2) {
+                                section(v, "help.files", "配置与数据文件", cw, [&](float c) {
+                                    button(v, "help.files.open", "前往导出设置", 160, [] {
+                                        state.optionsTab = 2;
+                                        state.configOffset = 0;
+                                        state.navigate(Page::Options);
+                                    });
+                                    helpSubheading(v, "help.config", "用户配置文件", c);
+                                    helpExample(v, "help.path",
+                                                platform::compatibilityConfig().u8string(), c);
+                                    helpText(v, "help.silent",
+                                             "点击「保存配置」会写入上述文件，下次启动时自动读取。"
+                                             "在「选项 → 导出」设置 CSV "
+                                             "目录和文件名。目录留空或使用相对路径时，"
+                                             "以配置文件所在目录为基准。程序会创建缺失的输出目录。"
+                                             "重名时默认追加序号。保存与导出的详细记录可在「日志」"
+                                             "查看。",
+                                             c);
+                                    helpSubheading(v, "help.csv.wide.title", "默认（宽表）", c);
+                                    helpText(v, "help.csv",
+                                             "左上角留空，首行为从 1 开始的部件编号，首列为 "
+                                             "A、B、C 等操作员标记。"
+                                             "每行包含一名操作员在一轮重复测量中对全部部件的测量值"
+                                             "，按操作员 → 重复轮次排列。"
+                                             "使用 UTF-8 BOM；运行顺序设置不适用于该布局。",
+                                             c);
+                                    helpSubheading(v, "help.csv.long.title",
+                                                   "五种软件格式 · 每行一次测量", c);
+                                    helpText(v, "help.csv.encoding",
+                                             "Minitab、SPSS、JMP 19、Origin、MATLAB "
+                                             "共用同一种长表布局，使用 UTF-8 无 BOM。"
+                                             "所有 CSV 格式均使用英文逗号、CRLF "
+                                             "换行和英文小数点，测量值保留配置指定的小数位数。",
+                                             c);
+                                });
+                                section(v, "help.runorder", "CSV 格式与运行顺序", cw, [&](float c) {
+                                    helpText(v, "help.runorder.format",
+                                             "在「选项 → 导出」选择 CSV "
+                                             "导出格式；所有导出入口均使用该设置。"
+                                             "五种长表的列名统一为 "
+                                             "Operator,Part,Trial,Measurement，分别表示操作员、"
+                                             "部件、重复测量编号与测量值。操作员标记为 "
+                                             "A、B、C，Part 和 Trial 从 1 开始。"
+                                             "选择「默认（宽表）」时，运行顺序控件不可用。",
+                                             c);
+                                    helpSubheading(v, "help.runorder.modes.title", "三种运行顺序",
+                                                   c);
+                                    helpText(
+                                        v, "help.runorder.modes",
+                                        "标准顺序按 Trial、Part、Operator 的顺序排列。\n"
+                                        "全部随机化会打乱所有完整记录，可跨轮次和操作员排列。\n"
+                                        "操作员内随机化会在每个 Trial 和 Operator "
+                                        "组合内独立打乱部件顺序。",
+                                        c);
+                                    helpText(
+                                        v, "help.runorder.operators",
+                                        "选择「操作员内随机化」后可勾选「随机化操作员顺序」。"
+                                        "每项研究随机确定一次操作员顺序，所有 Trial 使用同一顺序。",
+                                        c);
+                                    helpSubheading(v, "help.runorder.seed.title", "运行顺序种子",
+                                                   c);
+                                    helpText(v, "help.runorder.seed",
+                                             "运行顺序种子与数据生成种子相互独立，仅在随机化模"
+                                             "式下可设置。允许留空，填"
+                                             "写时须为 "
+                                             "1～9223372036854775807 的整数。"
+                                             "相同数据、运行顺序设置和排序种子可复现同一排列，但不"
+                                             "保证与 Minitab "
+                                             "的相同种子逐行一致。留空时为本项研究自动选择种子；同"
+                                             "一研究以相同运行顺序"
+                                             "设置导出到五种软件时，复用同一排列。",
+                                             c);
+                                    helpSubheading(v, "help.runorder.standard.title",
+                                                   "保留标准运行序号", c);
+                                    helpText(v, "help.runorder.standard",
+                                             "在「CSV "
+                                             "格式」中勾选「保留标准运行序号（StdOrder）」后，在首"
+                                             "列添加 "
+                                             "StdOrder，记录随机化前的 1～N 标准序号。"
+                                             "CSV 行序就是实际运行顺序；Trial "
+                                             "始终是真实重复测量编号，不随随机排序重编号。"
+                                             "随机化仅移动完整记录，不改变测量值、字段对应关系或数"
+                                             "据精度。"
+                                             "对同一种分析方法，随机化前后的统计结果保持一致，允许"
+                                             "浮点末位差异。"
+                                             "修改导出格式或运行顺序无需重新生成数据；保存配置、启"
+                                             "动加载和恢复"
+                                             "默认均包含这些设置。",
+                                             c);
+                                    helpSubheading(v, "help.runorder.identity.title",
+                                                   "核对序号与记录数", c);
+                                    helpText(v, "help.runorder.identity",
+                                             "标准序号：((Trial − 1) × 部件数 + Part − 1) × "
+                                             "操作员数 + 操作员编号；"
+                                             "A=1、B=2、C=3。总记录数 "
+                                             "N=操作员数×每件重复测量次数×部件数。"
+                                             "同一组数据比较不同运行顺序时，直接更改导出设置后再次"
+                                             "导出；不要重新"
+                                             "生成。若要多次生成相同数据，请固定「研究 → "
+                                             "生成参数」中的数据生成种子。",
+                                             c);
+                                });
+                                section(
+                                    v, "help.minitab", "导入 Minitab 与结果对标", cw, [&](float c) {
+                                        helpSubheading(v, "help.minitab.import.title",
+                                                       "1. 导入文件并选择字段", c);
+                                        helpText(v, "help.minitab.import",
+                                                 "选择「Minitab」长表并导出，在 Minitab 打开 "
+                                                 "CSV，首行为列名。"
+                                                 "选择「统计 → 质量工具 → 量具研究 → 交叉量具 "
+                                                 "R&R」。部件选 Part，"
+                                                 "操作员选 Operator，测量数据选 Measurement。",
+                                                 c);
+                                        helpSubheading(v, "help.minitab.method.title",
+                                                       "2. 对齐分析设置", c);
+                                        helpText(
+                                            v, "help.minitab.method",
+                                            "分析方法与本程序一致：Xbar 和 R 或 "
+                                            "ANOVA；ANOVA 还须统一交互项设置。研究变异倍数默认 6。"
+                                            "比较 P/T "
+                                            "时，规格、独立容差及均值等设置须一致。EV/TV%、AV/TV%、"
+                                            "GRR/TV% 对应 %Study Var，P/T% 对应总量具 R&R 的 "
+                                            "%Tolerance。",
+                                            c);
+                                        helpSubheading(v, "help.minitab.columns.title",
+                                                       "3. 核对顺序与指标", c);
+                                        helpText(v, "help.minitab.columns",
+                                                 "Trial 保留原重复测量编号；StdOrder "
+                                                 "供追溯标准序。两列均不作为"
+                                                 "测量响应或额外因子。Minitab "
+                                                 "按操作员和部件识别重复测量。"
+                                                 "三种运行顺序只重排完整记录，统计结果允许浮点末位"
+                                                 "差异，ndc 应一致。",
+                                                 c);
+                                        helpSubheading(v, "help.minitab.evidence.title",
+                                                       "已验证的研究设计", c);
+                                        helpText(v, "help.minitab.evidence",
+                                                 "Minitab 22.6 验证记录包含 3 名操作员、3 次测量和 "
+                                                 "10 个部件。"
+                                                 "同一组数据按三种运行顺序各导出 90 条，核对了 "
+                                                 "Trial、StdOrder、"
+                                                 "测量值及 21 项统计结果。",
+                                                 c);
+                                    });
+                            }
+                            if (state.helpTopic == 4) {
+                                section(v, "help.cli", "CLI 命令行使用", cw, [&](float c) {
+                                    helpSubheading(v, "help.cli.start.title", "查看参数与读取配置",
+                                                   c);
+                                    helpText(
+                                        v, "help.cli.config",
+                                        "msa_cli.exe 支持 GUI 的全部业务配置。优先级：内置默认值 → "
+                                        "JSON "
+                                        "配置 → 命令行覆盖；重复参数最后一次生效。GUI "
+                                        "保存的配置可用 "
+                                        "--config 指定；未指定配置文件时，自动读取 GUI 用户配置。"
+                                        "普通 CLI 运行不会把命令行覆盖值写回配置文件。",
+                                        c);
+                                    helpText(v, "help.cli.syntax",
+                                             "运行 msa_cli.exe --help "
+                                             "查看完整参数及示例。--no-config 跳过用户配置；"
+                                             "可选数值用 null 清空，布尔选项用 "
+                                             "true/false；指标约束可用 none、"
+                                             "target:值[:误差]、between:下限:上限、at_most:值、at_"
+                                             "least:值。"
+                                             "指标参数会整项替换旧约束。",
+                                             c);
+                                    helpSubheading(v, "help.cli.example.title",
+                                                   "示例：生成随机运行顺序的长表", c);
+                                    helpExample(
+                                        v, "help.cli.example",
+                                        "msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 "
+                                        "--csv-format minitab --run-order all --run-seed 321 "
+                                        "--store-standard-order true --output data.csv "
+                                        "--report result.json",
+                                        c);
+                                    helpSubheading(v, "help.cli.analyze.title", "仅分析已有数据",
+                                                   c);
+                                    helpText(
+                                        v, "help.cli.analyze",
+                                        "使用 --input CSV "
+                                        "读取已有宽表或长表，按操作员与部件标识恢复测量记录。"
+                                        "配合 --method crossed_anova 或 crossed_xbarr "
+                                        "选择方法，并使用 --report 保存分析报告。"
+                                        "此模式仅分析输入数据，不输出 CSV 文件，不能与 --output "
+                                        "同用；研究设计须与输入数据一致。",
+                                        c);
+                                    helpSubheading(v, "help.cli.files.title", "输出路径与退出状态",
+                                                   c);
+                                    helpText(
+                                        v, "help.cli.files",
+                                        "生成模式省略 --output "
+                                        "时使用配置中的输出目录、文件名模板和同名处理方式。显式 "
+                                        "--output "
+                                        "是完整文件路径，不展开变量；覆盖显式 CSV 或报告须加 "
+                                        "--overwrite。"
+                                        "--overwrite 始终优先于 "
+                                        "--existing-file，与参数书写顺序无关。--report "
+                                        "保存最终配置、"
+                                        "测量矩阵、指标及实际生成种子。Ctrl+C 可取消；退出码 0 "
+                                        "表示成功，1 表示配置、生成、"
+                                        "文件错误或取消，2 表示参数错误或显式同名文件预检查失败。",
+                                        c);
+                                });
+                            }
+                            if (state.helpTopic == 3) {
+                                section(v, "help.filename", "导出文件名变量", cw, [&](float c) {
+                                    helpText(v, "help.filename.syntax",
+                                             "点击英文或中文变量按钮即可复制，再粘贴到「选项 → "
+                                             "导出」的文件名模板。\n"
+                                             "变量区分大小写，仅在 CSV 文件名中展开。输入 [[ 或 ]] "
+                                             "可保留方括号，其余文字按原样保留。",
+                                             c);
+                                    button(v, "help.filename.open", "编辑文件名模板", 176, [] {
+                                        state.optionsTab = 2;
+                                        state.configOffset = 0;
+                                        state.navigate(Page::Options);
+                                    });
+                                    helpExample(
+                                        v, "help.filename.example",
+                                        "MSA_Data_[YYYY]-[MM]-[DD]_[H]-[M]-[S].csv\n"
+                                        "→ "
+                                        "MSA_Data_2026-10-24_22-08-12.csv\n"
+                                        "研究_[人员数量]人_[测量次数]次_[产品件数]件_GRR[GRR_PCT]_["
+                                        "DATETIME].csv",
+                                        c);
+                                    for (const auto &variable : msa::filename_variables()) {
+                                        const std::string name = variable.name;
+                                        if (name == "YYYY")
+                                            helpSubheading(v, "help.filename.date", "日期与时间",
+                                                           c);
+                                        else if (name == "OPERATORS")
+                                            helpSubheading(v, "help.filename.study", "研究参数", c);
+                                        else if (name == "EV_PCT")
+                                            helpSubheading(v, "help.filename.metrics", "实际指标",
+                                                           c);
+                                        else if (name == "VERSION")
+                                            helpSubheading(v, "help.filename.version", "程序信息",
+                                                           c);
+                                        filenameVariableHelp(v, variable, c);
+                                    }
+                                    helpSubheading(v, "help.filename.values.title", "变量取值规则",
+                                                   c);
+                                    helpText(
+                                        v, "help.filename.values",
+                                        "日期和时钟变量采用导出开始时的电脑本地时间，同次导出共用同"
+                                        "一时刻；"
+                                        "Unix 时间戳从 1970-01-01 UTC 起算，不随本地时区改变。"
+                                        "研究参数和指标取已生成数据的配置及实际复核值，随机种子取本"
+                                        "次实际种子。"
+                                        "百分比指标保留两位、不含百分号；规格未设置、P/T 或 ndc "
+                                        "不可计算时写 "
+                                        "NA。"
+                                        "中心留空时取实际均值；修改文件名不改变数据或计算精度。",
+                                        c);
+                                    helpSubheading(v, "help.filename.collision.title",
+                                                   "同名文件与错误提示", c);
+                                    helpText(
+                                        v, "help.filename.collision",
+                                        "追加序号为默认策略：先使用原文件名，重名时在扩展名前追加 "
+                                        "_001、_002 等。"
+                                        "选择覆盖文件时才替换原文件；写入过程中使用原子保存。"
+                                        "配置保存的是模板原文。未知变量、括号错误、非法字符、Window"
+                                        "s "
+                                        "保留名或文件名过长时停止保存或导出，"
+                                        "底部显示简短失败提示，详细原因见日志。",
+                                        c);
+                                });
+                            }
+                            if (state.helpTopic == 1) {
+                                section(v, "help.native", "适用范围与结果校验", cw, [&](float c) {
+                                    helpText(v, "help.boundary",
+                                             "支持 2 或 3 名操作员、每件重复测量 2 或 3 次、5～10 "
+                                             "个部件，共 24 种平衡交叉设计。"
+                                             "当前不支持嵌套设计、非平衡数据、固定或混合效应模型，"
+                                             "以及 REML、ML、MINQUE 或 Bayesian 估计。",
+                                             c);
+                                    helpText(
+                                        v, "help.compatibility",
+                                        "配置采用 schema_version=1，缺失的可选字段按默认值补齐。"
+                                        "固定种子在相同程序版本和参数下可复现；搜索时限可能使搜索提"
+                                        "前结束。"
+                                        "找到满足约束的结果后，最多继续优化 120 次。",
+                                        c);
+                                    helpSubheading(v, "help.verify.title", "小数位与导出校验", c);
+                                    helpText(v, "help.verify",
+                                             "候选测量值先按小数位数舍入，再进行指标复核。导出时校"
+                                             "验序列化结果，"
+                                             "保存后回读实际 "
+                                             "CSV，再次检查测量值精度、记录数量和字段对应关系。"
+                                             "长表保留所选运行顺序，不在写出时重新排序。",
+                                             c);
+                                    helpSubheading(v, "help.failures.title", "如何解读生成失败", c);
+                                    helpText(v, "help.failures",
+                                             "程序分别报告参数错误、已证明的约束冲突和有限搜索失败"
+                                             "。超时或次数耗尽"
+                                             "不代表数学上无解。修改研究或生成参数会使旧结果失效；"
+                                             "导出设置独立。",
+                                             c);
+                                });
+                            }
+                        })
+                        .build();
+                })
+                .build();
+        })
+        .build();
+}
+void appMark(Ui &u, const std::string &id, float size) {
+    const float factor = size / 40;
+    const auto snap = [factor](float value) {
+        return std::round(value * factor * state.pixelScale) / state.pixelScale;
+    };
+    u.stack(id)
+        .size(size, size)
+        .content([&] {
+            u.rect(id + ".bg").size(size, size).color(blue).radius(8.75f * factor).build();
+            constexpr std::array<float, 3> barTop{22.5f, 15.f, 17.5f};
+            for (int i = 0; i < 3; ++i) {
+                const float x = 7.5f + i * 10, y = barTop[i];
+                u.rect(id + ".bar." + std::to_string(i))
+                    .position(snap(x), snap(y))
+                    .size(snap(x + 5) - snap(x), snap(32.5f) - snap(y))
+                    .radius(1.25f * factor)
+                    .color(surface)
+                    .build();
+            }
+            u.rect(id + ".sample")
+                .position(snap(27.5f), snap(7.5f))
+                .size(snap(32.5f) - snap(27.5f), snap(12.5f) - snap(7.5f))
+                .radius(1.25f * factor)
+                .color("#71F0D2")
+                .build();
+        })
+        .build();
+}
+struct AboutAccessory {
+    std::string label;
+    std::function<void()> action{};
+    bool disabled = false;
+};
+void aboutRow(Ui &u, const std::string &id, const std::string &symbol, const std::string &title,
+              const std::string &value, const std::string &valueId, float w, bool divider,
+              const AboutAccessory &accessory) {
+    if (divider)
+        u.rect(id + ".divider").size(w, 1).color(line).build();
+    constexpr float iconSize = 36, gap = 12, accessoryWidth = 104;
+    const float detailWidth = w - iconSize - accessoryWidth - 2 * gap;
+    u.row(id)
+        .width(w)
+        .minHeight(78)
+        .padding(0, 8)
+        .gap(gap)
+        .alignItems(eui::Align::CENTER)
+        .content([&] {
+            u.stack(id + ".icon")
+                .size(iconSize, iconSize)
+                .content([&] {
+                    u.rect(id + ".icon.bg")
+                        .size(iconSize, iconSize)
+                        .radius(9)
+                        .color(blueWash)
+                        .border(1, brandBorder)
+                        .build();
+                    u.text(id + ".icon.text")
+                        .size(iconSize, iconSize)
+                        .text(symbol)
+                        .fontSize(17)
+                        .color(blue)
+                        .horizontalAlign(eui::HorizontalAlign::Center)
+                        .verticalAlign(eui::VerticalAlign::Center)
+                        .build();
+                })
+                .build();
+            u.column(id + ".details")
+                .width(detailWidth)
+                .gap(4)
+                .content([&] {
+                    paragraph(u, id + ".title", title, detailWidth, ink, 19);
+                    paragraph(u, valueId, value, detailWidth, muted, 16);
+                })
+                .build();
+            if (accessory.action)
+                button(u, id + ".open", accessory.label, accessoryWidth, accessory.action, false,
+                       accessory.disabled, 36);
+            else
+                badge(u, id + ".license", accessory.label, accessoryWidth, blue, blueWash);
+        })
+        .build();
+}
+void aboutGroup(Ui &u, const std::string &id, const std::string &title, float w,
+                const std::function<void(float)> &content) {
+    section(u, id, title, w,
+            [&](float c) { u.column(id + ".rows").width(c).content([&] { content(c); }).build(); });
+}
+void aboutIdentity(Ui &u, float w) {
+    section(u, "about.hero", "", w, [&](float c) {
+        const bool inlineAction = c >= 460;
+        const float mark = inlineAction ? 60.f : 48.f;
+        constexpr float gap = 16, actionWidth = 140;
+        const float titleWidth = c - mark - gap - (inlineAction ? actionWidth + gap : 0.f);
+        const auto copyButton = [&] {
+            button(u, "copyversion", state.versionCopied ? "已复制版本信息" : "复制版本信息",
+                   actionWidth, [] {
+                       safe([] {
+                           platform::clipboard(platform::wide(
+                               std::string("MSA 数据生成器 v") + MSA_UI_VERSION +
+                               "\r\nWindows x64 / EUI-NEO 0.6.2"
+                               "\r\n交叉量具 R&R：Xbar-R / ANOVA"
+                               "\r\n作者：" +
+                               msa::project_author + "\r\n项目仓库：" + msa::project_repository +
+                               "\r\n项目许可：" + msa::project_license));
+                           state.versionCopied = true;
+                           state.hint("已复制版本信息");
+                       });
+                   });
+        };
+        u.row("about.identity")
+            .width(c)
+            .gap(gap)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                appMark(u, "about.mark", mark);
+                u.column("about.hero.copy")
+                    .width(titleWidth)
+                    .gap(5)
+                    .content([&] {
+                        text(u, "about.title", "MSA 数据生成器", titleWidth, 32, 22);
+                        paragraph(u, "about.purpose", "交叉量具 R&R 模拟数据生成与统计复核",
+                                  titleWidth, muted, 17);
+                        u.flow("about.hero.meta")
+                            .width(titleWidth)
+                            .gap(8)
+                            .lineGap(6)
+                            .margin(0, 3, 0, 0)
+                            .content([&] {
+                                badge(u, "about.version", std::string("v") + MSA_UI_VERSION, 82,
+                                      blue, blueWash);
+                                badge(u, "about.platform", "Windows x64", 112, muted,
+                                      surfaceDisabled);
+                            })
+                            .build();
+                    })
+                    .build();
+                if (inlineAction)
+                    copyButton();
+            })
+            .build();
+        if (!inlineAction)
+            u.row("about.hero.action")
+                .width(c)
+                .justifyContent(eui::Align::END)
+                .content(copyButton)
+                .build();
+    });
+}
+void aboutEnvironment(Ui &u, float w) {
+    section(u, "about.environment", "运行环境", w, [&](float c) {
+        const std::array<const char *, 4> ids{"about.build", "about.graphics", "about.dpi",
+                                              "about.scale"};
+        const std::array<const char *, 4> labels{"构建标准", "图形接口", "窗口 DPI", "界面缩放"};
+        const std::array<std::string, 4> values{"C++17", "OpenGL 3.3",
+                                                std::to_string(state.systemDpi),
+                                                number(state.pixelScale * 100, 0) + "%"};
+        const int columns = c >= 456 ? 4 : 2;
+        constexpr float gap = 12;
+        const float cell = (c - (columns - 1) * gap) / columns;
+        for (int start = 0; start < int(ids.size()); start += columns)
+            u.row("about.environment.row." + std::to_string(start))
+                .width(c)
+                .gap(gap)
+                .content([&] {
+                    for (int i = start; i < start + columns; ++i)
+                        u.stack(std::string(ids[i]) + ".tile")
+                            .size(cell, 64)
+                            .content([&] {
+                                u.rect(std::string(ids[i]) + ".surface")
+                                    .size(cell, 64)
+                                    .color(surfaceSoft)
+                                    .border(1, line)
+                                    .radius(controlRadius)
+                                    .build();
+                                u.column(std::string(ids[i]) + ".caption")
+                                    .width(cell)
+                                    .padding(12, 8)
+                                    .gap(2)
+                                    .content([&] {
+                                        text(u, std::string(ids[i]) + ".label", labels[i],
+                                             cell - 24, 19, 11, muted);
+                                        text(u, ids[i], values[i], cell - 24, 27, 15);
+                                    })
+                                    .build();
+                            })
+                            .build();
+                })
+                .build();
+    });
+}
+void aboutPage(Ui &u, float w, float h) {
+    const auto licenseDir = platform::executableDirectory() / "licenses";
+    std::error_code licenseError;
+    const bool licenseAvailable = std::filesystem::is_directory(licenseDir, licenseError);
+    const float viewportWidth =
+        std::min(w, 1100.f + tokens().metrics.control.scrollbar + scrollGutter);
+    u.row("about.center")
+        .size(w, h)
+        .justifyContent(eui::Align::CENTER)
+        .content([&] {
+            components::scrollView(u, "aboutscroll")
+                .size(viewportWidth, h)
+                .offset(state.aboutOffset)
+                .theme(tokens())
+                .scrollbarGap(scrollGutter)
+                .reserveScrollbar()
+                .onChange([](float offset) {
+                    state.aboutOffset = offset;
+                    menu.id.clear();
+                })
+                .content([licenseDir, licenseAvailable](Ui &v, float cw, float) {
+                    const auto project = [&](Ui &v, float width) {
+                        aboutGroup(v, "about.project", "项目信息", width, [&](float c) {
+                            aboutRow(v, "about.author.row", "@", "作者", msa::project_author,
+                                     "about.author", c, false,
+                                     {"访问主页", [] {
+                                          safe([] {
+                                              platform::openWebsite(
+                                                  L"https://github.com/print-yuhuan");
+                                              state.hint("已打开作者主页");
+                                          });
+                                      }});
+                            aboutRow(v, "about.repository.row", "↗", "项目仓库",
+                                     msa::project_repository, "about.repository", c, true,
+                                     {"访问仓库", [] {
+                                          safe([] {
+                                              platform::openWebsite(
+                                                  platform::wide(msa::project_repository));
+                                              state.hint("已打开项目仓库");
+                                          });
+                                      }});
+                            std::string description =
+                                "允许商业使用、修改和分发。\n"
+                                "分发副本或实质部分时须保留版权声明与许可声明。";
+                            if (!licenseAvailable)
+                                description += "\n许可全文随便携运行包提供。";
+                            aboutRow(v, "about.license.row", "§", msa::project_license, description,
+                                     "about.projectlicense", c, true,
+                                     {"许可目录",
+                                      [licenseDir] {
+                                          safe([licenseDir] {
+                                              platform::openDirectory(licenseDir);
+                                              state.hint("已打开许可目录");
+                                          });
+                                      },
+                                      !licenseAvailable});
+                        });
+                    };
+                    const auto dependencies = [](Ui &v, float width) {
+                        aboutGroup(v, "about.dependencies", "第三方组件", width, [&](float c) {
+                            aboutRow(v, "about.framework", "UI", "EUI-NEO", "界面框架 · 0.6.2",
+                                     "about.euiversion", c, false, {"Apache-2.0"});
+                            aboutRow(v, "about.font", "Aa", "Noto Sans CJK SC", "中文字体 · 2.004",
+                                     "about.fontlicense", c, true, {"OFL-1.1"});
+                            aboutRow(v, "about.json", "{}", "nlohmann/json", "配置与报告 · 3.12.0",
+                                     "about.jsonlicense", c, true, {"MIT"});
+                        });
+                    };
+                    v.column("about.page")
+                        .width(cw)
+                        .gap(16)
+                        .padding(0, 0, 0, 12)
+                        .content([&] {
+                            aboutIdentity(v, cw);
+                            pairedCards(v, "about.details", cw, "about.project", project,
+                                        "about.dependencies", dependencies, 860);
+                            aboutEnvironment(v, cw);
+                        })
+                        .build();
+                })
+                .build();
+        })
+        .build();
+}
+void footerStatus(Ui &u, float w, const std::string &fallback) {
+    // 固定提示槽仅更新文字和颜色，不改变底栏尺寸或按钮位置。
+    const bool showHint = state.visibleHint();
+    auto status = u.text("footer.status")
+                      .size(w, controlHeight)
+                      .text(showHint ? state.footerMessage : fallback)
+                      .fontSize(16.5f)
+                      .color(!showHint                          ? muted
+                             : state.footerLevel == Level::Info ? green
+                                                                : levelColor(state.footerLevel))
+                      .verticalAlign(eui::VerticalAlign::Center)
+                      .clip();
+    if (showHint)
+        status.onFrame([](float) {});
+    status.build();
+}
+// 新页面共享现有主题、状态栏与本地统计结果。
+#include "gui_visualization.hpp"
+#include "gui_status.hpp"
+void footer(Ui &u, float w) {
+    const bool compact = w < 760;
+    if (state.page == Page::Charts && !state.busy()) {
+        const float applyWidth = compact ? 110.f : 132.f, exportWidth = compact ? 124.f : 152.f;
+        footerStatus(u, w - applyWidth - exportWidth - 24, chartFooterSummary());
+        button(u, "charts.apply", "应用编辑", applyWidth, [] { applyChartEdits(visual.selected); },
+               false, visual.busy() || !insightResult() || !visual.editDirty[visual.selected]);
+        button(u, "charts.export", visual.busy() ? "导出中…" : "导出图表", exportWidth,
+               exportVisuals, true, visual.busy() || !insightResult() || selectedChartCount() == 0);
+        return;
+    }
+    if (state.page == Page::Data) {
+        const std::string fallback =
+            state.busy()
+                ? (w >= 760 ? "已搜索候选 " + std::to_string(state.ticks.load()) + " / " +
+                                  state.draft.attempts + " · " + number(state.elapsed) + " 秒"
+                            : std::to_string(state.ticks.load()) + " 次 · " +
+                                  number(state.elapsed) + " 秒")
+            : state.retainedResult() ? "保留上次成功结果，可复核或导出"
+            : !state.message.empty() ? "操作失败，请查看页面提示"
+            : state.validResult()    ? "数据已生成，可复核并导出 CSV"
+            : state.result && state.resultRevision != state.revision ? "参数已修改，请重新生成"
+            : "准备就绪";
+        const float generateWidth = compact ? 112.f : 146.f, exportWidth = compact ? 124.f : 158.f;
+        footerStatus(u, w - generateWidth - exportWidth - 24, fallback);
+        button(
+            u, "generate",
+            state.status == Status::Cancelling ? "取消中…"
+            : state.busy()                     ? "取消生成"
+            : state.validResult()              ? "重新生成"
+                                               : "生成数据",
+            generateWidth,
+            [cancelAction = state.busy()] {
+                if (cancelAction)
+                    state.requestCancel();
+                else if (!state.busy())
+                    state.start();
+            },
+            state.busy() || !state.validResult(), state.status == Status::Cancelling);
+        button(
+            u, "export", "导出 CSV", exportWidth, [] { exportData(); }, state.validResult(),
+            !state.validResult());
+    } else if (state.busy()) {
+        footerStatus(u, w - 284, "生成中 · " + number(state.elapsed) + " 秒");
+        button(u, "showtask", "返回数据", 140, [] { state.navigate(Page::Data); });
+        button(
+            u, "cancel", state.status == Status::Cancelling ? "取消中…" : "取消", 120,
+            [] { state.requestCancel(); }, true, state.status == Status::Cancelling);
+    } else if (state.page == Page::Options) {
+        const float resetWidth = compact ? 108.f : 124.f, saveWidth = compact ? 122.f : 148.f;
+        footerStatus(u, w - resetWidth - saveWidth - 24,
+                     state.configDirty ? "配置有未保存的更改" : "配置已保存");
+        button(u, "defaults", "恢复默认", resetWidth, [] {
+            state.draft = Draft{};
+            state.changed();
+            state.status = Status::Ready;
+            state.message.clear();
+            state.feedback("已恢复默认 · 尚未保存", "已恢复默认设置。点击「保存配置」可供下次启动使用。");
+            state.configOffset = 0;
+        });
+        button(u, "saveconfig", "保存配置", saveWidth, [] { saveSettings(); }, true);
+    } else {
+        footerStatus(u, w - 132, std::string("MSA 数据生成器 · v") + MSA_UI_VERSION);
+        button(u, "returntask", "返回数据", 120, [] { state.navigate(Page::Data); });
+    }
+}
+void compose(Ui &u, const eui::Screen &screen) {
+    state.poll();
+    pollVisuals();
+    state.systemDpi = GetDpiForWindow(platform::owner());
+    RECT physical{};
+    GetClientRect(platform::owner(), &physical);
+    if (physical.right > 0 && screen.width > 0)
+        state.pixelScale = physical.right / screen.width;
+    static Page previousPage = Page::Data;
+    if (state.previousWidth != screen.width || state.previousHeight != screen.height ||
+        previousPage != state.page) {
+        menu.id.clear();
+        state.previousWidth = screen.width;
+        state.previousHeight = screen.height;
+        previousPage = state.page;
+    }
+    if (std::fabs(state.limitScale - state.pixelScale) > .01f) {
+        state.limitScale = state.pixelScale;
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        RECT outer{};
+        int minWidth = int(620 * state.pixelScale), minHeight = int(500 * state.pixelScale);
+        if (GetMonitorInfoW(MonitorFromWindow(platform::owner(), MONITOR_DEFAULTTONEAREST),
+                            &monitor) &&
+            GetWindowRect(platform::owner(), &outer)) {
+            minWidth =
+                std::min(minWidth,
+                         int(std::max(160L, monitor.rcWork.right - monitor.rcWork.left -
+                                                (outer.right - outer.left - physical.right) - 32)));
+            minHeight = std::min(
+                minHeight,
+                int(std::max(160L, monitor.rcWork.bottom - monitor.rcWork.top -
+                                       (outer.bottom - outer.top - physical.bottom) - 32)));
+        }
+        glfwSetWindowSizeLimits(glfwGetCurrentContext(), minWidth, minHeight, GLFW_DONT_CARE,
+                                GLFW_DONT_CARE);
+    }
+    const bool compact = screen.width < 760;
+    const float pad = screen.width < 1120 ? 16.0f : 24.0f, c = screen.width - pad * 2;
+    const float headerHeight = compact ? 56.f : 64.f, navHeight = 48.f;
+    const float footerHeight = compact ? 56.f : 60.f, bodyInset = compact ? 8.f : 12.f;
+    const float h = std::max(120.0f, screen.height - headerHeight - navHeight - footerHeight -
+                                       bodyInset);
+    u.rect("header.surface")
+        .size(screen.width, headerHeight + navHeight)
+        .color(headerSurface)
+        .build();
+    u.rect("header.divider")
+        .position(0, headerHeight + navHeight - 1)
+        .size(screen.width, 1)
+        .color(line)
+        .build();
+    u.rect("footer.surface")
+        .position(0, screen.height - footerHeight)
+        .size(screen.width, footerHeight)
+        .color(surface)
+        .build();
+    u.rect("footer.divider")
+        .position(0, screen.height - footerHeight)
+        .size(screen.width, 1)
+        .color(line)
+        .build();
+    u.column("shell")
+        .size(screen.width, screen.height)
+        .content([&] {
+            u.row("header")
+                .size(screen.width, headerHeight)
+                .padding(pad, 0)
+                .gap(12)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    u.row("brandgroup")
+                        .size(compact ? 236.f : 282.f, 42)
+                        .gap(11)
+                        .alignItems(eui::Align::CENTER)
+                        .content([&] {
+                            appMark(u, "brand.mark", compact ? 34.f : 38.f);
+                            u.text("brand")
+                                .height(42)
+                                .text("MSA")
+                                .fontSize(compact ? 24.f : 27.f)
+                                .color(blue)
+                                .verticalAlign(eui::VerticalAlign::Center)
+                                .build();
+                            u.text("title")
+                                .height(42)
+                                .text("数据生成器")
+                                .fontSize(compact ? 21.f : 24.f)
+                                .color(ink)
+                                .verticalAlign(eui::VerticalAlign::Center)
+                                .build();
+                        })
+                        .build();
+                    u.rect("header.spacer")
+                        .width(eui::SizeValue::fill())
+                        .height(1)
+                        .color("#00000000")
+                        .build();
+                    headerStatusIndicator(u, headerStatusPresentation());
+                })
+                .build();
+            u.row("navigation")
+                .size(screen.width, navHeight)
+                .padding(pad, 3)
+                .gap(8)
+                .content([&] {
+                    tabs(
+                        u, "pages",
+                        {"数据", "图表", "日志", "选项", "帮助", "关于"},
+                        static_cast<int>(state.page), std::min(c, 684.0f),
+                        [](int i) {
+                            state.navigate(static_cast<Page>(i));
+                            menu.id.clear();
+                        },
+                        38);
+                })
+                .build();
+            u.rect("body.inset").size(screen.width, bodyInset).color(bg).build();
+            auto body = u.column("body").size(screen.width, h).padding(pad, 0);
+            // 正文始终清晰；过渡仅作用于导航和控件状态。
+            if (visual.busy())
+                body.onFrame([](float) {});
+            body.content([&] {
+                    switch (state.page) {
+                    case Page::Data:
+                        dataPage(u, c, h);
+                        break;
+                    case Page::Charts:
+                        chartsPage(u, c, h);
+                        break;
+                    case Page::Logs:
+                        logsPage(u, c, h);
+                        break;
+                    case Page::Options:
+                        optionsPage(u, c, h);
+                        break;
+                    case Page::Help:
+                        helpPage(u, c, h);
+                        break;
+                    case Page::About:
+                        aboutPage(u, c, h);
+                        break;
+                    }
+                })
+                .build();
+            u.row("footer")
+                .size(screen.width, footerHeight)
+                .padding(pad, 0)
+                .gap(12)
+                .alignItems(eui::Align::CENTER)
+                .justifyContent(state.page == Page::Data ? eui::Align::END : eui::Align::START)
+                .content([&] { footer(u, c); })
+                .build();
+        })
+        .build();
+    menuOverlay(u, screen);
+}
+} // namespace gui
+namespace app {
+const DslAppConfig &dslAppConfig() {
+    static const DslAppConfig config = [] {
+        // 无状态解码与图形初始化并行，FreeType操作仅在UI线程执行。
+        (void)gui::fontLoad();
+        float scale = 1;
+        wchar_t env[32]{};
+        if (GetEnvironmentVariableW(L"MSA_UI_SCALE", env, 32))
+            scale = std::clamp(float(_wtof(env)), 1.0f, 2.0f);
+        RECT a{0, 0, 1280, 960};
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &a, 0);
+        const UINT dpi = GetDpiForSystem();
+        const float effectiveScale = dpi / 96.0f * scale;
+        const int frameWidth = 2 * (GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) +
+                                    GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi));
+        const int frameHeight = 2 * (GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) +
+                                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)) +
+                                GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+        auto [w, h] = native_ui::initial_window_size(a.right - a.left, a.bottom - a.top,
+                                                     effectiveScale, frameWidth, frameHeight);
+        wchar_t ew[32]{}, eh[32]{};
+        if (GetEnvironmentVariableW(L"MSA_UI_WIDTH", ew, 32))
+            w = _wtoi(ew);
+        if (GetEnvironmentVariableW(L"MSA_UI_HEIGHT", eh, 32))
+            h = _wtoi(eh);
+        w = std::clamp(w, 160, std::max(160, int(a.right - a.left) - frameWidth - 32));
+        h = std::clamp(h, 160, std::max(160, int(a.bottom - a.top) - frameHeight - 32));
+        return DslAppConfig{}
+            .title(std::string("MSA 数据生成器 · v") + MSA_UI_VERSION)
+            // Use the embedded, multi-size Windows icon for both small and large
+            // shell surfaces; a single PNG would override it with scaled pixels.
+            .iconPath("")
+            .windowSize(w, h)
+            .minWindowSize(std::min(w, int(620 * effectiveScale)),
+                           std::min(h, int(500 * effectiveScale)))
+            .highDpi()
+            .uiScale(scale)
+            .fonts(gui::font(), gui::font())
+            .clearColor(eui::Color(gui::bg))
+            .fps(60)
+            .showDebugOverlay(false)
+            .showDebugStatsInTitle(false)
+            .onStart([] {
+                // 首次显示前按实际外框居中，工作区不包含任务栏。
+                RECT workArea{}, windowRect{};
+                const HWND window = platform::owner();
+                // Windows 10 不支持标题栏颜色属性，调用失败时使用系统配色。
+                if (SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR,
+                                                    &gui::headerBackground,
+                                                    sizeof(gui::headerBackground)))) {
+                    constexpr COLORREF captionText = RGB(24, 44, 69);
+                    DwmSetWindowAttribute(window, DWMWA_TEXT_COLOR, &captionText,
+                                          sizeof(captionText));
+                }
+                if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0) &&
+                    GetWindowRect(window, &windowRect)) {
+                    const int x =
+                        workArea.left + std::max(0L, (workArea.right - workArea.left -
+                                                      (windowRect.right - windowRect.left)) /
+                                                         2);
+                    const int y =
+                        workArea.top + std::max(0L, (workArea.bottom - workArea.top -
+                                                     (windowRect.bottom - windowRect.top)) /
+                                                        2);
+                    SetWindowPos(window, nullptr, x, y, 0, 0,
+                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                gui::initializeFont();
+                CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+                BOOL animations = TRUE;
+                if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
+                    gui::state.motion = animations != FALSE;
+                gui::state.systemDpi = GetDpiForWindow(platform::owner());
+                gui::state.loadInitial();
+            })
+            .onShutdown([] {
+                gui::stopVisuals();
+                gui::state.stop();
+                CoUninitialize();
+            })
+            .onKeyEvent([](const eui::KeyEvent &k) {
+                if (k.isDown() && k.key == eui::InputKey::Tab)
+                    gui::menu.id.clear();
+                if (k.isDown() && k.key == eui::InputKey::Escape) {
+                    gui::menu.id.clear();
+                }
+            });
+    }();
+    return config;
+}
+void compose(eui::Ui &u, const eui::Screen &s) { gui::compose(u, s); }
+} // namespace app
