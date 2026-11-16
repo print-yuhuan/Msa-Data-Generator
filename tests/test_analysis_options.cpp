@@ -55,6 +55,68 @@ void narrow_normal_classification_interval() {
         near(result["good_rejected"].get<double>() / expected_good, 1);
     }
 }
+void normal_classification_origin_invariance() {
+    auto cfg = default_config();
+    cfg["design"] = {{"operators", 2}, {"replicates", 2}, {"parts", 5}};
+    cfg["analysis"]["method"] = "crossed_anova";
+    cfg["analysis"]["misclassification"] = true;
+    cfg["analysis"]["historical_sd"] = 1e-8;
+
+    auto tiny = data();
+    for (auto &row : tiny)
+        for (double &value : row)
+            value *= 1e-10;
+    constexpr double shift = 1e12;
+    for (const char *side : {"lsl", "usl"}) {
+        auto single = cfg;
+        for (double origin : {0., shift, -shift}) {
+            single["analysis"]["historical_mean"] = origin;
+            single["specification"][side] = origin;
+            const auto result = calculate(tiny, single)["misclassification"];
+            // At the mean, conditional errors are equal for a single limit.
+            const double expected = std::atan(result["gage_sd"].get<double>() /
+                                              result["part_sd"].get<double>()) / std::acos(-1.);
+            near(result["accept_given_bad"], expected);
+            near(result["reject_given_good"], expected);
+        }
+    }
+
+    auto interval_data = data();
+    for (auto &row : interval_data)
+        for (double &value : row)
+            value *= 0x1p-16;
+    cfg["analysis"]["historical_sd"] = 0x1p-12;
+    const auto two_sided = [&](double origin) {
+        auto both = cfg;
+        both["analysis"]["historical_mean"] = origin;
+        both["specification"]["lsl"] = origin - 0x1p-12;
+        both["specification"]["usl"] = origin + 0x1p-11;
+        return calculate(interval_data, both)["misclassification"];
+    };
+    const auto centered = two_sided(0);
+    require(centered["bad_accepted"] > 0 && centered["good_rejected"] > 0,
+            "平移测试缺少可比较的误分类概率");
+    for (double origin : {shift, -shift}) {
+        const auto shifted = two_sided(origin);
+        for (const char *key : {"bad_accepted", "good_rejected", "accept_given_bad", "reject_given_good"})
+            near(shifted[key], centered[key]);
+    }
+
+    cfg["analysis"]["historical_mean"] = shift;
+    cfg["specification"]["lsl"] = shift;
+    cfg["analysis"]["historical_sd"] = calculate(tiny, cfg)["GRR"];
+    const auto no_part = calculate(tiny, cfg)["misclassification"];
+    require(no_part["part_sd"] == 0 && no_part["accept_given_bad"].is_null(),
+            "零部件变异时，单侧边界上的部件应属于合格总体");
+    near(no_part["bad_accepted"], 0);
+    near(no_part["reject_given_good"], .5);
+
+    const auto no_gage = calculate(Matrix(4, std::vector<double>{0, 1, 2, 3, 4}),
+                                   cfg)["misclassification"];
+    require(no_gage["gage_sd"] == 0, "误分类边界测试的量具变异应为零");
+    near(no_gage["accept_given_bad"], 0);
+    near(no_gage["reject_given_good"], 0);
+}
 void historical_variation_with_automatic_sample_scale() {
     for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
         auto cfg = default_config();
@@ -280,6 +342,7 @@ int main(int argc, char **argv) {
     try {
         narrow_specification_with_analysis_tolerance();
         narrow_normal_classification_interval();
+        normal_classification_origin_invariance();
         historical_variation_with_automatic_sample_scale();
         optional_reports_preserve_selected_sample();
         mls_confidence_domain();

@@ -32,18 +32,22 @@ inline std::string trim(const std::string &value) {
 }
 struct Target {
     int mode = 0;
-    std::string first, second;
+    std::string first, upper{}, tolerance{};
 };
 inline constexpr std::array<const char *, 6> csv_formats{"default", "minitab", "spss",
                                                          "jmp19",   "origin",  "matlab"};
 inline constexpr std::array<const char *, 3> run_order_modes{"standard", "all", "within_operator"};
 inline constexpr std::array<const char *, 3> interaction_modes{"auto", "include", "exclude"};
+inline constexpr std::array<const char *, 5> part_sampling_modes{
+    "default", "even", "stratified", "center_dense", "end_dense"};
 struct Draft {
     std::string operators = "3", replicates = "3", parts = "10", lsl, usl, multiplier = "6",
-                reference;
+                reference, minimumPartSpanPct;
     std::string center, decimals = "4", percentError = "0.1", ndcError = "0", seed,
                         attempts = "5000", timeout = "30", directory, filename = "msa_data.csv";
     int priority = 0, compliance = 0, scale = 0, existingFile = 0, csvFormat = 0, runMode = 0;
+    int partSampling = 0;
+    bool requireNormality = false;
     bool randomOperators = false, storeStandardOrder = false;
     std::string runSeed;
     int analysisMethod = 0, interactionMode = 0;
@@ -76,6 +80,20 @@ inline msa::Json numeric(const std::string &input, const std::string &label, boo
     } catch (const std::exception &) {
         throw msa::ConfigError(label + (integer ? "必须是整数" : "必须是有限数字"));
     }
+}
+inline msa::Json number_when_enabled(const std::string &input, const std::string &label,
+                                     bool enabled, double minimum, double maximum,
+                                     const msa::Json &fallback) {
+    if (enabled)
+        return numeric(input, label, false, fallback.is_null());
+    // A hidden field may contain an incomplete edit. Keep a valid preference.
+    try {
+        const double value = msa::parse_number(trim(input));
+        if (minimum <= value && value <= maximum)
+            return value;
+    } catch (const msa::ConfigError &) {
+    }
+    return fallback;
 }
 inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
     if (d.csvFormat < 0 || d.csvFormat >= int(csv_formats.size()) || d.runMode < 0 ||
@@ -116,7 +134,11 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
         throw msa::ConfigError("分析方法或交互项选择无效");
     c["analysis"]["method"] = d.analysisMethod ? "crossed_anova" : "crossed_xbarr";
     c["analysis"]["interaction"] = interaction_modes[d.interactionMode];
-    c["analysis"]["interaction_alpha"] = numeric(d.interactionAlpha, "交互项显著性水平");
+    const bool anova = d.analysisMethod == 1;
+    c["analysis"]["interaction_alpha"] =
+        number_when_enabled(d.interactionAlpha, "交互项显著性水平", anova && d.interactionMode == 0,
+                            std::nextafter(0., 1.), std::nextafter(1., 0.),
+                            c["analysis"]["interaction_alpha"]);
     c["analysis"]["tolerance"] = numeric(d.analysisTolerance, "分析容差", false, true);
     c["analysis"]["historical_sd"] = numeric(d.historicalSd, "历史标准差", false, true);
     c["analysis"]["historical_mean"] = numeric(d.historicalMean, "历史均值", false, true);
@@ -126,7 +148,10 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
         d.confidenceMethod > 1)
         throw msa::ConfigError("置信区间类型或算法选择无效");
     c["analysis"]["confidence"] = {{"enabled", d.confidenceEnabled},
-                                   {"level", numeric(d.confidenceLevel, "置信水平")},
+                                   {"level", number_when_enabled(d.confidenceLevel, "置信水平",
+                                                                 anova && d.confidenceEnabled,
+                                                                 .01, 99.99,
+                                                                 c["analysis"]["confidence"]["level"])},
                                    {"bound", d.confidenceBound == 1   ? "lower"
                                              : d.confidenceBound == 2 ? "upper"
                                                                       : "both"},
@@ -136,10 +161,19 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
                           {"compliance", d.compliance ? "relaxed" : "strict"}};
     if (use == ConfigUse::Analysis)
         return msa::normalize_config(c);
+    if (d.partSampling < 0 || d.partSampling >= int(part_sampling_modes.size()))
+        throw msa::ConfigError("部件取样方案无效");
+    const bool needsReference =
+        d.scale == 1 || c["specification"]["lsl"].is_null() || c["specification"]["usl"].is_null();
     c["generation"] = {{"center", numeric(d.center, "中心", false, true)},
                        {"priority", d.priority ? "indicators" : "center"},
+                       {"require_normality", d.requireNormality},
+                       {"part_sampling", part_sampling_modes[d.partSampling]},
+                       {"minimum_part_span_pct",
+                        numeric(d.minimumPartSpanPct, "最低部件跨度", false, true)},
                        {"scale_mode", d.scale ? "reference_tv_sd" : "auto"},
-                       {"reference_tv_sd", numeric(d.reference, "参考 TV_SD", false, true)},
+                       {"reference_tv_sd", number_when_enabled(d.reference, "参考 TV_SD",
+                                                             needsReference, 1e-12, 1e12, nullptr)},
                        {"decimal_places", numeric(d.decimals, "小数位", true)},
                        {"seed", numeric(d.seed, "随机种子", true, true)},
                        {"max_attempts", numeric(d.attempts, "候选次数上限", true)},
@@ -159,9 +193,9 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
         out = {{"mode", modes[t.mode]}};
         out[t.mode == 2 ? "min" : "value"] = numeric(t.first, msa::metric_keys[i], i == 4);
         if (t.mode == 2)
-            out["max"] = numeric(t.second, msa::metric_keys[i], i == 4);
-        else if (t.mode == 1 && !trim(t.second).empty())
-            out[i == 4 ? "tolerance" : "tolerance_pp"] = numeric(t.second, "目标允许误差", i == 4);
+            out["max"] = numeric(t.upper, msa::metric_keys[i], i == 4);
+        else if (t.mode == 1 && !trim(t.tolerance).empty())
+            out[i == 4 ? "tolerance" : "tolerance_pp"] = numeric(t.tolerance, "目标允许误差", i == 4);
     }
     return msa::normalize_config(c);
 }
@@ -200,6 +234,11 @@ inline Draft from_config(const msa::Json &raw) {
     d.attempts = text(g["max_attempts"]);
     d.timeout = text(g["timeout_seconds"]);
     d.priority = g["priority"] == "indicators";
+    d.requireNormality = g["require_normality"].get<bool>();
+    for (int i = 0; i < int(part_sampling_modes.size()); ++i)
+        if (g["part_sampling"] == part_sampling_modes[i])
+            d.partSampling = i;
+    d.minimumPartSpanPct = text(g["minimum_part_span_pct"]);
     d.scale = g["scale_mode"] == "reference_tv_sd";
     d.percentError = text(c["target_defaults"]["percentage_tolerance_pp"]);
     d.ndcError = text(c["target_defaults"]["ndc_tolerance"]);
@@ -225,9 +264,9 @@ inline Draft from_config(const msa::Json &raw) {
         target.mode = mode == "target" ? 1 : mode == "between" ? 2 : mode == "at_most" ? 3 : 4;
         target.first = text(t[target.mode == 2 ? "min" : "value"]);
         if (target.mode == 2)
-            target.second = text(t["max"]);
+            target.upper = text(t["max"]);
         else if (target.mode == 1 && t.contains(i == 4 ? "tolerance" : "tolerance_pp"))
-            target.second = text(t[i == 4 ? "tolerance" : "tolerance_pp"]);
+            target.tolerance = text(t[i == 4 ? "tolerance" : "tolerance_pp"]);
     }
     return d;
 }

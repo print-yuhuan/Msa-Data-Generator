@@ -1,7 +1,9 @@
 #include "core.hpp"
+#include "analysis_detail.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <random>
 
 namespace msa {
@@ -34,20 +36,50 @@ double preferred(const Json &c, const std::string &k, double fallback) {
         return (t["min"].get<double>() + t["max"].get<double>()) / 2;
     return fallback;
 }
+void shuffle_and_center(std::vector<double> &seq, Random &rng) {
+    rng.shuffle(seq);
+    const double mean = accurate_sum(seq) / static_cast<double>(seq.size());
+    for (auto &v : seq)
+        v -= mean;
+}
 std::vector<double> profile(int n, Random &rng) {
     std::vector<double> seq{0, 1};
     for (int i = 2; i < n; ++i)
         seq.push_back(rng.uniform(.05, .95));
-    rng.shuffle(seq);
-    double mean = accurate_sum(seq) / n;
-    for (auto &v : seq)
-        v -= mean;
+    shuffle_and_center(seq, rng);
+    return seq;
+}
+std::vector<double> part_profile(int n, const std::string &sampling, Random &rng) {
+    if (sampling == "default")
+        return profile(n, rng);
+
+    std::vector<double> seq;
+    seq.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        if (sampling == "stratified") {
+            seq.push_back(rng.uniform(static_cast<double>(i) / n, static_cast<double>(i + 1) / n));
+            continue;
+        }
+        const double position = 2.0 * i / (n - 1) - 1;
+        double value = position;
+        if (sampling == "center_dense")
+            value *= .5 + .5 * position * position;
+        else if (sampling == "end_dense")
+            value *= 2 - std::abs(position);
+        seq.push_back(value);
+    }
+    // Xbar-R constructs the intended PV from a profile with unit range.
+    const double span = seq.back() - seq.front();
+    for (double &value : seq)
+        value /= span;
+    shuffle_and_center(seq, rng);
     return seq;
 }
 std::optional<std::pair<Matrix, double>>
 normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int attempt) {
     auto [el, eh, al, ah, gl, gh] = ratio;
     int o = c["design"]["operators"], r = c["design"]["replicates"], p = c["design"]["parts"];
+    const auto &sampling = c["generation"]["part_sampling"].get_ref<const std::string &>();
     const auto &t = c["targets"];
     bool et = !t["EV_pct"].is_null(), at = !t["AV_pct"].is_null();
     double fallback =
@@ -92,7 +124,7 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
             inter = 0;
             msi = ev * ev;
         }
-        auto parts = profile(p, rng), operators = profile(o, rng);
+        auto parts = part_profile(p, sampling, rng), operators = profile(o, rng);
         scale_norm(parts, (p - 1) * (msi + o * r * pv * pv) / (o * r));
         scale_norm(operators, (o - 1) * (msi + p * r * (av * av - inter)) / (p * r));
         Matrix interaction(o, std::vector<double>(p));
@@ -132,7 +164,7 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
                         parts[j] + operators[i] + flat[i * p + j] + residuals[(i * p + j) * r + k];
         return std::make_pair(matrix, g);
     }
-    auto parts = profile(p, rng);
+    auto parts = part_profile(p, sampling, rng);
     for (auto &v : parts)
         v *= pv * pv_divisor(p);
     double arange = av > 1e-14 ? av_divisor(o) * std::sqrt(av * av + ev * ev / (p * r)) : 0;
@@ -153,8 +185,43 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
         }
     return std::make_pair(matrix, g);
 }
+double part_mean_span(const Matrix &matrix) {
+    double low = INFINITY, high = -INFINITY;
+    const double origin = matrix.front().front();
+    std::vector<double> values(matrix.size());
+    for (std::size_t part = 0; part < matrix.front().size(); ++part) {
+        for (std::size_t row = 0; row < matrix.size(); ++row)
+            values[row] = matrix[row][part] - origin;
+        const double mean = accurate_sum(values) / static_cast<double>(values.size());
+        low = std::min(low, mean);
+        high = std::max(high, mean);
+    }
+    return high - low;
+}
+bool uses_reference_scale(const Json &generation, const Json &specification) {
+    return generation["scale_mode"] == "reference_tv_sd" ||
+           specification["lsl"].is_null() || specification["usl"].is_null();
+}
+bool pt_excludes_historical_variation(const Json &c) {
+    const auto pt = acceptance(c, "PT_pct");
+    if (!pt || pt->first <= 0)
+        return false;
+    const auto &analysis = c["analysis"];
+    const auto &historical_mean = analysis["historical_mean"];
+    const auto reference_mean = historical_mean.is_null()
+                                    ? std::optional<double>{}
+                                    : std::optional<double>{historical_mean.get<double>()};
+    const auto width =
+        detail::effective_tolerance(analysis, c["specification"], reference_mean).width;
+    if (!(width > 0))
+        return false;
+    const double historical_sd = analysis["historical_sd"], multiplier = analysis["study_multiplier"];
+    // At equality, the analysis still uses history. Match P/T's computation order.
+    const double largest_pt_using_history = 100 * (multiplier * historical_sd) / width;
+    return pt->first > largest_pt_using_history;
+}
 std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &c, Random &rng,
-                                  int attempt) {
+                                  int attempt, double minimum_part_span) {
     auto &s = c["specification"];
     auto &g = c["generation"];
     const auto &analysis = c["analysis"];
@@ -184,40 +251,76 @@ std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &
                                      : analysis["historical_mean"].get<double>();
         width = 2 * std::abs((haslo ? lo : hi) - reference);
     }
+    // A requested center is a preference. With a single limit at that center,
+    // placement may move the sample mean and give it a nonzero P/T denominator.
+    bool estimate_pt_scale = !automatic_single_center && width > 0;
     auto pt = acceptance(c, "PT_pct");
     double sl = 0, sh = INFINITY;
-    if (pt && grr && !automatic_single_center) {
+    if (pt && grr && estimate_pt_scale) {
         double factor = width / (100 * c["analysis"]["study_multiplier"].get<double>() * grr);
         sl = pt->first * factor;
         sh = pt->second * factor;
+        if (single && strict && analysis["historical_mean"].is_null() && std::isfinite(sh)) {
+            const double grid = haslo ? grid_lo : grid_hi;
+            const double center_distance = haslo ? center - grid : grid - center;
+            const double extent = haslo ? high : -low;
+            const double farthest_reading = std::max(center_distance + sh * extent, sh * span);
+            const double margin = 8 * std::numeric_limits<double>::epsilon() *
+                                  std::max(std::abs(grid), std::abs(center));
+            // Below half a grid step, every originally proposed reading rounds to the same
+            // limit. Let the final measured P/T decide instead of forcing a constant sample.
+            if (farthest_reading + margin < .5 * std::pow(10., -dp)) {
+                estimate_pt_scale = false;
+                sl = 0;
+                sh = INFINITY;
+            }
+        }
     }
     if (strict && both && span)
         sh = std::min(sh, (hi - lo) / span);
+    double preferred_span_scale = 0;
+    const bool guide_part_span = minimum_part_span > 0 && g["scale_mode"] == "auto";
+    if (guide_part_span) {
+        const double span_at_unit_scale = part_mean_span(matrix);
+        if (span_at_unit_scale > 0) {
+            // Rounding can move the difference of two part means by one output unit.
+            const double output_unit = std::pow(10., -dp);
+            sl = std::max(sl, (minimum_part_span - output_unit) / span_at_unit_scale);
+            preferred_span_scale = minimum_part_span / span_at_unit_scale;
+        }
+        if (strict && span)
+            sh = std::min(sh, (grid_hi - grid_lo) / span);
+    }
     if (sl > sh)
         return {};
-    double desired = g["scale_mode"] == "reference_tv_sd" || !both
+    const bool reference_scale = uses_reference_scale(g, s);
+    double desired = reference_scale
                          ? (g["reference_tv_sd"].is_null() ? analysis["historical_sd"].get<double>()
                                                            : g["reference_tv_sd"].get<double>())
                          : (hi - lo) * .60 / std::max(span, 1e-12);
     auto &t = c["targets"]["PT_pct"];
     if (!t.is_null() && (t["mode"] == "target" || t["mode"] == "between") && grr &&
-        !automatic_single_center)
+        estimate_pt_scale)
         desired = preferred(c, "PT_pct", 10) * width /
                   (100 * c["analysis"]["study_multiplier"].get<double>() * grr);
+    if (guide_part_span)
+        desired = std::max(desired, preferred_span_scale);
     double scale = std::min(sh, std::max(sl, desired));
     if (attempt % 5 != 0) {
         if (std::isfinite(sh) && sh > sl)
             scale = rng.uniform(std::max(sl, sh * .15), sh);
-        else if (!pt)
+        else if (!pt) {
             scale *= rng.uniform(.7, 1.3);
+            if (guide_part_span)
+                scale = std::clamp(scale, sl, sh);
+        }
     }
     if (!analysis["historical_sd"].is_null() && analysis["process_variation"] == "historical") {
-        const bool reference = g["scale_mode"] == "reference_tv_sd";
-        const double anchor = reference && !g["reference_tv_sd"].is_null()
+        const double anchor = reference_scale && !g["reference_tv_sd"].is_null()
                                   ? g["reference_tv_sd"].get<double>()
                                   : analysis["historical_sd"].get<double>();
         // 双侧自动模式可按规格生成样本，报告仍使用配置的历史过程口径。
-        const bool flexible = !reference && both;
+        const bool flexible = !reference_scale;
         const double limit = flexible && strict && span
                                  ? std::min(sh, (grid_hi - grid_lo) / span)
                                  : sh;
@@ -249,6 +352,39 @@ std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &
         for (auto &v : row)
             v = parse_number(fixed(center + scale * v, dp));
     return result;
+}
+bool approximately_normal(const Matrix &matrix) {
+    std::vector<double> values;
+    values.reserve(matrix.size() * matrix.front().size());
+    const double origin = matrix.front().front();
+    for (const auto &row : matrix)
+        for (double value : row)
+            values.push_back(value - origin);
+    std::sort(values.begin(), values.end());
+
+    const double count = static_cast<double>(values.size());
+    const double mean = accurate_sum(values) / count;
+    double sum_squares = 0;
+    for (double value : values) {
+        const double deviation = value - mean;
+        sum_squares += deviation * deviation;
+    }
+    const double normal_scale = std::sqrt(2 * (sum_squares / (count - 1)));
+    if (!(normal_scale > 0) || !std::isfinite(normal_scale))
+        return false;
+
+    double tail_sum = 0;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        const double lower = (values[i] - mean) / normal_scale;
+        const double upper = (values[values.size() - 1 - i] - mean) / normal_scale;
+        tail_sum += (2.0 * static_cast<double>(i) + 1) *
+                    (std::log(.5 * std::erfc(-lower)) + std::log(.5 * std::erfc(upper)));
+    }
+    const double statistic = -count - tail_sum / count;
+    const double adjusted = statistic * (1 + .75 / count + 2.25 / (count * count));
+    // Stephens' fitted-normal Anderson–Darling 5% reference is a shape criterion here:
+    // measurements in a crossed study are grouped by part and operator.
+    return adjusted <= .752;
 }
 std::pair<double, double> score(const Json &m, const Json &c) {
     double total = 0;
@@ -282,6 +418,13 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
     const auto &analysis = c["analysis"];
     const auto &generation = c["generation"];
     const auto &specification = c["specification"];
+    const bool require_normality = generation["require_normality"].get<bool>();
+    const double minimum_part_span =
+        generation["minimum_part_span_pct"].is_null()
+            ? 0.
+            : std::max(std::numeric_limits<double>::denorm_min(),
+                       (generation["minimum_part_span_pct"].get<double>() / 100) *
+                           (specification["usl"].get<double>() - specification["lsl"].get<double>()));
     const bool with_optional_reports =
         analysis["method"] == "crossed_anova" &&
         (analysis["confidence"]["enabled"] == true ||
@@ -294,7 +437,8 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
         screening["analysis"]["misclassification"] = false;
     }
     if (!analysis["historical_sd"].is_null() && analysis["process_variation"] == "historical" &&
-        generation["scale_mode"] == "reference_tv_sd" && !generation["reference_tv_sd"].is_null()) {
+        uses_reference_scale(generation, specification) && !generation["reference_tv_sd"].is_null() &&
+        !pt_excludes_historical_variation(c)) {
         // 历史SD定义报告分母，参考TV_SD定义数据本身的尺度；保留两项独立含义。
         const double factor =
             analysis["historical_sd"].get<double>() / generation["reference_tv_sd"].get<double>();
@@ -337,11 +481,13 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
         auto n = normalized(construction, ratio, rng, attempt);
         if (!n)
             continue;
-        auto matrix = scale_place(n->first, n->second, c, rng, attempt);
+        auto matrix = scale_place(n->first, n->second, c, rng, attempt, minimum_part_span);
         if (!matrix)
             continue;
         auto m = calculate(*matrix, screening);
-        if (qualified(m, c)) {
+        if (qualified(m, c) &&
+            (minimum_part_span == 0 || part_mean_span(*matrix) >= minimum_part_span) &&
+            (!require_normality || approximately_normal(*matrix))) {
             auto sc = score(m, c);
             if (!best || sc < best_score) {
                 best = Result{std::move(*matrix), std::move(m), c, seed};
@@ -356,11 +502,21 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
     if (progress)
         progress(attempts, seconds(), best.has_value());
     check_cancelled();
-    if (!best)
-        throw SearchError("已尝试 " + std::to_string(attempts) +
-                          " 次，尚未找到满足条件的数据（不代表已证明无解）。请调整指标误差、小数位"
-                          "、规格或搜索限制。种子：" +
+    if (!best) {
+        const char *hint = require_normality && minimum_part_span > 0
+                               ? "尚未找到同时满足规格、指标、最低部件跨度和近似正态要求的数据。请尝试"
+                                 "降低最低部件跨度或调整指标、小数位、正态筛选和搜索预算。"
+                           : minimum_part_span > 0
+                               ? "尚未找到同时满足规格、指标和最低部件跨度的数据。请尝试降低最低部件跨度"
+                                 "或调整指标、小数位和搜索预算。"
+                           : require_normality
+                               ? "尚未找到同时满足生成约束和近似正态要求的数据。请调整指标约束、小数位或"
+                                 "搜索预算，也可关闭“要求近似正态”。"
+                               : "尚未找到满足条件的数据（不代表已证明无解）。请调整指标误差、小数位"
+                                 "、规格或搜索限制。";
+        throw SearchError("已尝试 " + std::to_string(attempts) + " 次，" + hint + "种子：" +
                           std::to_string(seed));
+    }
     if (with_optional_reports) {
         best->metrics = calculate(best->matrix, c);
         check_cancelled();

@@ -245,13 +245,16 @@ void options_grouping(const eui::Ui &ui, int tab) {
         throw std::runtime_error("旧的精度分组未合并到生成参数");
     if (ui.find("center.hit") || ui.find("lsl.hit") || ui.find("usl.hit") || ui.find("spec.card"))
         throw std::runtime_error("数据中心或规格范围仍出现在选项页");
-    if (tab != 0 && (ui.find("priority") || ui.find("compliance.hit")))
+    if (tab != 0 &&
+        (ui.find("priority") || ui.find("compliance.hit") || ui.find("normality.hit") ||
+         ui.find("part.sampling") || ui.find("part.span.hit")))
         throw std::runtime_error("生成规则控件出现在非研究选项中");
     if (tab == 0) {
         group("design.card", {"operators", "replicates", "parts"});
-        group("generation.rules.card", {"priority", "compliance.hit"});
+        group("generation.rules.card", {"priority", "compliance.hit", "normality.hit",
+                                        "normality.note", "part.sampling", "part.sampling.note"});
         aligned("priority", "compliance.hit");
-        group("generation.card", {"decimals", "scale", "seed.hit"});
+        group("generation.card", {"decimals", "scale", "seed.hit", "part.span.hit", "part.span.note"});
         const bool reference = gui::state.draft.scale == 1 ||
                                native_ui::trim(gui::state.draft.lsl).empty() ||
                                native_ui::trim(gui::state.draft.usl).empty();
@@ -673,12 +676,13 @@ void regrouped_settings_state(const msa::Result &generated) {
         const char *value;
     };
     constexpr int dataTab = -1;
-    const std::array<FieldCase, 9> fields{{
+    const std::array<FieldCase, 10> fields{{
         {dataTab, "center", &native_ui::Draft::center, "10.25"},
         {dataTab, "lsl", &native_ui::Draft::lsl, "8.5"},
         {dataTab, "usl", &native_ui::Draft::usl, "11.5"},
         {0, "seed", &native_ui::Draft::seed, "22409"},
         {0, "reference", &native_ui::Draft::reference, "0.25"},
+        {0, "part.span", &native_ui::Draft::minimumPartSpanPct, "80.5"},
         {0, "percenterror", &native_ui::Draft::percentError, "0.2"},
         {0, "ndcerror", &native_ui::Draft::ndcError, "1"},
         {1, "multiplier", &native_ui::Draft::multiplier, "5.15"},
@@ -751,6 +755,77 @@ void regrouped_settings_state(const msa::Result &generated) {
         if (gui::state.draft.*member != 1 || !staleResult())
             throw std::runtime_error(std::string("生成规则变更未正确保留并标记旧结果：") + id);
     }
+    for (const bool initial : {false, true}) {
+        reset(0);
+        gui::state.draft.requireNormality = initial;
+        eui::Ui ui;
+        ui.begin("generation-normality");
+        const float width = initial ? 588.f : 1232.f;
+        gui::optionsPage(ui, width, 500);
+        ui.end();
+        ui.layout(width, 500);
+        click(ui, "normality.hit");
+        if (gui::state.draft.requireNormality == initial || !staleResult())
+            throw std::runtime_error("正态性筛选变更未正确保留并标记旧结果");
+        auto saved = native_ui::to_config(gui::state.draft);
+        const auto generation =
+            native_ui::to_config(gui::state.draft, native_ui::ConfigUse::Generation);
+        if (saved["generation"]["require_normality"] != !initial ||
+            generation["generation"]["require_normality"] != !initial ||
+            native_ui::from_config(saved).requireNormality == initial)
+            throw std::runtime_error("正态性筛选未随生成请求或配置保存和恢复");
+        saved["generation"].erase("require_normality");
+        if (native_ui::from_config(saved).requireNormality)
+            throw std::runtime_error("缺少正态性筛选字段的旧配置未采用关闭默认值");
+    }
+    for (const auto &[width, height] : {std::pair{588.f, 332.f}, std::pair{1232.f, 636.f}}) {
+        const bool compact = width < 600;
+        reset(0);
+        gui::state.draft.partSampling = 0;
+        gui::state.draft.minimumPartSpanPct = "80.5";
+        gui::state.draft.lsl = "9.5";
+        gui::state.draft.usl = compact ? "" : "10.5";
+        eui::Ui ui;
+        ui.begin("part-sampling-and-span");
+        gui::optionsPage(ui, width, height);
+        ui.end();
+        ui.layout(width, height);
+        const auto *sampling = ui.find("part.sampling");
+        const auto *span = ui.find("part.span.hit");
+        const auto *spanNote = ui.find("part.span.note");
+        const auto *scroll = ui.find("configscroll");
+        if (!sampling || !sampling->onPress || !span || span->disabled || !spanNote || !scroll)
+            throw std::runtime_error("部件取样和跨度设置应可操作");
+        const float reachableBottom = scroll->frame.y + scroll->frame.height + scroll->scrollMaxOffset;
+        if (sampling->frame.y + sampling->frame.height > reachableBottom + .1f ||
+            span->frame.y + span->frame.height > reachableBottom + .1f ||
+            (spanNote->text.find("填写上下规格限") != std::string::npos) != compact)
+            throw std::runtime_error("部件取样和跨度设置超出滚动范围或缺少双侧规格提示");
+        sampling->onPress({}, {});
+        const std::vector<std::string> expected{
+            "默认", "等距覆盖", "分层随机", "中心加密", "两端加密"};
+        if (!gui::menu.select || gui::menu.items != expected)
+            throw std::runtime_error("部件取样下拉框应列出五种方案");
+        const int selected = compact ? 2 : 4;
+        gui::menu.select(selected);
+        gui::menu.id.clear();
+        if (gui::state.draft.partSampling != selected || !staleResult())
+            throw std::runtime_error("部件取样变更应保存选项并标记旧结果");
+        auto saved = native_ui::to_config(gui::state.draft);
+        const auto generation =
+            native_ui::to_config(gui::state.draft, native_ui::ConfigUse::Generation);
+        const auto loaded = native_ui::from_config(saved);
+        if (saved["generation"]["part_sampling"] != native_ui::part_sampling_modes[selected] ||
+            saved["generation"]["minimum_part_span_pct"] != 80.5 ||
+            generation["generation"] != saved["generation"] || loaded.partSampling != selected ||
+            loaded.minimumPartSpanPct != "80.5")
+            throw std::runtime_error("部件取样或跨度未随生成请求或配置保存和恢复");
+        saved["generation"].erase("part_sampling");
+        saved["generation"].erase("minimum_part_span_pct");
+        const auto legacy = native_ui::from_config(saved);
+        if (legacy.partSampling != 0 || !legacy.minimumPartSpanPct.empty())
+            throw std::runtime_error("旧配置应采用默认取样和自动跨度");
+    }
     reset(2);
     gui::state.draft.csvFormat = 1;
     gui::state.draft.storeStandardOrder = false;
@@ -774,6 +849,69 @@ void regrouped_settings_state(const msa::Result &generated) {
     std::cout << "重分组后参数变更正确标记旧结果，附加导出列仅修改输出偏好\n";
 }
 
+void setting_dependencies() {
+    native_ui::Draft draft;
+    draft.lsl = "9.5";
+    draft.usl = "10.5";
+    draft.interactionAlpha = "0";
+    draft.confidenceEnabled = true;
+    draft.confidenceLevel.clear();
+    draft.reference = "未完成";
+    for (const auto use : {native_ui::ConfigUse::Full, native_ui::ConfigUse::Generation,
+                           native_ui::ConfigUse::Analysis}) {
+        const auto effective = native_ui::to_config(draft, use);
+        if (effective["analysis"]["interaction_alpha"] != .05 ||
+            effective["analysis"]["confidence"]["level"] != 95 ||
+            !effective["generation"]["reference_tv_sd"].is_null())
+            throw std::runtime_error("停用字段妨碍使用当前有效选项");
+    }
+    const auto rejects = [](const native_ui::Draft &value, const std::string &expected) {
+        try {
+            native_ui::to_config(value, native_ui::ConfigUse::Generation);
+        } catch (const msa::ConfigError &error) {
+            if (std::string(error.what()).find(expected) != std::string::npos)
+                return;
+        }
+        throw std::runtime_error("重新启用后遗漏了对 " + expected + " 的检查");
+    };
+    auto activated = draft;
+    activated.analysisMethod = 1;
+    activated.confidenceEnabled = false;
+    rejects(activated, "显著性水平");
+    activated.interactionMode = 1;
+    activated.confidenceEnabled = true;
+    rejects(activated, "置信水平");
+    activated = draft;
+    activated.scale = 1;
+    rejects(activated, "参考 TV_SD");
+
+    draft.interactionAlpha = "0.08";
+    draft.confidenceLevel = "92";
+    draft.reference = ".2";
+    auto configured = native_ui::to_config(draft);
+    if (configured["analysis"]["interaction_alpha"] != .08 ||
+        configured["analysis"]["confidence"]["level"] != 92 ||
+        configured["generation"]["reference_tv_sd"] != .2)
+        throw std::runtime_error("合法停用选项未保留");
+
+    configured["targets"]["GRR_pct"] = {{"mode", "between"}, {"min", 10}, {"max", 20}};
+    draft = native_ui::from_config(configured);
+    auto &target = draft.targets[2];
+    target.mode = 1;
+    auto config = native_ui::to_config(draft);
+    if (config["targets"]["GRR_pct"].contains("tolerance_pp") ||
+        msa::acceptance(config, "GRR_pct") != msa::Bounds({9.9, 10.1}))
+        throw std::runtime_error("区间上限被误用为目标允许误差");
+    target.tolerance = "0.2";
+    target.mode = 2;
+    config = native_ui::to_config(draft);
+    if (config["targets"]["GRR_pct"]["max"] != 20)
+        throw std::runtime_error("目标允许误差被误用为区间上限");
+    target.mode = 1;
+    if (native_ui::to_config(draft)["targets"]["GRR_pct"]["tolerance_pp"] != .2)
+        throw std::runtime_error("切回目标模式时未恢复上次填写的允许误差");
+}
+
 void help_topics() {
     const auto revision = gui::state.revision;
     const std::array<const char *, 6> anchors{"help.workflow.card", "help.analysis.card",
@@ -782,6 +920,9 @@ void help_topics() {
     const std::array<const char *, 6> shortcuts{
         "sample.bg", "help.analysis.open.bg", "help.files.open.bg", "help.filename.open.bg",
         nullptr,     "help.charts.open.bg"};
+    const std::array<const char *, 6> lastSections{
+        "help.troubleshooting.card", "help.software.card", "help.minitab.card",
+        "help.filename.collision", "help.cli.outputs.card", "help.charts.export.card"};
     constexpr float tolerance = .1f;
     const auto bottom = [](const core::dsl::Element &node) {
         return node.frame.y + node.frame.height;
@@ -835,11 +976,25 @@ void help_topics() {
                 scroll->frame.width > 940.f + tolerance)
                 throw std::runtime_error("help toolbar and body do not share a centered column");
             const float reachableBottom = bottom(*scroll) + scroll->scrollMaxOffset;
-            if (const auto *shortcut = shortcuts[topic]) {
-                const auto *action = page.find(shortcut);
+            const auto *last = page.find(lastSections[topic]);
+            if (!last || bottom(*last) > reachableBottom + tolerance)
+                throw std::runtime_error("last help section is missing or clipped");
+            const auto checkShortcut = [&](const char *id) {
+                const auto *action = page.find(id);
                 if (!action || !action->onClick || !action->focusable || !action->onKeyEvent ||
                     bottom(*action) > reachableBottom + tolerance)
-                    throw std::runtime_error(std::string("unreachable help shortcut: ") + shortcut);
+                    throw std::runtime_error(std::string("unreachable help shortcut: ") + id);
+            };
+            if (const auto *shortcut = shortcuts[topic])
+                checkShortcut(shortcut);
+            if (topic == 0) {
+                checkShortcut("help.rules.open.bg");
+                checkShortcut("help.logs.open.bg");
+            }
+            if (topic == 4) {
+                checkShortcut("help.cli.help.copy.bg");
+                checkShortcut("help.cli.example.copy.bg");
+                checkShortcut("help.cli.analyze.example.copy.bg");
             }
             if (topic == 3) {
                 for (const auto &variable : msa::filename_variables()) {
@@ -2080,11 +2235,11 @@ void help_destinations() {
     const auto revision = gui::state.revision;
     const auto configOffset = gui::state.configOffset;
     const auto helpOffset = gui::state.helpOffset;
-    const std::array<const char *, 3> buttons{"help.analysis.open.bg", "help.files.open.bg",
-                                              "help.filename.open.bg"};
-    for (int i = 0; i < 3; ++i) {
+    const std::array<const char *, 4> buttons{"help.rules.open.bg", "help.analysis.open.bg",
+                                              "help.files.open.bg", "help.filename.open.bg"};
+    for (int i = 0; i < int(buttons.size()); ++i) {
         gui::state.navigate(gui::Page::Help);
-        gui::state.helpTopic = i + 1;
+        gui::state.helpTopic = i;
         gui::state.helpOffset = 0;
         gui::state.configOffset = 120;
         gui::state.hint("copied");
@@ -2094,7 +2249,7 @@ void help_destinations() {
         help.end();
         help.layout(588, 500);
         click(help, buttons[i]);
-        if (gui::state.page != gui::Page::Options || gui::state.optionsTab != (i == 0 ? 1 : 2) ||
+        if (gui::state.page != gui::Page::Options || gui::state.optionsTab != std::min(i, 2) ||
             gui::state.configOffset != 0 || !gui::state.footerMessage.empty() ||
             gui::state.revision != revision)
             throw std::runtime_error(
@@ -2624,6 +2779,18 @@ void chart_interaction(const msa::Result &generated) {
     gui::visual.scope = 1;
     gui::visual.included.fill(false);
     gui::visual.included[0] = gui::visual.included[3] = true;
+    gui::visual.selected = 2;
+    gui::visual.editDirty[2] = true;
+    require(gui::chartFooterSummary().find("未应用") == std::string::npos,
+            "组合导出误报未勾选图表的草稿");
+    gui::visual.editDirty[3] = true;
+    require(gui::chartFooterSummary().find("未应用") != std::string::npos,
+            "组合导出未提示已勾选图表的草稿");
+    gui::exportVisuals();
+    require(!gui::visual.busy() && gui::visual.selected == 3 && gui::visual.errorChart == 3,
+            "组合导出和底栏使用的草稿检查范围不一致");
+    gui::visual.editDirty[2] = gui::visual.editDirty[3] = false;
+    gui::clearVisualError();
     gui::visual.format = 2;
     gui::visual.filename = "两图组合快照";
     gui::exportVisuals();
@@ -2672,6 +2839,7 @@ int wmain(int argc, wchar_t **argv) {
         data_settings_layout();
         options_navigation(generated);
         regrouped_settings_state(generated);
+        setting_dependencies();
         help_topics();
         scrolled_menu_anchors();
         help_destinations();

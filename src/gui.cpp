@@ -202,11 +202,11 @@ struct State {
         draft.interactionAlpha = alpha;
         draft.lsl = "9.5";
         draft.usl = "10.5";
-        draft.targets[0] = {1, "10", "0.1"};
-        draft.targets[1] = {3, "10", ""};
+        draft.targets[0] = {1, "10", "", "0.1"};
+        draft.targets[1] = {3, "10"};
         draft.targets[2] = {2, "10", "20"};
-        draft.targets[3] = {3, "20", ""};
-        draft.targets[4] = {4, "5", ""};
+        draft.targets[3] = {3, "20"};
+        draft.targets[4] = {4, "5"};
         changed();
         status = Status::Ready;
         feedback("示例设置已填入", "已载入示例设置，可生成模拟测量数据并复核指标。");
@@ -1171,6 +1171,8 @@ void inputs(Ui &u, float w) {
                         .content([&] {
                             text(u, id + ".name", metricNames[i], labelWidth, 40, 14);
                             combo(u, id + ".mode", modes, t.mode, modeWidth, [i](int mode) {
+                                if (state.busy() || state.draft.targets[i].mode == mode)
+                                    return;
                                 state.draft.targets[i].mode = mode;
                                 state.changed();
                             });
@@ -1194,7 +1196,7 @@ void inputs(Ui &u, float w) {
                                                 t.mode == 1
                                                     ? (i == 4 ? "误差（整数）" : "误差（百分点）")
                                                     : ("上限" + unit),
-                                                t.second, f,
+                                                t.mode == 1 ? t.tolerance : t.upper, f,
                                                 t.mode == 1 ? (i == 4 ? state.draft.ndcError
                                                                       : state.draft.percentError)
                                                             : "");
@@ -1225,10 +1227,11 @@ std::string condition(int i) {
     const std::string first = display(t.first);
     if (t.mode == 1)
         return first + " ± " +
-               display(t.second.empty() ? (i == 4 ? state.draft.ndcError : state.draft.percentError)
-                                        : t.second);
+               display(native_ui::trim(t.tolerance).empty()
+                           ? (i == 4 ? state.draft.ndcError : state.draft.percentError)
+                           : t.tolerance);
     if (t.mode == 2)
-        return first + " ～ " + display(t.second);
+        return first + " ～ " + display(t.upper);
     return std::string(t.mode == 3 ? "≤ " : "≥ ") + first;
 }
 std::string boundText(double v, int dp) { return std::isfinite(v) ? msa::fixed(v, dp) : "∞"; }
@@ -2063,6 +2066,14 @@ void designSettings(Ui &u, float w) {
     });
 }
 void generationRules(Ui &u, float w) {
+    static const std::vector<std::string> samplingNames{
+        "默认", "等距覆盖", "分层随机", "中心加密", "两端加密"};
+    static constexpr std::array<const char *, native_ui::part_sampling_modes.size()> samplingNotes{
+        "沿用现有方式，在区间两端和中间取样。",
+        "按近似相等的间距布置部件尺寸。",
+        "等分取样区间，每段随机取一件。",
+        "部件尺寸在中心附近较密，两端逐渐稀疏。",
+        "部件尺寸在区间两端较密，中心较稀疏。"};
     section(u, "generation.rules", "生成规则", w, [&](float c) {
         const float f = (c - 16) / 2;
         u.row("generation.rules.values")
@@ -2114,6 +2125,38 @@ void generationRules(Ui &u, float w) {
                           state.draft.compliance == 0 ? "在「数据」页填写至少一侧规格限。"
                                                       : "允许测量值超出规格限。",
                           f, muted, 17.5f);
+            })
+            .build();
+        u.row("generation.rules.normality")
+            .width(c)
+            .gap(16)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                toggle(u, "normality", "要求近似正态", state.draft.requireNormality, f,
+                       [](bool enabled) {
+                           if (state.busy() || state.draft.requireNormality == enabled)
+                               return;
+                           state.draft.requireNormality = enabled;
+                           state.changed();
+                       });
+                paragraph(u, "normality.note", "筛选最终测量值的正态性，规格和指标约束同时生效。",
+                          f, muted, 17.5f);
+            })
+            .build();
+        u.column("generation.rules.sampling")
+            .width(c)
+            .gap(5)
+            .content([&] {
+                text(u, "part.sampling.label", "部件取样", f, 21, 13);
+                const int selected =
+                    std::clamp(state.draft.partSampling, 0, int(samplingNames.size()) - 1);
+                combo(u, "part.sampling", samplingNames, selected, f, [](int i) {
+                    if (state.busy() || state.draft.partSampling == i)
+                        return;
+                    state.draft.partSampling = i;
+                    state.changed();
+                });
+                paragraph(u, "part.sampling.note", samplingNotes[selected], c, muted, 17.5f);
             })
             .build();
     });
@@ -2198,9 +2241,22 @@ void generationSettings(Ui &u, float w) {
                     .build();
             })
             .build();
-        const bool showReference = state.draft.scale == 1 ||
-                                   native_ui::trim(state.draft.lsl).empty() ||
-                                   native_ui::trim(state.draft.usl).empty();
+        const bool hasBothLimits = !native_ui::trim(state.draft.lsl).empty() &&
+                                   !native_ui::trim(state.draft.usl).empty();
+        u.row("generation.part.span")
+            .width(c)
+            .gap(12)
+            .alignItems(eui::Align::CENTER)
+            .content([&] {
+                paragraph(u, "part.span.note",
+                          hasBothLimits ? "部件均值的最大差，占规格宽度的百分比。"
+                                        : "设置跨度前，请在「数据」页填写上下规格限。",
+                          f, muted, 17.5f);
+                field(u, "part.span", "最低部件跨度（%）", state.draft.minimumPartSpanPct, f,
+                      "留空按生成尺度");
+            })
+            .build();
+        const bool showReference = state.draft.scale == 1 || !hasBothLimits;
         u.row("generation.references")
             .width(c)
             .gap(12)
@@ -2966,13 +3022,16 @@ void helpText(Ui &u, const std::string &id, const std::string &copy, float w,
         .color(color)
         .build();
 }
-void copyFilenameVariable(const std::string &token) {
+void copyHelpContent(const std::string &content, const std::string &confirmation) {
     try {
-        platform::clipboard(platform::wide(token));
-        state.hint("已复制 " + token);
+        platform::clipboard(platform::wide(content));
+        state.hint(confirmation);
     } catch (const std::exception &error) {
         state.feedback("复制失败，请重试", error.what(), Level::Error);
     }
+}
+void copyFilenameVariable(const std::string &token) {
+    copyHelpContent(token, "已复制 " + token);
 }
 void filenameVariableHelp(Ui &u, const msa::FilenameVariable &variable, float w) {
     const auto id = std::string("help.variable.") + variable.name;
@@ -3491,13 +3550,507 @@ void helpExample(Ui &u, const std::string &id, const std::string &copy, float w)
         })
         .build();
 }
+void helpItem(Ui &u, const std::string &id, const std::string &title, const std::string &copy,
+             float w) {
+    helpSubheading(u, id + ".title", title, w);
+    helpText(u, id, copy, w);
+}
+template <std::size_t N>
+void helpRows(Ui &u, const std::string &id,
+             const std::array<std::pair<const char *, const char *>, N> &rows, float w) {
+    constexpr float gap = 14.f;
+    const float labelWidth = std::min(150.f, w * .29f);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const auto row = id + "." + std::to_string(i);
+        const auto &[label, copy] = rows[i];
+        u.row(row)
+            .width(w)
+            .gap(gap)
+            .content([&] {
+                helpText(u, row + ".label", label, labelWidth, blue);
+                helpText(u, row + ".copy", copy, w - labelWidth - gap);
+            })
+            .build();
+    }
+}
+void helpCommand(Ui &u, const std::string &id, const std::string &command, float w) {
+    helpExample(u, id, command, w);
+    u.row(id + ".actions")
+        .width(w)
+        .justifyContent(eui::Align::END)
+        .content([&] {
+            button(u, id + ".copy", "复制命令", 112,
+                   [command] { copyHelpContent(command, "已复制命令"); }, false, false, 32);
+        })
+        .build();
+}
+void helpQuickStart(Ui &v, float cw) {
+    section(v, "help.workflow", "从示例开始", cw, [&](float c) {
+        helpText(v, "help.workflow.intro",
+                 "「载入示例配置」会填入一组可生成的参数并返回「数据」页。点击「生成数据」即可查看结果。",
+                 c);
+        button(
+            v, "sample", "载入示例配置", 156,
+            [] {
+                if (state.busy())
+                    return;
+                state.sample();
+                state.navigate(Page::Data);
+            },
+            false, state.busy());
+
+        const auto step = [&](const std::string &id, const std::string &number,
+                              const std::string &title, const std::string &detail) {
+            v.rect(id + ".divider").size(c, 1).color(line).build();
+            v.row(id + ".row")
+                .width(c)
+                .gap(12)
+                .content([&] {
+                    badge(v, id + ".number", number, 40);
+                    v.column(id + ".content")
+                        .width(c - 52)
+                        .gap(4)
+                        .content([&] {
+                            text(v, id + ".title", title, c - 52, 26, 15);
+                            helpText(v, id, detail, c - 52);
+                        })
+                        .build();
+                })
+                .build();
+        };
+        step("help.step1", "1", "设置研究设计",
+             "在「选项 → 研究」设置操作员数、重复测量次数和部件数。在「选项 → 分析」选择分析方法。");
+        step("help.step2", "2", "填写生成条件",
+             "在「数据」页填写规格限和指标约束，数据中心可留空。「规格内生成」需要至少一侧规格限，"
+             "「最低部件跨度」需要上下规格限。");
+        step("help.step3", "3", "生成并核对结果",
+             "点击「生成数据」。在「指标复核」核对实际值，在「数据预览」检查测量记录，"
+             "再到「分析详情」或「ANOVA 详情」查看计算结果。搜索期间可在底栏取消。");
+        step("help.step4", "4", "导出 CSV",
+             "在「选项 → 导出」选择格式、运行顺序和保存位置，然后回到「数据」页点击「导出 CSV」。");
+    });
+
+    section(v, "help.rules", "部件取样与分布", cw, [&](float c) {
+        helpText(v, "help.part.sampling",
+                 "在「选项 → 研究 → 生成规则」选择「部件取样」。每件部件的基础尺寸供所有操作员和"
+                 "重复测量使用。",
+                 c);
+        button(v, "help.rules.open", "前往研究选项", 160, [] {
+            state.optionsTab = 0;
+            state.configOffset = 0;
+            state.navigate(Page::Options);
+        });
+        constexpr std::array<std::pair<const char *, const char *>, 5> sampling{{
+            {"默认", "两端各取一点，中间随机取样。跨度留空时可复现原有固定种子的结果。"},
+            {"等距覆盖", "按近似相等的间距布置部件，减少尺寸扎堆。"},
+            {"分层随机", "等分取样区间，每段随机取一件，让取样覆盖整个区间。"},
+            {"中心加密", "中心附近的部件较密，两端逐渐稀疏。"},
+            {"两端加密", "较小和较大的部件各成一组，中间较稀疏。"},
+        }};
+        helpRows(v, "help.part.sampling.modes", sampling, c);
+        helpItem(v, "help.part.span", "最低部件跨度",
+                 "在「生成参数」选填百分比，留空时沿用生成尺度。程序先按最终精度舍入读数，"
+                 "再按部件求均值。规格为 9.5～10.5 时，填写 80 表示最大与最小部件均值至少相差 0.8。",
+                 c);
+        helpItem(v, "help.normality", "要求近似正态",
+                 "开启后，程序用 Anderson–Darling 的 5% 参考阈值筛选舍入后的全部读数。"
+                 "这个开关可与各取样方案组合。两端加密时，同时满足正态筛选可能需要更多搜索。",
+                 c);
+    });
+
+    section(v, "help.scale", "生成尺度与种子", cw, [&](float c) {
+        constexpr std::array<std::pair<const char *, const char *>, 4> settings{{
+            {"生成优先级",
+             "「中心优先」先找更接近所填中心的结果。「指标优先」先找更接近指标目标的结果。"
+             "候选数据均须满足已启用的约束。"},
+            {"规格内生成", "开启后，每个最终测量值都须落在已填写的规格限内。关闭后允许超限。"},
+            {"生成尺度",
+             "选择「参考总变异」时填写参考总变异标准差（TV_SD），留空则用历史标准差。"
+             "只填一侧规格限或未填规格时，也需要其中一项。"},
+            {"数据生成种子",
+             "相同版本、配置和固定种子可复现生成结果。搜索超时可能提前结束，"
+             "小数位数同时决定生成时的舍入和 CSV 的精度。"},
+        }};
+        helpRows(v, "help.scale.settings", settings, c);
+    });
+
+    section(v, "help.settings", "保存配置", cw, [&](float c) {
+        helpText(v, "help.settings.save",
+                 "在「选项」底栏点击「保存配置」，下次启动会自动载入。点击「恢复默认」后，"
+                 "再保存即可在下次启动使用默认设置。配置路径可在「配置管理」复制或打开所在目录。",
+                 c);
+        helpExample(v, "help.path", "%USERPROFILE%\\MSA数据生成器\\msa_generator.json", c);
+        helpText(v, "help.settings.regenerate",
+                 "修改研究、生成、规格、指标或分析设置后，需要重新生成。仅调整导出设置时，"
+                 "可以直接用同一批数据再次导出。",
+                 c);
+    });
+
+    section(v, "help.troubleshooting", "生成失败时怎么排查", cw, [&](float c) {
+        constexpr std::array<std::pair<const char *, const char *>, 3> issues{{
+            {"参数校验失败", "按提示补齐规格限或参考尺度，并检查数字格式、范围和小数位。"},
+            {"约束冲突", "检查指标范围能否同时满足。规格内可用的精度数值过少时，可提高小数位数。"},
+            {"搜索未找到结果",
+             "先检查指标误差、最低部件跨度和近似正态要求，再按需增加「约束与搜索」里的尝试次数或时限。"},
+        }};
+        helpRows(v, "help.troubleshooting.cases", issues, c);
+        helpItem(v, "help.logs", "查看日志和保存路径",
+                 "「日志」显示本次运行最近的 100 条记录，可筛选「全部」「警告」或「错误」。"
+                 "导出失败时，从日志查看完整原因。点击「复制当前日志」可带走筛选后的记录，"
+                 "开启「跟随最新」可回到列表末尾。",
+                 c);
+        button(v, "help.logs.open", "打开日志页", 144, [] { state.navigate(Page::Logs); });
+    });
+}
+
+void helpAnalysis(Ui &v, float cw) {
+    section(v, "help.analysis", "选择分析方法", cw, [&](float c) {
+        helpText(v, "help.analysis.select",
+                 "两种方法均用于平衡交叉量具 R&R。每名操作员测量全部部件，每个组合重复测量相同次数。"
+                 "支持 2 或 3 名操作员、2 或 3 次重复测量及 5～10 个部件。",
+                 c);
+        button(v, "help.analysis.open", "前往分析选项", 160, [] {
+            state.optionsTab = 1;
+            state.configOffset = 0;
+            state.navigate(Page::Options);
+        });
+        helpItem(v, "help.xbarr", "Xbar-R（均值极差法）",
+                 "按每个操作员与部件组合的极差估计重复性（EV），用操作员均值的极差估计再现性（AV）并扣除重复性影响，"
+                 "用部件均值的极差估计部件间变异（PV）。在「分析详情」查看分量。",
+                 c);
+        helpItem(v, "help.anova", "ANOVA（方差分析法）",
+                 "把部件和操作员作为随机因子，以平方和、自由度和均方估计方差分量。"
+                 "在「ANOVA 详情」查看最终模型、完整模型的交互项 P 值、方差分析表和方差分量。",
+                 c);
+        helpItem(v, "help.anova.interaction", "部件 × 操作员交互项",
+                 "选择「按 P 值判断」时可设置显著性水平 α，默认 0.05。P < α 时保留交互项并计入再现性。"
+                 "P ≥ α 或 P 值不可计算时，将交互项并入重复性误差。也可直接选择「保留交互项」或"
+                 "「并入重复性误差」。方差分量为负时按 0 计算。修改后请重新生成。",
+                 c);
+    });
+    section(v, "help.metrics", "读懂复核指标", cw, [&](float c) {
+        constexpr std::array<std::pair<const char *, const char *>, 5> metrics{{
+            {"EV / TV %", "重复性占总变异的比例，反映同一操作员反复测量同一部件的波动。"},
+            {"AV / TV %", "再现性占总变异的比例，反映操作员间的差异。ANOVA 保留的交互分量也计入再现性。"},
+            {"GRR / TV %", "量具 R&R 占总变异的比例。量具 R&R 合并重复性与再现性。"},
+            {"P/T %", "量具 R&R 的研究变异相对有效容差的比例。有效容差由分析容差或规格限确定。"},
+            {"ndc", "可区分类别数。将 1.41 × PV_SD ÷ GRR_SD 向下取整，最小为 1。GRR_SD 为 0 时不可计算。"},
+        }};
+        helpRows(v, "help.metrics.values", metrics, c);
+        helpText(v, "help.sd",
+                 "EV、AV、GRR、PV 和 TV 均以标准差 SD（1σ）表示。研究变异等于 k × SD，k 默认取 6。"
+                 "「指标复核」中的百分比显示两位小数，ndc 显示整数。判定使用完整精度。",
+                 c);
+    });
+    section(v, "help.constraints", "选择指标约束", cw, [&](float c) {
+        constexpr std::array<std::pair<const char *, const char *>, 5> constraintModes{{
+            {"不约束", "仅查看该指标的实际值。"},
+            {"目标值", "接受目标值加减允许误差形成的范围。误差填 0 时要求等于目标值。"},
+            {"区间", "接受下限到上限之间的数值，包含两端。"},
+            {"不高于", "接受小于或等于阈值的数值。"},
+            {"不低于", "接受大于或等于阈值的数值。"},
+        }};
+        helpRows(v, "help.constraints.modes", constraintModes, c);
+        helpItem(v, "help.units", "允许误差",
+                 "百分比指标的误差以百分点填写。ndc 的目标值和误差都用整数。"
+                 "误差留空时采用「选项 → 研究 → 约束与搜索」里的默认允许误差。",
+                 c);
+        helpExample(v, "help.constraints.example",
+                    "将 GRR / TV % 设为「目标值」，填写 10 和 0.1，接受范围为 9.90%～10.10%。", c);
+        helpText(v, "help.constraints.result",
+                 "「满足」表示生成结果达到所设约束。评价实际测量系统时，应结合真实测量数据与验收要求。", c);
+    });
+    section(v, "help.process", "P/T 与历史过程", cw, [&](float c) {
+        helpItem(v, "help.process.tolerance", "如何确定有效容差",
+                 "优先使用「选项 → 分析 → 评价口径」里的分析容差。留空时，双侧规格取 USL − LSL。"
+                 "单侧规格用规格限与均值之间距离的两倍。历史均值留空时用实际测量均值，距离为零时 P/T 不可计算。",
+                 c);
+        helpExample(v, "help.process.tolerance.formula",
+                    "P/T% = 100 × k × GRR_SD ÷ 有效容差\n"
+                    "例如 GRR_SD = 0.02、k = 6，有效容差为 1，则 P/T 为 12%。",
+                    c);
+        helpItem(v, "help.process.history", "选择过程变异估计来源",
+                 "选择「优先使用历史标准差」时，历史 SD ≥ GRR_SD 便以历史 SD 作为 TV_SD，并由 TV_SD 和 "
+                 "GRR_SD 推算 PV_SD。历史 SD 留空或小于 GRR_SD 时，使用本次研究估计。"
+                 "选择「按本次研究估计」则始终以本次研究计算 TV 和 PV。填写历史标准差后，"
+                 "可查看各分量 SD 相对历史标准差的百分比（%Process）。",
+                 c);
+    });
+    section(v, "help.inference", "ANOVA 统计推断", cw, [&](float c) {
+        helpItem(v, "help.process.classification", "计算误分类概率",
+                 "在「选项 → 分析 → 统计推断」开启，需至少一侧规格限。结果可查看真实不合格却被判合格、"
+                 "真实合格却被判不合格的概率，并分别给出联合概率和条件概率。"
+                 "模型假定真实部件尺寸与测量误差独立且服从正态分布。",
+                 c);
+        helpText(v, "help.process.classification.source",
+                 "当历史 SD ≥ GRR_SD 时，误分类使用历史过程波动，否则使用研究部件间变异。"
+                 "「过程变异估计来源」可单独设置。条件事件概率为 0 时，相应条件概率不可计算。",
+                 c);
+        helpItem(v, "help.process.confidence", "计算置信区间",
+                 "在「统计推断」选择置信水平与置信限类型。可查看方差分量、标准差、研究变异、P/T 和 "
+                 "%Process 的双侧区间或单侧置信限。重复性采用卡方区间，其他分量可选「MLS（Minitab）」"
+                 "或「Satterthwaite（JMP）」。",
+                 c);
+        helpText(v, "help.process.confidence.range",
+                 "MLS 的最低适用水平随操作员数和置信限类型变化。界面提示下界时，可提高置信水平或改选 "
+                 "Satterthwaite。部分边界情形以「—」标记不可计算的限值。"
+                 "%Contribution、%Study Var 和 ndc 在报告中提供点估计。",
+                 c);
+    });
+    section(v, "help.software", "比较不同软件的结果", cw, [&](float c) {
+        helpItem(v, "help.software.setup", "先统一分析设置",
+                 "使用相同的完整记录和分析方法，并核对规格限、分析容差、研究变异倍数、历史均值和标准差、"
+                 "过程变异来源及区间算法。ANOVA 还应核对随机效应、交互项、EMS 均方估计和负方差分量的处理。"
+                 "REML、Bayesian 或固定效应模型应按各自口径解释。",
+                 c);
+        helpItem(v, "help.software.columns", "再对照报表列",
+                 "EV / TV %、AV / TV %、GRR / TV % 对应 Minitab 的 %Study Var（标准差之比）。"
+                 "%Contribution 使用方差之比。P/T % 对照总量具 R&R 行的 %Tolerance。"
+                 "Trial 和 StdOrder 用于追溯测量次数与标准顺序，模型使用操作员和部件作为因子。",
+                 c);
+        helpText(v, "help.software.single",
+                 "仅有一侧规格时，应核对软件如何计算有效容差。例如 MATLAB 原生应用会将缺失一侧视为无穷规格。",
+                 c);
+    });
+}
+
+void helpCsv(Ui &v, float cw) {
+    section(v, "help.files", "导出当前结果", cw, [&](float c) {
+        helpText(v, "help.csv.start",
+                 "在「选项 → 导出」选择 CSV 格式、运行顺序和保存位置。回到「数据」页，"
+                 "点击底部「导出 CSV」。更改导出设置后可直接再次导出同一批数据。",
+                 c);
+        button(v, "help.files.open", "前往导出设置", 160, [] {
+            state.optionsTab = 2;
+            state.configOffset = 0;
+            state.navigate(Page::Options);
+        });
+        helpItem(v, "help.csv.location", "保存位置",
+                 "在「文件保存」填写输出目录和 CSV 文件名模板。目录留空时保存到配置"
+                 "文件所在目录，相对路径也从该目录开始。完整保存路径和失败原因可在「日志」查看。",
+                 c);
+    });
+    section(v, "help.runorder", "CSV 格式与运行顺序", cw, [&](float c) {
+        helpItem(v, "help.csv", "默认（宽表）",
+                 "列按部件编号排列，每行记录一名操作员在一轮中测得的全部数值。文件采用 "
+                 "UTF-8 BOM 编码。选择任一长表格式即可设置逐条测量的运行顺序。",
+                 c);
+        helpItem(v, "help.csv.encoding", "长表",
+                 "Minitab、SPSS、JMP 19、Origin 和 MATLAB 共用长表。每行一次测量，"
+                 "依次记录操作员（Operator）、部件（Part）、重复测量编号（Trial）和"
+                 "测量值（Measurement）。长表采用 UTF-8 无 BOM，宽表和长表均使用"
+                 "英文逗号、小数点及 CRLF 换行。",
+                 c);
+        helpItem(v, "help.runorder.modes", "三种运行顺序",
+                 "标准顺序 · 依次按重复测量轮次、部件、操作员排列。\n"
+                 "全部随机化 · 打乱所有测量记录，可跨轮次和操作员排列。\n"
+                 "操作员内随机化 · 每轮按操作员分组，各组独立打乱部件顺序。",
+                 c);
+        helpText(v, "help.runorder.operators",
+                 "选用「操作员内随机化」后，可勾选「随机化操作员顺序」。"
+                 "每项研究确定一次操作员顺序，各轮测量沿用该顺序。",
+                 c);
+        helpItem(v, "help.runorder.seed", "复现运行顺序",
+                 "运行顺序种子只控制测量记录的排列，数据生成种子控制测量值。"
+                 "随机化时可填正整数，留空时为本批数据自动选取。比较多种运行顺序时，"
+                 "对同一批数据重复导出即可。跨命令行进程复现时，固定两个种子并沿用相同设置。",
+                 c);
+        helpItem(v, "help.runorder.standard", "追溯标准顺序",
+                 "在「CSV 格式」勾选「保留标准运行序号（StdOrder）」，首列会记录"
+                 "随机化前的序号。CSV 行序是实际运行顺序，Trial 始终保留原重复测量编号。"
+                 "排序会移动完整记录，测量值和字段对应关系随记录一起移动。",
+                 c);
+        helpItem(v, "help.runorder.identity", "手工核对序号",
+                 "StdOrder 等于 ((Trial − 1) × 部件数 + Part − 1) × 操作员数 + "
+                 "操作员编号。A、B、C 对应 1、2、3。总记录数为操作员数 × 重复测量次数 × 部件数。",
+                 c);
+    });
+    section(v, "help.minitab", "导入 Minitab 并核对结果", cw, [&](float c) {
+        helpItem(v, "help.minitab.import", "导入并指定列",
+                 "选择 Minitab 格式导出，在 Minitab 中以首行为列名打开 CSV。进入「统计 → "
+                 "质量工具 → 量具研究 → 交叉量具 R&R」，将 Part 指定为部件，Operator "
+                 "指定为操作员，Measurement 指定为测量数据。Trial 和 StdOrder 用于追溯。",
+                 c);
+        helpItem(v, "help.minitab.method", "统一分析设置",
+                 "对照同一批数据，使用相同的分析方法、研究变异倍数和规格设置。"
+                 "选择 ANOVA 时还需对齐交互项设置。比较 P/T 时统一分析容差与均值口径。",
+                 c);
+        helpItem(v, "help.minitab.columns", "核对指标",
+                 "EV/TV%、AV/TV% 和 GRR/TV% 对应各分量的 %Study Var，P/T% 对应总量具 "
+                 "R&R 的 %Tolerance。对比运行顺序时核对记录数、测量值及字段对应关系。",
+                 c);
+    });
+}
+
+void helpFilename(Ui &v, float cw) {
+    section(v, "help.filename", "导出文件名变量", cw, [&](float c) {
+        helpText(v, "help.filename.syntax",
+                 "点击变量名复制带方括号的写法，再粘贴到「选项 → 导出 → 文件保存」"
+                 "的「CSV 文件名模板」。模板填写 .csv 文件名，目录在「输出目录」中另设。",
+                 c);
+        button(v, "help.filename.open", "编辑文件名模板", 176, [] {
+            state.optionsTab = 2;
+            state.configOffset = 0;
+            state.navigate(Page::Options);
+        });
+        helpExample(v, "help.filename.example",
+                    "研究_[OPERATORS]人_[PARTS]件_[DATETIME].csv\n"
+                    "→ 研究_3人_10件_2026-10-24_22-08-12.csv",
+                    c);
+        for (const auto &variable : msa::filename_variables()) {
+            const std::string name = variable.name;
+            if (name == "YYYY")
+                helpSubheading(v, "help.filename.date", "日期与时间", c);
+            else if (name == "OPERATORS")
+                helpSubheading(v, "help.filename.study", "研究参数", c);
+            else if (name == "EV_PCT")
+                helpSubheading(v, "help.filename.metrics", "实际指标", c);
+            else if (name == "VERSION")
+                helpSubheading(v, "help.filename.version", "程序信息", c);
+            filenameVariableHelp(v, variable, c);
+        }
+        helpItem(v, "help.filename.values", "拼写和取值",
+                 "变量区分大小写，[MM] 表示月份，[M] 表示分钟。输入 [[ 或 ]] 可输出"
+                 "字面方括号。日期取导出开始时的本地时间，研究参数和指标取当前结果。"
+                 "百分比指标用两位小数，省略百分号。未设置的规格限和不可计算的指标写为 NA。",
+                 c);
+        helpItem(v, "help.filename.collision", "同名文件与保存失败",
+                 "「追加序号」遇到同名文件会在扩展名前加 _001、_002 等。"
+                 "选择「覆盖文件」会替换同名文件。出现保存或导出错误时，先检查变量拼写、"
+                 "括号、Windows 保留名称和文件名长度，再到「日志」查看具体原因。",
+                 c);
+    });
+}
+
+void helpCli(Ui &v, float cw) {
+    section(v, "help.cli", "在 PowerShell 中使用命令行", cw, [&](float c) {
+        helpText(v, "help.cli.start",
+                 "在包含 msa_cli.exe 的解压目录打开 PowerShell，可先查看完整参数。",
+                 c);
+        helpCommand(v, "help.cli.help", ".\\msa_cli.exe --help", c);
+        helpItem(v, "help.cli.config", "选择配置来源",
+                 "命令行参数优先于 JSON 配置，配置缺项用内置默认值。省略 --config 时读取"
+                 "用户配置，文件不存在时使用内置默认值。--no-config 可跳过用户配置，"
+                 "与 --config 二选一。普通运行只读取配置。--init 可创建缺失的默认模板，"
+                 "生成前按需补齐规格和尺度。",
+                 c);
+        helpItem(v, "help.cli.syntax", "常用参数写法",
+                 "含空格的路径用引号括起。用 null 清空可选数值，布尔选项填写 true 或 "
+                 "false。同一参数写多次时，以最后一次为准。",
+                 c);
+    });
+    section(v, "help.cli.generate", "生成并导出 CSV", cw, [&](float c) {
+        helpText(v, "help.cli.example.intro",
+                 "这条命令使用分层随机、80% 最低部件跨度，导出 Minitab 长表和 JSON 报告。",
+                 c);
+        helpCommand(v, "help.cli.example",
+                    ".\\msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 "
+                    "--part-sampling stratified --minimum-part-span-pct 80 "
+                    "--csv-format minitab --output data.csv --report result.json",
+                    c);
+        helpText(v, "help.cli.normality",
+                 "加上 --require-normality true 可筛选舍入后的整批测量值。"
+                 "启用的规格、指标、跨度和近似正态要求须同时满足。",
+                 c);
+        helpItem(v, "help.cli.targets", "给指标设置约束",
+                 "例如 --ev target:10:0.1 表示 EV/TV% 的目标值为 10%，允许误差为 0.1 个百分点。"
+                 "也可用 between:下限:上限、at_most:阈值、at_least:阈值或 none，整项替换原约束。",
+                 c);
+    });
+    section(v, "help.cli.analyze.section", "分析已有 CSV", cw, [&](float c) {
+        helpText(v, "help.cli.analyze",
+                 "用 --input 读取已有数据，程序按表头识别宽表或长表。操作员数、重复测量次数"
+                 "和部件数应与文件一致。此模式用 --report 保存分析报告。下例分析上一步的 Minitab 长表。",
+                 c);
+        helpCommand(v, "help.cli.analyze.example",
+                    ".\\msa_cli.exe --no-config --input data.csv --csv-format minitab "
+                    "--method crossed_anova --lsl 9 --usl 11 --report analysis.json",
+                    c);
+    });
+    section(v, "help.cli.outputs", "文件路径与退出状态", cw, [&](float c) {
+        helpItem(v, "help.cli.files", "选择输出位置",
+                 "省略 --output 时按配置的目录、文件名模板和同名处理方式保存。显式 "
+                 "--output 直接指定 CSV 路径。命令中的相对 --config、--input、--output "
+                 "和 --report 路径从当前工作目录开始。配置中的相对输出目录从用户配置目录开始。",
+                 c);
+        helpText(v, "help.cli.report",
+                 "--report 保存生效配置、测量矩阵和统计结果。生成模式同时记录实际种子。", c);
+        helpItem(v, "help.cli.status", "覆盖文件与查看退出码",
+                 "确认要替换显式指定的 CSV 或报告时加 --overwrite。"
+                 "生成过程中可按 Ctrl+C 取消。\n"
+                 "0 · 成功。1 · 配置、生成或文件操作失败，或生成已取消。"
+                 "2 · 参数错误或显式文件路径检查失败。",
+                 c);
+    });
+}
+
+void helpCharts(Ui &v, float cw) {
+    section(v, "help.charts", "选择数据源", cw, [&](float c) {
+        helpItem(v, "help.charts.source.current", "当前结果",
+                 "先在「数据」页生成一组数据，再到「图表」选择「当前结果」。图表沿用这批数据的"
+                 "研究配置与统计结果。",
+                 c);
+        helpItem(v, "help.charts.source.import", "导入 CSV",
+                 "先在「选项」按文件设置操作员数、重复测量次数、部件数及分析方法。再到「图表」"
+                 "点击「导入 CSV」，选择包含完整测量记录的宽表或长表，文件最大为 4 MiB。",
+                 c);
+        helpText(v, "help.charts.source.switch",
+                 "导入成功后可在「当前结果」和「CSV 文件」之间切换。需要按新的分析设置查看"
+                 "导入数据时，请重新导入文件。",
+                 c);
+        button(v, "help.charts.open", "打开图表页", 152, [] { state.navigate(Page::Charts); });
+    });
+    section(v, "help.charts.view", "按目的选图", cw, [&](float c) {
+        helpItem(v, "help.charts.view.parts", "查看部件间距和整批分布",
+                 "用「测量值与部件」查看各部件的读数及均值。菱形表示部件均值，可用来比较"
+                 "取样方案产生的跨度和间距。「测量值直方图」显示整批读数的频数。",
+                 c);
+        helpItem(v, "help.charts.view.variation", "查看变异来源和操作员差异",
+                 "在「变异分量」查看量具和部件间变异，在「操作员分布」比较各操作员的箱线图"
+                 "和测量点。「部件 × 操作员交互图」比较各操作员对同一部件的平均读数。",
+                 c);
+        helpItem(v, "help.charts.view.control", "查看均值和极差",
+                 "「均值控制图」显示各重复测量子组的均值，「极差控制图」显示各子组的极差。"
+                 "控制限的计算口径可在对应图表的说明中查看。",
+                 c);
+    });
+    section(v, "help.charts.edit", "编辑并应用外观", cw, [&](float c) {
+        helpItem(v, "help.charts.edit.fields", "编辑图表",
+                 "选择图表后点击「编辑图表」，可调整标题、坐标轴名称、主色、线宽、点大小和纵轴"
+                 "范围，也可设置网格、图例与适用的参考线。",
+                 c);
+        helpItem(v, "help.charts.edit.draft", "应用、撤销或重置",
+                 "每张图表有独立草稿，收起编辑器或切换图表时可保留。点击「应用编辑」更新预览"
+                 "和导出样式。点击「撤销草稿」返回上次应用的样式，「重置当前图表」恢复默认外观。",
+                 c);
+        helpText(v, "help.charts.edit.session", "图表外观、组合选择和图表导出设置保留在本次运行期间。",
+                 c);
+    });
+    section(v, "help.charts.export", "导出单图或组合", cw, [&](float c) {
+        helpItem(v, "help.charts.export.scope", "选图和版式",
+                 "在「图表导出」选择「当前单图」或「多图组合」。组合可勾选至少一张图，按列表"
+                 "顺序排列，支持单列或双列。先应用或撤销待导出图表的草稿。",
+                 c);
+        helpItem(v, "help.charts.export.files", "设置格式和保存位置",
+                 "选择 PNG、JPEG 或 PDF，设置单图宽度、文件名和导出目录，再点击「导出图表」。"
+                 "同名时自动追加序号。保存后可点击「上次导出目录」查看文件。",
+                 c);
+        helpText(v, "help.charts.export.pdf",
+                 "PDF 将全部所选图表保存为一页，图形与中文文字一起绘制成高分辨率图像。", c);
+    });
+}
+
 void helpPage(Ui &u, float w, float h) {
-    const std::vector<std::string> topics{"快速入门",   "分析指标", "CSV 导出",
-                                          "文件名变量", "命令行",   "结果图表"};
-    const auto changeTopic = [](int topic) {
-        if (state.helpTopic == topic)
+    static const std::vector<std::string> topics{
+        "快速入门", "分析指标", "CSV 导出", "文件名变量", "命令行", "结果图表"};
+    using Article = void (*)(Ui &, float);
+    constexpr std::array<Article, 6> articles{
+        helpQuickStart, helpAnalysis, helpCsv, helpFilename, helpCli, helpCharts};
+    const int topic = std::clamp(state.helpTopic, 0, int(articles.size()) - 1);
+    const auto changeTopic = [](int next) {
+        if (state.helpTopic == next)
             return;
-        state.helpTopic = topic;
+        state.helpTopic = next;
         state.helpOffset = 0;
         menu.id.clear();
     };
@@ -3519,11 +4072,9 @@ void helpPage(Ui &u, float w, float h) {
                             cardWidth - labelWidth - secondaryNavGap - 2 * secondaryNavInset;
                         text(u, "help.title", compact ? "主题" : "帮助主题", labelWidth, 38, 16);
                         if (compact)
-                            combo(u, "help.topics", topics, state.helpTopic, topicsWidth,
-                                  changeTopic);
+                            combo(u, "help.topics", topics, topic, topicsWidth, changeTopic);
                         else
-                            tabs(u, "help.topics", topics, state.helpTopic, topicsWidth,
-                                 changeTopic, 38);
+                            tabs(u, "help.topics", topics, topic, topicsWidth, changeTopic, 38);
                     });
                 })
                 .build();
@@ -3542,615 +4093,7 @@ void helpPage(Ui &u, float w, float h) {
                         .width(cw)
                         .gap(sectionGap)
                         .padding(0, 0, 0, 10)
-                        .content([&] {
-                            if (state.helpTopic == 5) {
-                                section(v, "help.charts", "查看、编辑与导出图表", cw, [&](float c) {
-                                    helpText(v, "help.charts.source",
-                                             "在「图表」页选择「当前结果」，或通过「导入 "
-                                             "CSV」查看已有测量数据。",
-                                             c);
-                                    button(v, "help.charts.open", "打开图表页", 152,
-                                           [] { state.navigate(Page::Charts); });
-                                    helpSubheading(v, "help.charts.view.title", "选择图表", c);
-                                    helpText(v, "help.charts.text",
-                                             "在预览上方选择变异分量、按部件测量、按操作员分布、极"
-                                             "差控制图、"
-                                             "均值控制图、交互作用图或直方图。控制限的计算口径见各"
-                                             "图说明。",
-                                             c);
-                                    helpSubheading(v, "help.charts.edit.title", "编辑外观", c);
-                                    helpText(v, "help.charts.edit",
-                                             "点击「编辑图表」可调整标题、坐标轴、颜色、线宽、点大"
-                                             "小、纵轴范围、网格和图例。"
-                                             "点击「应用编辑」更新预览和导出外观。点击「撤销草稿」"
-                                             "恢复上次应用的外观。",
-                                             c);
-                                    helpSubheading(v, "help.charts.export.title", "保存图表文件",
-                                                   c);
-                                    helpText(v, "help.charts.export",
-                                             "在「图表导出」选择图表、格式和保存位置，再点击「导出"
-                                             "图表」。单图和"
-                                             "组合图均支持 PNG、JPEG 和 "
-                                             "PDF，重名时会追加序号。导出前请处理所选图表"
-                                             "的编辑草稿。PDF "
-                                             "中的中文随图表保留为高分辨率图像，页幅随尺寸和分辨率"
-                                             "变化。",
-                                             c);
-                                });
-                            } else if (state.helpTopic == 0) {
-                                section(v, "help.workflow", "开始使用", cw, [&](float c) {
-                                    const auto step = [&](const std::string &id,
-                                                          const std::string &number,
-                                                          const std::string &title,
-                                                          const std::string &detail) {
-                                        if (number != "1")
-                                            v.rect(id + ".divider").size(c, 1).color(line).build();
-                                        v.row(id + ".row")
-                                            .width(c)
-                                            .gap(12)
-                                            .content([&] {
-                                                badge(v, id + ".number", number, 40);
-                                                v.column(id + ".content")
-                                                    .width(c - 52)
-                                                    .gap(4)
-                                                    .content([&] {
-                                                        text(v, id + ".title", title, c - 52, 26,
-                                                             15);
-                                                        helpText(v, id, detail, c - 52);
-                                                    })
-                                                    .build();
-                                            })
-                                            .build();
-                                    };
-                                    step("help.step1", "1", "设置研究设计",
-                                         "在「选项 → "
-                                         "研究」设置操作员数、重复测量次数、部件数和生成规则。"
-                                         "然后在「分析」页选择方法。");
-                                    step("help.step2", "2", "填写生成条件",
-                                         "在「数据」页填写规格限和指标约束。数据中心可留空。"
-                                         "开启规格内生成时，请至少填写一侧规格限。");
-                                    step("help.step3", "3", "生成并复核",
-                                         "点击「生成数据」。在「指标复核」比较实际值与约束范围，"
-                                         "在「数据预览」核对记录。生成期间可查看日志，也可从底栏取"
-                                         "消。"
-                                         "测量系统是否合格需结合实际研究判断。");
-                                    step("help.step4", "4", "导出数据与保存配置",
-                                         "在「选项 → "
-                                         "导出」设置格式、目录和文件名，再回到「数据」导出 CSV。"
-                                         "修改研究、分析或生成条件后，请重新生成。"
-                                         "点击「保存配置」可在下次启动时沿用当前设置。");
-                                    button(
-                                        v, "sample", "载入示例配置", 156,
-                                        [] {
-                                            if (state.busy())
-                                                return;
-                                            state.sample();
-                                            state.navigate(Page::Data);
-                                        },
-                                        false, state.busy());
-                                });
-                            }
-                            if (state.helpTopic == 1) {
-                                section(v, "help.analysis", "分析方法", cw, [&](float c) {
-                                    helpText(
-                                        v, "help.analysis.select",
-                                        "在「选项 → 分析」选择 Xbar-R（均值极差法）或 "
-                                        "ANOVA（方差分析法）。"
-                                        "两者均适用于平衡交叉量具 R&R "
-                                        "研究：每名操作员测量全部部件，"
-                                        "每个「操作员＋部件」组合的重复测量次数相同。估计方法不"
-                                        "同，同组数据的结果可能不同。",
-                                        c);
-                                    button(v, "help.analysis.open", "前往分析选项", 160, [] {
-                                        state.optionsTab = 1;
-                                        state.configOffset = 0;
-                                        state.navigate(Page::Options);
-                                    });
-                                    helpSubheading(v, "help.xbarr.title", "Xbar-R（均值极差法）",
-                                                   c);
-                                    helpText(
-                                        v, "help.xbarr.components",
-                                        "使用各「操作员＋部件」组合的极差估计重复性 EV；使用操作员"
-                                        "均值的极差并扣除重复性影响估计再现性 "
-                                        "AV；使用部件均值的极差估计"
-                                        "部件间变异 PV。GRR 合并 EV 与 AV，TV 合并 GRR 与 PV；AV "
-                                        "校正后的方差"
-                                        "小于零时取零。",
-                                        c);
-                                    helpText(v, "help.xbarr.scope",
-                                             "不单独估计部件×操作员交互作用，不输出 ANOVA "
-                                             "表或交互项 P 值。"
-                                             "交互项设置、误分类概率和方差分量置信区间仅在 ANOVA "
-                                             "方法下生效。",
-                                             c);
-                                    helpSubheading(v, "help.anova.title", "ANOVA（方差分析法）", c);
-                                    helpText(v, "help.anova.model",
-                                             "采用平衡交叉双随机效应模型，部件和操作员均为随机因子"
-                                             "。通过平方和、"
-                                             "自由度及均方估计重复性、操作员、部件和部件×操作员交"
-                                             "互的方差分量。",
-                                             c);
-                                    helpText(
-                                        v, "help.anova.interaction",
-                                        "默认按 P 值判断，显著性水平 α=0.05。完整模型的交互项 P<α "
-                                        "时保留。"
-                                        "P≥α 或 P "
-                                        "值不可计算时，将交互项的平方和与自由度并入重复性误差。"
-                                        "也可直接选择「保留交互项」或「将交互项并入重复性误差」。",
-                                        c);
-                                    helpText(
-                                        v, "help.anova.components",
-                                        "负方差分量逐项置零。再现性 AV "
-                                        "包括操作员分量和保留的交互分量；"
-                                        "量具 R&R（GRR）包括重复性与再现性。%Study Var "
-                                        "为标准差之比，"
-                                        "%Contribution（百分比贡献）为方差之比，两者不能混用。",
-                                        c);
-                                    helpText(v, "help.anova.report",
-                                             "在「分析详情」查看均值极差法的计算结果。「ANOVA "
-                                             "详情」还显示最终模型、"
-                                             "完整模型的交互项 P 值、ANOVA 表及方差分量。"
-                                             "修改分析方法或交互项设置后，请重新生成。",
-                                             c);
-                                    helpSubheading(v, "help.anova.software.title", "跨软件比较", c);
-                                    helpText(
-                                        v, "help.anova.software",
-                                        "跨软件对标须使用相同的完整记录和分析方法，并统一研究变异倍"
-                                        "数、规格限及容差。"
-                                        "ANOVA 还须统一随机效应模型、交互项、EMS "
-                                        "均方估计和负分量处理规则。"
-                                        "REML、Bayesian 或固定效应 ANOVA "
-                                        "的结果不能直接视为同一统计口径。"
-                                        "Trial 与 StdOrder 用于追溯记录，均不作为额外分析因子。",
-                                        c);
-                                });
-                                section(
-                                    v, "help.process", "分析口径、历史参数与置信区间", cw,
-                                    [&](float c) {
-                                        helpSubheading(v, "help.process.tolerance.title",
-                                                       "P/T 与分析容差", c);
-                                        helpExample(v, "help.process.tolerance.formula",
-                                                    "填写分析容差：P/T% = 100 × k × GRR_SD ÷ 容差\n"
-                                                    "仅有单侧规格：P/T% = 100 × (k/2) × GRR_SD ÷ "
-                                                    "|规格限 − 均值|",
-                                                    c);
-                                        helpText(v, "help.process.tolerance",
-                                                 "分析容差留空时，若有双侧规格，第一式的容差取 USL "
-                                                 "− LSL；"
-                                                 "只有单侧规格则使用第二式。k 为研究变异倍数。"
-                                                 "历史均值留空时使用实际测量均值；规格限与均值相同"
-                                                 "时，单侧 P/T 不可计算。"
-                                                 "「规格内生成」仍使用生成设置中的规格限。",
-                                                 c);
-                                        helpSubheading(v, "help.process.history.title",
-                                                       "历史标准差与过程变异来源", c);
-                                        helpText(v, "help.process.history",
-                                                 "选择「优先使用历史标准差」后，若历史 "
-                                                 "SD≥GRR_SD，则 TV_SD 取历史 SD，"
-                                                 "PV_SD=√(TV_SD²−GRR_SD²)。历史 SD 小于 GRR_SD "
-                                                 "时使用本次研究估计。"
-                                                 "选择「按本次研究估计」时，TV 和 PV "
-                                                 "始终由本次研究估计。"
-                                                 "填写历史标准差后，%Process "
-                                                 "显示各分量标准差相对历史标准差的百分比。",
-                                                 c);
-                                        helpSubheading(v, "help.process.classification.title",
-                                                       "误分类概率（仅 ANOVA）", c);
-                                        helpText(
-                                            v, "help.process.classification",
-                                            "在「统计推断」开启「计算误分类概率」；至少需要一个规"
-                                            "格限，并假设真实部件与测量误差相互"
-                                            "独立且服从正态分布。"
-                                            "联合概率与条件概率分别报告；条件事件的概率为零时"
-                                            "，条件概率不可计算。"
-                                            "历史 SD≥GRR_SD "
-                                            "时使用历史过程波动，否则使用研究部件变异；"
-                                            "这一规则独立于 %Study Var 的过程变异来源设置。",
-                                            c);
-                                        helpSubheading(v, "help.process.confidence.title",
-                                                       "置信区间（仅 ANOVA）", c);
-                                        helpText(
-                                            v, "help.process.confidence",
-                                            "在「统计推断」开启「计算置信区间」，选择估计方法、置"
-                                            "信水平及置信限类型。支持方差分量、标准差、研究变"
-                                            "异、P/T 和 %Process "
-                                            "的双侧或单侧置信限。"
-                                            "重复性采用卡方精确区间；其他分量默认采用 MLS "
-                                            "近似，也可选择 JMP EMS 使用的"
-                                            "Satterthwaite "
-                                            "近似。MLS 的最低适用水平取决于操作员人数和单/双侧"
-                                            "类型，超出范围时会提示下界；需要更低水平时请显式"
-                                            "选择 Satterthwaite，程序不会自动更换方法。"
-                                            "零方差或边界情形的部分置信限可能不可计算，"
-                                            "显示为「—」。"
-                                            "当前不提供 %Contribution、%Study Var 和 ndc "
-                                            "的比值置信区间，不能将分量置信限直接相除替代。",
-                                            c);
-                                        helpSubheading(v, "help.process.compatibility.title",
-                                                       "校对软件设置", c);
-                                        helpText(
-                                            v, "help.process.compatibility",
-                                            "对标时还需统一均值、历史标准差、过程变异来源、置信水平"
-                                            "和区间算法。"
-                                            "MATLAB 原生应用将缺失侧视为无穷规格，与本程序的单侧 "
-                                            "P/T 定义不同。"
-                                            "各软件的默认模型、估计方法和 ndc 取整规则也可能不同。",
-                                            c);
-                                    });
-                            }
-                            if (state.helpTopic == 0 || state.helpTopic == 1) {
-                                section(v, "help.constraints", "约束模式与单位", cw, [&](float c) {
-                                    const std::array<std::pair<std::string, std::string>, 5> rows{
-                                        {{"不约束", "不以该指标筛选数据，仍显示其实际计算结果。"},
-                                         {"目标值", "目标值 ± 允许误差；误差留空时采用默认误差。"},
-                                         {"区间",
-                                          "接受下限至上限之间的值，含两端；不额外叠加误差。"},
-                                         {"不高于", "实际值不超过填写的阈值。"},
-                                         {"不低于", "实际值不低于填写的阈值。"}}};
-                                    for (size_t i = 0; i < rows.size(); ++i)
-                                        v.row("help.mode" + std::to_string(i))
-                                            .width(c)
-                                            .gap(12)
-                                            .content([&] {
-                                                badge(v, "help.mode.name" + std::to_string(i),
-                                                      rows[i].first, 84);
-                                                helpText(v, "help.mode.desc" + std::to_string(i),
-                                                         rows[i].second, c - 96);
-                                            })
-                                            .build();
-                                    helpSubheading(v, "help.units.title", "百分比与允许误差", c);
-                                    helpText(
-                                        v, "help.units",
-                                        "EV/TV%、AV/TV%、GRR/TV% 以总变异的标准差 TV_SD "
-                                        "为分母，对应 Minitab 的"
-                                        " %Study Var。百分比指标的允许误差以「百分点」为单位，例如 "
-                                        "10±0.1 表示"
-                                        "接受 "
-                                        "9.90%～10.10%"
-                                        "。ndc（可区分类别数）的目标值与允许误差均使用整数。"
-                                        "误差填 0 表示零误差，留空则使用默认允许误差。",
-                                        c);
-                                    helpSubheading(v, "help.sd.title", "标准差与研究变异", c);
-                                    helpText(v, "help.sd",
-                                             "EV（重复性）、AV（再现性）、GRR（量具 "
-                                             "R&R）、PV（部件间变异）和"
-                                             " TV（总变异）以标准差 SD（1σ）表示。研究变异为 "
-                                             "k×SD，k 默认取 6。"
-                                             "研究变异倍数影响研究变异及 P/T，不改变标准差本身。",
-                                             c);
-                                    helpSubheading(v, "help.display.title", "显示精度", c);
-                                    helpText(v, "help.display",
-                                             "指标复核中的百分比、目标范围与偏差显示两位小数，ndc "
-                                             "显示整数；约束判定仍使用原始精度。数据预览和 CSV "
-                                             "保持配置指定的小数位。",
-                                             c);
-                                });
-                            }
-                            if (state.helpTopic == 0) {
-                                section(v, "help.rules", "生成规则与尺度", cw, [&](float c) {
-                                    helpText(
-                                        v, "help.priority",
-                                        "中心优先和指标优先决定候选数据的优化侧重，最终结果都"
-                                        "必须满足已设置的指标约束。"
-                                        "开启「规格内生成」时，全部测量值必须位于已设置的规格限"
-                                        "内；关闭后允许超出规格限。",
-                                        c);
-                                    helpSubheading(v, "help.reference.title", "参考尺度与生成种子",
-                                                   c);
-                                    helpText(
-                                        v, "help.reference",
-                                        "缺少双侧规格或显式选择参考尺度时，需要提供参考总变异标准"
-                                        "差（TV_SD）或历史标准差。"
-                                        "数据生成种子位于「选项 → 研究 → "
-                                        "生成参数」：固定种子在相同程序版本"
-                                        "、相同参数且搜索未被"
-                                        "超时截断时可复现；留空时每次生成自动选择种子。搜索超"
-                                        "时或次数耗尽不代表数学上无解。",
-                                        c);
-                                });
-                            }
-                            if (state.helpTopic == 2) {
-                                section(v, "help.files", "配置与数据文件", cw, [&](float c) {
-                                    button(v, "help.files.open", "前往导出设置", 160, [] {
-                                        state.optionsTab = 2;
-                                        state.configOffset = 0;
-                                        state.navigate(Page::Options);
-                                    });
-                                    helpSubheading(v, "help.config", "用户配置文件", c);
-                                    helpExample(v, "help.path",
-                                                platform::compatibilityConfig().u8string(), c);
-                                    helpText(v, "help.silent",
-                                             "点击「保存配置」会写入上述文件，下次启动时自动读取。"
-                                             "在「选项 → 导出」设置 CSV "
-                                             "目录和文件名。目录留空或使用相对路径时，"
-                                             "以配置文件所在目录为基准。程序会创建缺失的输出目录。"
-                                             "重名时默认追加序号。保存与导出的详细记录可在「日志」"
-                                             "查看。",
-                                             c);
-                                    helpSubheading(v, "help.csv.wide.title", "默认（宽表）", c);
-                                    helpText(v, "help.csv",
-                                             "左上角留空，首行为从 1 开始的部件编号，首列为 "
-                                             "A、B、C 等操作员标记。"
-                                             "每行包含一名操作员在一轮重复测量中对全部部件的测量值"
-                                             "，按操作员 → 重复轮次排列。"
-                                             "使用 UTF-8 BOM；运行顺序设置不适用于该布局。",
-                                             c);
-                                    helpSubheading(v, "help.csv.long.title",
-                                                   "五种软件格式 · 每行一次测量", c);
-                                    helpText(v, "help.csv.encoding",
-                                             "Minitab、SPSS、JMP 19、Origin、MATLAB "
-                                             "共用同一种长表布局，使用 UTF-8 无 BOM。"
-                                             "所有 CSV 格式均使用英文逗号、CRLF "
-                                             "换行和英文小数点，测量值保留配置指定的小数位数。",
-                                             c);
-                                });
-                                section(v, "help.runorder", "CSV 格式与运行顺序", cw, [&](float c) {
-                                    helpText(v, "help.runorder.format",
-                                             "在「选项 → 导出」选择 CSV "
-                                             "导出格式；所有导出入口均使用该设置。"
-                                             "五种长表的列名统一为 "
-                                             "Operator,Part,Trial,Measurement，分别表示操作员、"
-                                             "部件、重复测量编号与测量值。操作员标记为 "
-                                             "A、B、C，Part 和 Trial 从 1 开始。"
-                                             "选择「默认（宽表）」时，运行顺序控件不可用。",
-                                             c);
-                                    helpSubheading(v, "help.runorder.modes.title", "三种运行顺序",
-                                                   c);
-                                    helpText(
-                                        v, "help.runorder.modes",
-                                        "标准顺序按 Trial、Part、Operator 的顺序排列。\n"
-                                        "全部随机化会打乱所有完整记录，可跨轮次和操作员排列。\n"
-                                        "操作员内随机化会在每个 Trial 和 Operator "
-                                        "组合内独立打乱部件顺序。",
-                                        c);
-                                    helpText(
-                                        v, "help.runorder.operators",
-                                        "选择「操作员内随机化」后可勾选「随机化操作员顺序」。"
-                                        "每项研究随机确定一次操作员顺序，所有 Trial 使用同一顺序。",
-                                        c);
-                                    helpSubheading(v, "help.runorder.seed.title", "运行顺序种子",
-                                                   c);
-                                    helpText(v, "help.runorder.seed",
-                                             "运行顺序种子与数据生成种子相互独立，仅在随机化模"
-                                             "式下可设置。允许留空，填"
-                                             "写时须为 "
-                                             "1～9223372036854775807 的整数。"
-                                             "相同数据、运行顺序设置和排序种子可复现同一排列，但不"
-                                             "保证与 Minitab "
-                                             "的相同种子逐行一致。留空时为本项研究自动选择种子；同"
-                                             "一研究以相同运行顺序"
-                                             "设置导出到五种软件时，复用同一排列。",
-                                             c);
-                                    helpSubheading(v, "help.runorder.standard.title",
-                                                   "保留标准运行序号", c);
-                                    helpText(v, "help.runorder.standard",
-                                             "在「CSV "
-                                             "格式」中勾选「保留标准运行序号（StdOrder）」后，在首"
-                                             "列添加 "
-                                             "StdOrder，记录随机化前的 1～N 标准序号。"
-                                             "CSV 行序就是实际运行顺序；Trial "
-                                             "始终是真实重复测量编号，不随随机排序重编号。"
-                                             "随机化仅移动完整记录，不改变测量值、字段对应关系或数"
-                                             "据精度。"
-                                             "对同一种分析方法，随机化前后的统计结果保持一致，允许"
-                                             "浮点末位差异。"
-                                             "修改导出格式或运行顺序无需重新生成数据；保存配置、启"
-                                             "动加载和恢复"
-                                             "默认均包含这些设置。",
-                                             c);
-                                    helpSubheading(v, "help.runorder.identity.title",
-                                                   "核对序号与记录数", c);
-                                    helpText(v, "help.runorder.identity",
-                                             "标准序号：((Trial − 1) × 部件数 + Part − 1) × "
-                                             "操作员数 + 操作员编号；"
-                                             "A=1、B=2、C=3。总记录数 "
-                                             "N=操作员数×每件重复测量次数×部件数。"
-                                             "同一组数据比较不同运行顺序时，直接更改导出设置后再次"
-                                             "导出；不要重新"
-                                             "生成。若要多次生成相同数据，请固定「研究 → "
-                                             "生成参数」中的数据生成种子。",
-                                             c);
-                                });
-                                section(
-                                    v, "help.minitab", "导入 Minitab 与结果对标", cw, [&](float c) {
-                                        helpSubheading(v, "help.minitab.import.title",
-                                                       "1. 导入文件并选择字段", c);
-                                        helpText(v, "help.minitab.import",
-                                                 "选择「Minitab」长表并导出，在 Minitab 打开 "
-                                                 "CSV，首行为列名。"
-                                                 "选择「统计 → 质量工具 → 量具研究 → 交叉量具 "
-                                                 "R&R」。部件选 Part，"
-                                                 "操作员选 Operator，测量数据选 Measurement。",
-                                                 c);
-                                        helpSubheading(v, "help.minitab.method.title",
-                                                       "2. 对齐分析设置", c);
-                                        helpText(
-                                            v, "help.minitab.method",
-                                            "分析方法与本程序一致：Xbar 和 R 或 "
-                                            "ANOVA；ANOVA 还须统一交互项设置。研究变异倍数默认 6。"
-                                            "比较 P/T "
-                                            "时，规格、独立容差及均值等设置须一致。EV/TV%、AV/TV%、"
-                                            "GRR/TV% 对应 %Study Var，P/T% 对应总量具 R&R 的 "
-                                            "%Tolerance。",
-                                            c);
-                                        helpSubheading(v, "help.minitab.columns.title",
-                                                       "3. 核对顺序与指标", c);
-                                        helpText(v, "help.minitab.columns",
-                                                 "Trial 保留原重复测量编号；StdOrder "
-                                                 "供追溯标准序。两列均不作为"
-                                                 "测量响应或额外因子。Minitab "
-                                                 "按操作员和部件识别重复测量。"
-                                                 "三种运行顺序只重排完整记录，统计结果允许浮点末位"
-                                                 "差异，ndc 应一致。",
-                                                 c);
-                                        helpSubheading(v, "help.minitab.evidence.title",
-                                                       "已验证的研究设计", c);
-                                        helpText(v, "help.minitab.evidence",
-                                                 "Minitab 22.6 验证记录包含 3 名操作员、3 次测量和 "
-                                                 "10 个部件。"
-                                                 "同一组数据按三种运行顺序各导出 90 条，核对了 "
-                                                 "Trial、StdOrder、"
-                                                 "测量值及 21 项统计结果。",
-                                                 c);
-                                    });
-                            }
-                            if (state.helpTopic == 4) {
-                                section(v, "help.cli", "CLI 命令行使用", cw, [&](float c) {
-                                    helpSubheading(v, "help.cli.start.title", "查看参数与读取配置",
-                                                   c);
-                                    helpText(
-                                        v, "help.cli.config",
-                                        "msa_cli.exe 支持 GUI 的全部业务配置。优先级：内置默认值 → "
-                                        "JSON "
-                                        "配置 → 命令行覆盖；重复参数最后一次生效。GUI "
-                                        "保存的配置可用 "
-                                        "--config 指定；未指定配置文件时，自动读取 GUI 用户配置。"
-                                        "普通 CLI 运行不会把命令行覆盖值写回配置文件。",
-                                        c);
-                                    helpText(v, "help.cli.syntax",
-                                             "运行 msa_cli.exe --help "
-                                             "查看完整参数及示例。--no-config 跳过用户配置；"
-                                             "可选数值用 null 清空，布尔选项用 "
-                                             "true/false；指标约束可用 none、"
-                                             "target:值[:误差]、between:下限:上限、at_most:值、at_"
-                                             "least:值。"
-                                             "指标参数会整项替换旧约束。",
-                                             c);
-                                    helpSubheading(v, "help.cli.example.title",
-                                                   "示例：生成随机运行顺序的长表", c);
-                                    helpExample(
-                                        v, "help.cli.example",
-                                        "msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 "
-                                        "--csv-format minitab --run-order all --run-seed 321 "
-                                        "--store-standard-order true --output data.csv "
-                                        "--report result.json",
-                                        c);
-                                    helpSubheading(v, "help.cli.analyze.title", "仅分析已有数据",
-                                                   c);
-                                    helpText(
-                                        v, "help.cli.analyze",
-                                        "使用 --input CSV "
-                                        "读取已有宽表或长表，按操作员与部件标识恢复测量记录。"
-                                        "配合 --method crossed_anova 或 crossed_xbarr "
-                                        "选择方法，并使用 --report 保存分析报告。"
-                                        "此模式仅分析输入数据，不输出 CSV 文件，不能与 --output "
-                                        "同用；研究设计须与输入数据一致。",
-                                        c);
-                                    helpSubheading(v, "help.cli.files.title", "输出路径与退出状态",
-                                                   c);
-                                    helpText(
-                                        v, "help.cli.files",
-                                        "生成模式省略 --output "
-                                        "时使用配置中的输出目录、文件名模板和同名处理方式。显式 "
-                                        "--output "
-                                        "是完整文件路径，不展开变量；覆盖显式 CSV 或报告须加 "
-                                        "--overwrite。"
-                                        "--overwrite 始终优先于 "
-                                        "--existing-file，与参数书写顺序无关。--report "
-                                        "保存最终配置、"
-                                        "测量矩阵、指标及实际生成种子。Ctrl+C 可取消；退出码 0 "
-                                        "表示成功，1 表示配置、生成、"
-                                        "文件错误或取消，2 表示参数错误或显式同名文件预检查失败。",
-                                        c);
-                                });
-                            }
-                            if (state.helpTopic == 3) {
-                                section(v, "help.filename", "导出文件名变量", cw, [&](float c) {
-                                    helpText(v, "help.filename.syntax",
-                                             "点击英文或中文变量按钮即可复制，再粘贴到「选项 → "
-                                             "导出」的文件名模板。\n"
-                                             "变量区分大小写，仅在 CSV 文件名中展开。输入 [[ 或 ]] "
-                                             "可保留方括号，其余文字按原样保留。",
-                                             c);
-                                    button(v, "help.filename.open", "编辑文件名模板", 176, [] {
-                                        state.optionsTab = 2;
-                                        state.configOffset = 0;
-                                        state.navigate(Page::Options);
-                                    });
-                                    helpExample(
-                                        v, "help.filename.example",
-                                        "MSA_Data_[YYYY]-[MM]-[DD]_[H]-[M]-[S].csv\n"
-                                        "→ "
-                                        "MSA_Data_2026-10-24_22-08-12.csv\n"
-                                        "研究_[人员数量]人_[测量次数]次_[产品件数]件_GRR[GRR_PCT]_["
-                                        "DATETIME].csv",
-                                        c);
-                                    for (const auto &variable : msa::filename_variables()) {
-                                        const std::string name = variable.name;
-                                        if (name == "YYYY")
-                                            helpSubheading(v, "help.filename.date", "日期与时间",
-                                                           c);
-                                        else if (name == "OPERATORS")
-                                            helpSubheading(v, "help.filename.study", "研究参数", c);
-                                        else if (name == "EV_PCT")
-                                            helpSubheading(v, "help.filename.metrics", "实际指标",
-                                                           c);
-                                        else if (name == "VERSION")
-                                            helpSubheading(v, "help.filename.version", "程序信息",
-                                                           c);
-                                        filenameVariableHelp(v, variable, c);
-                                    }
-                                    helpSubheading(v, "help.filename.values.title", "变量取值规则",
-                                                   c);
-                                    helpText(
-                                        v, "help.filename.values",
-                                        "日期和时钟变量采用导出开始时的电脑本地时间，同次导出共用同"
-                                        "一时刻；"
-                                        "Unix 时间戳从 1970-01-01 UTC 起算，不随本地时区改变。"
-                                        "研究参数和指标取已生成数据的配置及实际复核值，随机种子取本"
-                                        "次实际种子。"
-                                        "百分比指标保留两位、不含百分号；规格未设置、P/T 或 ndc "
-                                        "不可计算时写 "
-                                        "NA。"
-                                        "中心留空时取实际均值；修改文件名不改变数据或计算精度。",
-                                        c);
-                                    helpSubheading(v, "help.filename.collision.title",
-                                                   "同名文件与错误提示", c);
-                                    helpText(
-                                        v, "help.filename.collision",
-                                        "追加序号为默认策略：先使用原文件名，重名时在扩展名前追加 "
-                                        "_001、_002 等。"
-                                        "选择覆盖文件时才替换原文件；写入过程中使用原子保存。"
-                                        "配置保存的是模板原文。未知变量、括号错误、非法字符、Window"
-                                        "s "
-                                        "保留名或文件名过长时停止保存或导出，"
-                                        "底部显示简短失败提示，详细原因见日志。",
-                                        c);
-                                });
-                            }
-                            if (state.helpTopic == 1) {
-                                section(v, "help.native", "适用范围与结果校验", cw, [&](float c) {
-                                    helpText(v, "help.boundary",
-                                             "支持 2 或 3 名操作员、每件重复测量 2 或 3 次、5～10 "
-                                             "个部件，共 24 种平衡交叉设计。"
-                                             "当前不支持嵌套设计、非平衡数据、固定或混合效应模型，"
-                                             "以及 REML、ML、MINQUE 或 Bayesian 估计。",
-                                             c);
-                                    helpText(
-                                        v, "help.compatibility",
-                                        "配置采用 schema_version=1，缺失的可选字段按默认值补齐。"
-                                        "固定种子在相同程序版本和参数下可复现；搜索时限可能使搜索提"
-                                        "前结束。"
-                                        "找到满足约束的结果后，最多继续优化 120 次。",
-                                        c);
-                                    helpSubheading(v, "help.verify.title", "小数位与导出校验", c);
-                                    helpText(v, "help.verify",
-                                             "候选测量值先按小数位数舍入，再进行指标复核。导出时校"
-                                             "验序列化结果，"
-                                             "保存后回读实际 "
-                                             "CSV，再次检查测量值精度、记录数量和字段对应关系。"
-                                             "长表保留所选运行顺序，不在写出时重新排序。",
-                                             c);
-                                    helpSubheading(v, "help.failures.title", "如何解读生成失败", c);
-                                    helpText(v, "help.failures",
-                                             "程序分别报告参数错误、已证明的约束冲突和有限搜索失败"
-                                             "。超时或次数耗尽"
-                                             "不代表数学上无解。修改研究或生成参数会使旧结果失效；"
-                                             "导出设置独立。",
-                                             c);
-                                });
-                            }
-                        })
+                        .content([&] { articles[topic](v, cw); })
                         .build();
                 })
                 .build();

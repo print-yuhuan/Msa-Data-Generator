@@ -6,6 +6,7 @@
 #include <csignal>
 #include <iomanip>
 #include <iostream>
+#include <string_view>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -58,8 +59,15 @@ const Option options[]{
      "数据中心：-1e12～1e12 或 null；默认 null，自动确定"},
     {"--priority", "/generation/priority", ValueType::Text,
      "生成优先级：center 中心优先（默认）/ indicators 指标优先"},
+    {"--require-normality", "/generation/require_normality", ValueType::Boolean,
+     "要求近似正态（筛选最终测量值）：true / false（默认）"},
+    {"--part-sampling", "/generation/part_sampling", ValueType::Text,
+     "部件取样：default 默认 / even 等距覆盖 / stratified 分层随机 / "
+     "center_dense 中心加密 / end_dense 两端加密"},
     {"--scale-mode", "/generation/scale_mode", ValueType::Text,
      "波动尺度：auto 自动（默认）/ reference_tv_sd 参考总变异标准差"},
+    {"--minimum-part-span-pct", "/generation/minimum_part_span_pct", ValueType::NullableNumber,
+     "最低部件跨度占规格宽度的百分比（0 < 值 <= 100，须有双侧规格）或 null（默认）"},
     {"--reference-tv-sd", "/generation/reference_tv_sd", ValueType::NullableNumber,
      "参考总变异标准差 TV_SD：1e-12～1e12 或 null，默认 null"},
     {"--decimal-places", "/generation/decimal_places", ValueType::Integer,
@@ -177,7 +185,11 @@ void help() {
 该文件不存在则使用内置默认值，不自动创建。普通运行不保存命令行覆盖。
 生成时，严格规格至少需要一个规格限；P/T 约束需要规格限或分析容差。
 缺少双侧规格或选择参考尺度时，须指定参考 TV_SD 或历史标准差。
+设置最低部件跨度须同时提供 LSL 和 USL。先计算舍入后每件部件的测量均值。
+跨度百分比 = 100 × (最大部件均值 − 最小部件均值) / (USL − LSL)，该值须达到所设下限。
 百分比目标允许误差的单位为百分点；ndc 的目标、区间和允许误差均为整数。
+--require-normality true 对按小数位数舍入后的整批测量值应用 Anderson–Darling 正态性筛选。
+采用独立正态样本的 5% 参考阈值，筛选用于控制模拟样本的分布形状。
 --input 仅分析，不要求满足生成条件；操作员人数、重复次数与部件数量仍须与 CSV 一致。
 
 CSV 与运行顺序：
@@ -318,6 +330,11 @@ msa::Json target_value(const std::string &text, bool ndc) {
             "约束须为 none、target:值[:误差]、between:下限:上限、at_most:值或 at_least:值");
     return target;
 }
+void validate_option_field(const msa::Json::json_pointer &path, const msa::Json &value) {
+    auto single = msa::Json::object();
+    single[path] = value;
+    msa::normalize_config(single);
+}
 msa::Json option_value(const Option &option, const std::string &text) {
     try {
         msa::Json value;
@@ -347,17 +364,48 @@ msa::Json option_value(const Option &option, const std::string &text) {
             break;
         }
         // Reuse the GUI's field validation, before any file access or generation.
-        auto single = msa::Json::object();
-        single[msa::Json::json_pointer(option.path)] = value;
-        msa::normalize_config(single);
+        validate_option_field(msa::Json::json_pointer(option.path), value);
         return value;
     } catch (const std::exception &e) {
         throw std::invalid_argument(std::string(option.name) + ": " + e.what());
     }
 }
+enum class OutputUse { Configured, Explicit, Analysis };
+bool unused_output_field(OutputUse use, std::string_view path) {
+    if (use == OutputUse::Analysis)
+        return path.rfind("/output/", 0) == 0;
+    return use == OutputUse::Explicit &&
+           (path == "/output/directory" || path == "/output/filename" ||
+            path == "/output/existing_file");
+}
+void default_invalid_unused_output_fields(msa::Json &config, OutputUse use) {
+    if (use == OutputUse::Configured)
+        return;
+    constexpr const char *fields[]{
+        "/output/directory",          "/output/filename",    "/output/existing_file",
+        "/output/format",             "/output/encoding",    "/output/run_order/mode",
+        "/output/run_order/seed",     "/output/run_order/randomize_operators",
+        "/output/run_order/store_standard_order"};
+    const auto defaults = msa::default_config();
+    for (const auto *field : fields) {
+        if (!unused_output_field(use, field))
+            continue;
+        const msa::Json::json_pointer path(field);
+        if (!config.contains(path))
+            continue;
+        // Retain valid report metadata. Full normalization still checks object shape and keys.
+        try {
+            validate_option_field(path, config.at(path));
+        } catch (const msa::ConfigError &) {
+            config.at(path) = defaults.at(path);
+        }
+    }
+}
 int run(const std::vector<std::string> &args) {
     std::filesystem::path config, output, report, input;
     bool init = false, overwrite = false, noConfig = false;
+    OutputUse outputUse = OutputUse::Configured;
+    std::vector<std::pair<const Option *, std::string>> pending;
     std::vector<std::pair<msa::Json::json_pointer, msa::Json>> overrides;
     try {
         for (std::size_t i = 1; i < args.size(); ++i) {
@@ -411,8 +459,18 @@ int run(const std::vector<std::string> &args) {
                                                   [&](const Option &o) { return a == o.name; });
                 if (option == std::end(options))
                     throw std::invalid_argument("未知参数：" + a);
+                pending.emplace_back(option, value());
+            }
+        }
+        outputUse = !input.empty() ? OutputUse::Analysis
+                                   : !output.empty() ? OutputUse::Explicit : OutputUse::Configured;
+        for (const auto &[option, text] : pending) {
+            try {
                 overrides.emplace_back(msa::Json::json_pointer(option->path),
-                                       option_value(*option, value()));
+                                       option_value(*option, text));
+            } catch (const std::invalid_argument &) {
+                if (!unused_output_field(outputUse, option->path))
+                    throw;
             }
         }
         if (noConfig && !config.empty())
@@ -467,6 +525,7 @@ int run(const std::vector<std::string> &args) {
         // Pointer assignment replaces complete constraints and preserves explicit nulls.
         for (const auto &[path, value] : overrides)
             c[path] = value;
+        default_invalid_unused_output_fields(c, outputUse);
         if (overwrite)
             c["output"]["existing_file"] = "overwrite";
         c = msa::normalize_config(c);

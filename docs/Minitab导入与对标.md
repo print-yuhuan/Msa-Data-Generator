@@ -4,11 +4,11 @@
 
 ## 推荐导入流程
 
-1. 在“选项 → 导出 → CSV 导出格式”选择“Minitab”，设置运行顺序、可选排序种子与 StdOrder。已有生成结果时直接导出，无需重新生成。
+1. 在“选项 → 导出 → CSV 格式”的“导出格式”选择“Minitab”，按需设置运行顺序、种子与 StdOrder。已有生成结果时可直接导出。
 2. 在 Minitab 打开 CSV，使用英文逗号分隔、首行列名；Operator 为人员字母，其他列为数字。所有长表统一 UTF-8 无 BOM、CRLF，保持配置的小数位。
 3. 进入“统计 → 质量工具 → 量具研究 → 交叉量具 R&R”（英文界面为 Stat → Quality Tools → Gage Study → Gage R&R Study (Crossed)）。
 4. 按列名选择：部件=Part，操作员=Operator，测量数据=Measurement。**分析方法与本程序一致，选择 Xbar 和 R 或 ANOVA**。
-5. 研究变异倍数与程序一致，默认 6；比较 P/T 时使用相同双侧规格限或容差 USL−LSL。
+5. 研究变异倍数与程序一致，默认 6。比较 P/T 时匹配独立分析容差或规格限。只有一个规格限时按[单侧规格 P/T](#单侧规格-pt)设置。
 6. 比较下表对应项；Trial 及 StdOrder 用于追溯，不作为响应或额外因子。Minitab 按操作员与部件识别重复测量。
 
 | 本程序 | Minitab Xbar-R 输出 |
@@ -22,7 +22,31 @@
 | ndc | Number of Distinct Categories |
 | 研究变异 | 配置倍数×StdDev |
 
-%Study Var 采用标准差比例，%Contribution 采用方差比例，数值含义不同。P/T 优先使用独立分析容差，其次使用双侧规格宽度；仅有单侧规格时使用规格限到参考均值距离的两倍，距离为零时不可计算。无规格且未设置独立分析容差时，P/T 不可计算。对标须统一这些口径，不应将单侧结果直接与双侧容差比较。满足设定生成约束也不等于测量系统已达到某项质量判定标准。
+%Study Var 采用标准差比例，%Contribution 采用方差比例。P/T 优先使用独立分析容差，其次使用双侧规格宽度或单侧等效容差。规格限和独立分析容差均未设置时，P/T 不可计算。统计结果需按实际研究的质量判据解读。
+
+## 单侧规格 P/T
+
+只有一个规格限时，按 `P/T（%）= 100 × k × GRR_SD ÷ (2 × |参考均值 − 规格限|)` 计算。k 为研究变异倍数。参考均值默认取全部测量值的算术平均值，程序也允许指定历史均值。距离为零时 P/T 不可计算。
+
+将原始测量数据导入 Minitab，保持相同的研究变异倍数。直接传入单侧规格限时，Minitab 以样本均值计算距离，并在计算中使用半个研究变异。若需与指定了历史均值的程序输出核对，可将程序所用的参考均值换算为等效容差宽度，并通过 `TOLER` 传入。进行此项对标时，Minitab 的 `%Tolerance` 对应程序的 P/T。 [Minitab 单侧规格计算说明](https://support.minitab.com/en-us/minitab/help-and-how-to/quality-and-process-improvement/measurement-system-analysis/supporting-topics/gage-r-r-and-wheeler-s-emp-studies/calculation-of-percent-tolerance-with-a-one-sided-tolerance/)
+
+例如长表含 StdOrder、规格下限为 2、研究变异倍数为 6，导入后可在 Minitab 会话命令窗格执行以下命令。列 C34 的首行为总量具 R&R 的 `%Tolerance`。复核等效容差时，将 `LSL 2` 替换为 `TOLER` 加上由样本均值换算的容差宽度。
+
+```text
+GAGERR;
+  PARTS C3;
+  OPERS C2;
+  RESPONSE C5;
+  XBAR;
+  STUDYVAR 6;
+  SSTDEV C30;
+  SDISTINCT C31;
+  SSTUDYVAR C32 C33;
+  LSL 2;
+  STOLERANCE C34.
+```
+
+Minitab 22.6 COM 已对 24 组仅有下限的研究完成两种口径的核对，共 1,125 条测量记录。原生单侧输入和等效容差输入在这 24 组得到相同的全精度 P/T，与程序的最大绝对误差为 1.563194 × 10⁻¹³ 个百分点。 [数据范围与复核结果](验证报告.md#minitab-com-对标结果)
 
 ## CSV 列和运行顺序
 
@@ -42,9 +66,9 @@ Operator 为 A/B/C 等人员标记，Part 从 1 开始，Trial 为原始重复�
 
 | 模式 | 规则 |
 |---|---|
-| 不随机化 / `standard` | Trial→Part→Operator |
+| 标准顺序 / `standard` | Trial→Part→Operator |
 | 全部随机化 / `all` | 打乱全部完整记录，允许人员、部件和 Trial 跨组混排 |
-| 操作员内部随机化 / `within_operator` | 逐 Trial、逐操作员，每个 Trial＋Operator 内独立打乱部件 |
+| 操作员内随机化 / `within_operator` | 逐 Trial、逐操作员，每个 Trial＋Operator 内独立打乱部件 |
 
 “随机化操作员顺序”仅第三种模式生效，每项研究随机确定一次人员顺序，各 Trial 沿用；随机选择也可能恰好抽到原人员顺序。StdOrder 记录随机化前的标准序号，范围为 1～N，N=人员×次数×件数：
 
@@ -62,7 +86,7 @@ A=1，B=2，C=3
 | 种子 | GUI 位置 / CLI 参数 | 控制内容 |
 |---|---|---|
 | 数据生成种子 | 选项 → 研究 → 生成参数 / `--seed` | 测量值及生成搜索 |
-| 排序种子 | 运行顺序 / `--run-seed` | 独立重排完整测量记录 |
+| 运行顺序种子 | 导出 → 运行顺序 / `--run-seed` | 独立重排完整测量记录 |
 
 同一结果切换三种顺序，直接修改导出设置后重复导出即可。生成种子留空后点击“重新生成”，得到的是另一项研究，其统计值可能变化。跨 CLI 进程复现应固定生成种子及排序种子，并保持生成参数、运行配置、版本和搜索条件一致。CLI 每次正常执行都会生成研究。
 
@@ -87,7 +111,7 @@ powershell.exe -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File .\t
 
 批量 240 组实测入口为`tests/test_minitab.ps1`，支持`-BuildDirectory`和可选`-CaseLimit`；结果保存在`build/minitab-live-时间/`。常规 CTest 不依赖 Minitab，日常生成和导出也不需要安装 Minitab。命令与 COM 参考见 Minitab 官方[会话命令](https://support.minitab.com/en-us/minitab/session-command-help/)和[自动化接口](https://support.minitab.com/en-us/minitab/media/pdfs/notranslate/Minitab_Automation.pdf)。
 
-该批量脚本当前只向 Minitab 传入双侧容差，因此单侧 P/T 和独立分析容差的 P/T 明确记为 `not_compared`，不算作这些指标的外部对标通过；没有规格及独立分析容差时记为 `not_applicable`。每例的 `pt_comparison` 和汇总的 `pt_comparisons` 保留比较范围与原因。`tests/test_minitab_policy.ps1` 可在不安装或启动 Minitab 的情况下，使用 CLI 实际结果回归这些判据及双侧不一致拒绝分支；这项本地回归不能替代软件实测。
+批量脚本通过双侧容差复核 P/T。它将需要单侧口径或独立分析容差的 P/T 标为 `not_compared`，将无规格且无独立分析容差的 P/T 标为 `not_applicable`。每例的 `pt_comparison` 和汇总的 `pt_comparisons` 保留比较范围与原因。原批次留出的 24 组单侧规格已按上文单独补测。`tests/test_minitab_policy.ps1` 使用 CLI 输出核对分类和容差判据，运行时无需安装 Minitab。
 
 ## ANOVA 与其他软件
 

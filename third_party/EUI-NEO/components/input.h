@@ -135,7 +135,7 @@ public:
         const std::string textDirtyKey = id_ + ".text|" + std::to_string(state.textRevision) + "|" + std::to_string(display.textRevision) +
             "|" + std::to_string(static_cast<int>(std::lround(state.horizontalScroll * 64.0f))) +
             "|" + std::to_string(static_cast<int>(std::lround(state.verticalScroll * 64.0f))) +
-            (empty ? "|p" : "|v") + (hasComposition ? "|ime" : "");
+            (empty ? "|p|" + placeholder_ : "|v") + (hasComposition ? "|ime" : "");
         const float renderedTextHeight = multiline_ ? layout.contentHeight : textHeight;
         const float caretX = layout.clampedCursorX();
         const auto compositionRange = InputModel::selectionRange(state);

@@ -119,6 +119,32 @@ $namingData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $namingConfig 
 $badTemplate = Run-Cli @('--config',$namingConfig)
 Check ($badTemplate.exit -eq 1 -and $badTemplate.stderr.Contains('[UNKNOWN]')) 'unknown filename token is a controlled configuration error'
 
+$ignoredOutputConfig = Join-Path $runRoot 'ignored-output.json'
+$ignoredOutputData = Get-Content -LiteralPath $namingConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+$ignoredOutputData.output.directory = 42
+$ignoredOutputData.output.existing_file = 'invalid'
+$ignoredOutputData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ignoredOutputConfig -Encoding UTF8
+$ignoredOutputHash = (Get-FileHash -LiteralPath $ignoredOutputConfig).Hash
+$explicitOverride = Join-Path $runRoot 'explicit-with-unused-settings.csv'
+$ignoreFilename = Run-Cli @('--config',$ignoredOutputConfig,'--filename','[ALSO_UNKNOWN].csv',
+    '--existing-file','invalid','--csv-format','minitab','--store-standard-order','true',
+    '--output',$explicitOverride) $true
+Check ($ignoreFilename.exit -eq 0 -and (Get-Content -LiteralPath $explicitOverride -TotalCount 1) -ceq
+    'StdOrder,Operator,Part,Trial,Measurement' -and
+    (Get-FileHash -LiteralPath $ignoredOutputConfig).Hash -eq $ignoredOutputHash) 'explicit output ignores unused path settings and applies CSV format and ordering independently'
+$ignoredOutputData.output | Add-Member -NotePropertyName format -NotePropertyValue 'invalid' -Force
+$ignoredOutputData.output | Add-Member -NotePropertyName run_order -NotePropertyValue ([pscustomobject]@{seed=-1}) -Force
+$ignoredOutputData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ignoredOutputConfig -Encoding UTF8
+$inactiveFormat = Run-Cli @('--config',$ignoredOutputConfig,'--run-order','invalid','--input',$explicitOverride) $true
+Check ($inactiveFormat.exit -eq 0) 'analysis-only input ignores invalid unused CSV settings and detects the input format'
+$invalidActive = Join-Path $runRoot 'invalid-active-format.csv'
+$activeFormat = Run-Cli @('--config',$ignoredOutputConfig,'--output',$invalidActive) $true
+Check ($activeFormat.exit -eq 1 -and -not (Test-Path -LiteralPath $invalidActive)) 'explicit output still validates active CSV format and ordering'
+$ignoredOutputData.output | Add-Member -NotePropertyName unknown_field -NotePropertyValue $true
+$ignoredOutputData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ignoredOutputConfig -Encoding UTF8
+$unknownOutput = Run-Cli @('--config',$ignoredOutputConfig,'--input',$explicitOverride) $true
+Check ($unknownOutput.exit -eq 1 -and $unknownOutput.stderr.Contains('output.unknown_field')) 'analysis-only input retains strict config field names'
+
 $namingData.output.filename = 'long.csv'
 $namingData.output | Add-Member -NotePropertyName format -NotePropertyValue 'minitab' -Force
 $namingData.output | Add-Member -NotePropertyName run_order -NotePropertyValue ([pscustomobject]@{mode='within_operator';seed=321;randomize_operators=$true;store_standard_order=$true}) -Force
@@ -237,7 +263,7 @@ $invalidArguments=@(
     @('--ev','between:20:10'), @('--av','target:10:'), @('--grr','target'), @('--pt','at_most:2:3'),
     @('--ndc','target:5:0.1'), @('--ev','none:1'), @('--run-seed','0'), @('--run-seed','-1'),
     @('--run-order','invalid'), @('--randomize-operators','yes'), @('--store-standard-order','1'),
-    @('--csv-format','invalid'), @('--existing-file','invalid'), @('--filename','[UNKNOWN].csv'),
+    @('--csv-format','invalid'),
     @('--operators'), @('--seed','--parts','5'), @('--no-config=true'), @('--unknown','1'),
     @('--no-config','--config',$config), @('--init','--parts','5'), @('--output='))
 $invalidIndex=0
@@ -246,6 +272,10 @@ foreach($arguments in $invalidArguments){
     $badArgs=Run-Cli (@('--no-config','--output',$invalidPath)+$arguments) $true
     Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0 -and -not (Test-Path -LiteralPath $invalidPath)) "invalid CLI options rejected before writing: $($arguments -join ' ')"
     $invalidIndex++
+}
+foreach ($arguments in @(@('--existing-file','invalid'), @('--filename','[UNKNOWN].csv'))) {
+    $badArgs = Run-Cli (@('--no-config')+$arguments) $true
+    Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0) "configured CSV export validates active CLI option: $($arguments[0])"
 }
 $helpFlags=@('--operators','--replicates','--trials','--parts','--study-multiplier','--lsl','--usl',
     '--compliance','--center','--priority','--scale-mode','--reference-tv-sd','--decimal-places',

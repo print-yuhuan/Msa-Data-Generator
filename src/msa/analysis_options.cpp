@@ -39,26 +39,29 @@ double integrate(const std::function<double(double)> &f, double lo, double hi, d
 Json classification(double mean, double part, double gage, const Json &spec) {
     const double lo = spec["lsl"].is_null() ? -INFINITY : spec["lsl"].get<double>();
     const double hi = spec["usl"].is_null() ? INFINITY : spec["usl"].get<double>();
-    const auto probability = [&](double value) {
-        return gage ? normal_interval((lo - value) / gage, (hi - value) / gage)
-                    : double(value >= lo && value <= hi);
+    // Use offsets from the process mean so small part deviations survive at a large origin.
+    const double lo_offset = lo - mean, hi_offset = hi - mean;
+    const auto probability = [&](double deviation) {
+        return gage ? normal_interval((lo_offset - deviation) / gage,
+                                     (hi_offset - deviation) / gage)
+                    : double(deviation >= lo_offset && deviation <= hi_offset);
     };
-    const auto rejection = [&](double value) {
-        return gage ? normal_interval(-INFINITY, (lo - value) / gage) +
-                          normal_interval((hi - value) / gage, INFINITY)
-                    : double(value < lo || value > hi);
+    const auto rejection = [&](double deviation) {
+        return gage ? normal_interval(-INFINITY, (lo_offset - deviation) / gage) +
+                          normal_interval((hi_offset - deviation) / gage, INFINITY)
+                    : double(deviation < lo_offset || deviation > hi_offset);
     };
-    double good = part ? normal_interval((lo - mean) / part, (hi - mean) / part)
-                       : double(mean >= lo && mean <= hi);
-    const double bad = part ? normal_interval(-INFINITY, (lo - mean) / part) +
-                                  normal_interval((hi - mean) / part, INFINITY)
+    const double good = part ? normal_interval(lo_offset / part, hi_offset / part)
+                             : double(lo_offset <= 0 && hi_offset >= 0);
+    const double bad = part ? normal_interval(-INFINITY, lo_offset / part) +
+                                  normal_interval(hi_offset / part, INFINITY)
                             : 1 - good;
     double bad_accept = 0, good_reject = 0;
     if (!part) {
-        bad_accept = bad * probability(mean);
-        good_reject = good * rejection(mean);
+        bad_accept = bad * probability(0);
+        good_reject = good * rejection(0);
     } else if (gage) {
-        const double lower = (lo - mean) / part, upper = (hi - mean) / part;
+        const double lower = lo_offset / part, upper = hi_offset / part;
         // 在规格位置及测量误差过渡处拆分积分，避免窄过渡被采样网格漏掉。
         std::vector<double> cuts{-40, 40};
         for (double limit : {lower, upper})
@@ -79,9 +82,10 @@ Json classification(double mean, double part, double gage, const Json &spec) {
                 mass *
                 integrate(
                     [&](double z) {
+                        const double deviation = part * z;
                         return std::exp(-z * z / 2 - .5 * std::log(2 * std::acos(-1.)) -
                                         std::log(mass)) *
-                               (inside ? rejection(mean + part * z) : probability(mean + part * z));
+                               (inside ? rejection(deviation) : probability(deviation));
                     },
                     a, b);
             (inside ? good_reject : bad_accept) += value;

@@ -29,8 +29,11 @@ Json default_config() {
             {"generation",
              {{"center", nullptr},
               {"priority", "center"},
+              {"require_normality", false},
+              {"part_sampling", "default"},
               {"scale_mode", "auto"},
               {"reference_tv_sd", nullptr},
+              {"minimum_part_span_pct", nullptr},
               {"decimal_places", 4},
               {"seed", nullptr},
               {"max_attempts", 5000},
@@ -125,8 +128,15 @@ Json normalize_config(const Json &raw) {
     if (!one_of(g["priority"], {"center", "indicators"}) ||
         !one_of(g["scale_mode"], {"auto", "reference_tv_sd"}))
         throw ConfigError("生成规则或尺度模式无效");
+    if (!g["require_normality"].is_boolean())
+        throw ConfigError("要求近似正态必须为布尔值");
+    if (!one_of(g["part_sampling"], {"default", "even", "stratified", "center_dense", "end_dense"}))
+        throw ConfigError("部件取样方案无效");
     number(g["center"], "数据中心", -1e12, 1e12, false, true);
     number(g["reference_tv_sd"], "参考 TV_SD", 1e-12, 1e12, false, true);
+    number(g["minimum_part_span_pct"], "最低部件跨度（规格宽度的百分比）", 0, 100, false, true);
+    if (g["minimum_part_span_pct"] == 0)
+        throw ConfigError("最低部件跨度须大于 0%");
     number(g["decimal_places"], "小数位", 0, 10, true);
     number(g["seed"], "随机种子", -9223372036854775808.0, 9223372036854775808.0, true, true);
     if (g["seed"].is_number_unsigned() && g["seed"].get<std::uint64_t>() > std::uint64_t(INT64_MAX))
@@ -232,6 +242,8 @@ std::array<double, 6> ratios(const Json &c) {
         gl = std::max(gl, 1e-15);
     gl = std::max(gl, std::hypot(el, al));
     gh = std::min({gh, std::hypot(eh, ah), 1.});
+    if (n && gh == 0)
+        throw InfeasibleError("当前约束要求量具 R&R 为零，此时 ndc 无法计算。请调整指标约束。");
     if (gl > gh || el > eh || al > ah)
         throw InfeasibleError(
             "EV%、AV%、GRR%、P/T 或 ndc 的允许范围没有共同解；请调整目标或允许误差。");
@@ -242,21 +254,40 @@ Json validate_request(const Json &raw) {
     auto &s = c["specification"];
     auto &g = c["generation"];
     bool both = !s["lsl"].is_null() && !s["usl"].is_null();
+    if (!g["minimum_part_span_pct"].is_null() && !both)
+        throw ConfigError("设置最低部件跨度时，请填写下规格限和上规格限。也可将最低部件跨度留空。");
     if (s["compliance"] == "strict" && s["lsl"].is_null() && s["usl"].is_null())
         throw ConfigError("严格模式至少需要一个规格限；也可切换宽松模式。");
     const auto &a = c["analysis"];
-    if (!c["targets"]["PT_pct"].is_null() && s["lsl"].is_null() && s["usl"].is_null() &&
-        a["tolerance"].is_null())
-        throw ConfigError("P/T 约束需要规格限或有效的分析容差。");
+    if (!c["targets"]["PT_pct"].is_null() && a["tolerance"].is_null()) {
+        if (s["lsl"].is_null() && s["usl"].is_null())
+            throw ConfigError("P/T 约束需要规格限或有效的分析容差。");
+        if (!both && !a["historical_mean"].is_null() &&
+            a["historical_mean"] == (s["lsl"].is_null() ? s["usl"] : s["lsl"]))
+            throw InfeasibleError("历史均值等于单侧规格限，P/T 无法计算。请设置分析容差、修改历史均值或清除 P/T 约束。");
+    }
     if ((g["scale_mode"] == "reference_tv_sd" || !both) && g["reference_tv_sd"].is_null() &&
         a["historical_sd"].is_null())
         throw ConfigError("当前缺少波动尺度，请在选项页填写参考 TV_SD。中心可继续留空。");
     ratios(c);
-    if (s["compliance"] == "strict" && both &&
-        grid_bound(s["lsl"], g["decimal_places"], true) >=
-            grid_bound(s["usl"], g["decimal_places"], false))
-        throw InfeasibleError(
-            "规格范围内不足两个不同的输出精度数值，无法形成非零 TV；请增加小数位。");
+    if (s["compliance"] == "strict" && both) {
+        const double lsl = s["lsl"], usl = s["usl"];
+        const int dp = g["decimal_places"];
+        const double grid_low = grid_bound(lsl, dp, true), grid_high = grid_bound(usl, dp, false);
+        if (grid_low >= grid_high)
+            throw InfeasibleError(
+                "规格范围内不足两个不同的输出精度数值，无法形成非零 TV；请增加小数位。");
+        if (!g["minimum_part_span_pct"].is_null()) {
+            const double required_span = (usl - lsl) * (g["minimum_part_span_pct"].get<double>() / 100);
+            const double grid_span = grid_high - grid_low;
+            // Leave headroom for decimal conversion and subtraction at the bounds.
+            const double slack = 8 * std::numeric_limits<double>::epsilon() *
+                                 std::max(std::abs(lsl), std::abs(usl));
+            if (required_span - grid_span > slack)
+                throw InfeasibleError(
+                    "最低部件跨度超过规格内按当前小数位可表示的范围。请降低最低部件跨度或增加小数位。");
+        }
+    }
     return c;
 }
 } // namespace msa

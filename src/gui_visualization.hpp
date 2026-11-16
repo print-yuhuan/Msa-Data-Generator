@@ -78,6 +78,15 @@ int selectedChartCount() {
                ? 1
                : int(std::count(visual.included.begin(), visual.included.end(), true));
 }
+bool chartSelectedForExport(int index) {
+    return visual.scope == 0 ? index == visual.selected : visual.included[index];
+}
+std::optional<int> pendingChartExportEdit() {
+    for (int i = 0; i < int(visual.editDirty.size()); ++i)
+        if (chartSelectedForExport(i) && visual.editDirty[i])
+            return i;
+    return {};
+}
 std::string chartFooterSummary() {
     if (visual.busy())
         return "正在导出 " + std::to_string(visual.exportingCount) + " 张图表…";
@@ -85,8 +94,8 @@ std::string chartFooterSummary() {
         return "图表操作未完成，请查看页面提示";
     if (!insightResult())
         return "请先生成数据或导入 CSV";
-    if (visual.editDirty[visual.selected])
-        return "当前图表有待应用的编辑";
+    if (pendingChartExportEdit())
+        return visual.scope == 0 ? "当前图表有待应用的编辑" : "待导出的组合含未应用的编辑";
     if (visual.scope == 0)
         return std::string(msa::charts::label(msa::charts::all_kinds()[visual.selected]));
     return "已选 " + std::to_string(selectedChartCount()) + " / 7 张图表";
@@ -400,25 +409,23 @@ void exportVisuals() {
     if (visual.busy() || state.busy() || !insightResult())
         return;
     try {
+        if (const auto pending = pendingChartExportEdit()) {
+            const int i = *pending;
+            if (visual.selected != i)
+                visual.editorOffset = 0;
+            visual.selected = i;
+            visual.editing = true;
+            visualError("edit",
+                        "「" + std::string(msa::charts::label(msa::charts::all_kinds()[i])) +
+                            "」还有未应用的编辑",
+                        "请先应用编辑或撤销草稿，再导出。", i);
+            return;
+        }
         std::vector<msa::charts::Scene> scenes;
-        for (int i = 0; i < 7; ++i) {
-            if (visual.scope == 0 ? i == visual.selected : visual.included[i]) {
-                if (visual.editDirty[i]) {
-                    if (visual.selected != i)
-                        visual.editorOffset = 0;
-                    visual.selected = i;
-                    visual.editing = true;
-                    visualError("edit",
-                                "「" +
-                                    std::string(msa::charts::label(msa::charts::all_kinds()[i])) +
-                                    "」还有未应用的编辑",
-                                "请先应用编辑或撤销草稿，再导出。", i);
-                    return;
-                }
+        for (int i = 0; i < int(msa::charts::all_kinds().size()); ++i)
+            if (chartSelectedForExport(i))
                 scenes.push_back(msa::charts::make_scene(
                     *insightResult(), msa::charts::all_kinds()[i], chartEditor(i), 900, 560));
-            }
-        }
         if (scenes.empty())
             throw std::runtime_error("请至少选择一张组合图表");
         const auto basename = native_ui::trim(visual.filename);

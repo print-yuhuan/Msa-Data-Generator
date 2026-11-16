@@ -1,9 +1,9 @@
 <div align="center">
   <h1>MSA 数据生成器</h1>
   <p>生成交叉量具 R&amp;R 模拟数据，复核统计指标，导出测量记录。</p>
-  <p><strong>Windows x64</strong> · v1.0.0 · <a href="LICENSE">MIT 许可证</a></p>
+  <p><strong>Windows x64</strong> · v1.0.1 · <a href="LICENSE">MIT 许可证</a></p>
   <p>
-    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.0/MSA_Data_Generator_v1.0.0_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
+    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.1/MSA_Data_Generator_v1.0.1_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
     · <a href="#快速开始">快速开始</a>
     · <a href="docs/README.md">文档中心</a>
   </p>
@@ -32,13 +32,19 @@
 
 | 能力 | 支持范围 |
 | --- | --- |
-| 研究与生成 | 2～3 名操作员、2～3 次重复测量、5～10 个部件，共 24 种平衡交叉设计。可设置中心、规格限、精度与随机种子。 |
+| 研究与生成 | 2～3 名操作员、2～3 次重复测量、5～10 个部件，共 24 种平衡交叉设计。支持五种部件取样方案及可选最低跨度，可按需筛选近似正态的测量值。[取样设置](docs/使用说明.md#部件取样与跨度) |
 | 统计复核 | 支持 **Xbar-R（均值极差法）** 与 **ANOVA（方差分析法）**。可设置 EV/TV、AV/TV、GRR/TV、P/T、ndc 的目标值、区间或上下限。 |
 | 分析选项 | 支持研究变异倍数、独立分析容差和历史过程参数。ANOVA 另支持交互项设置、误分类概率和方差分量置信限。 |
 | 图表 | 提供七类 MSA 图表，支持操作员分面、控制限、坐标与外观编辑，可导出 PNG、JPEG 或 PDF。 |
 | CSV 导出 | 提供默认宽表及 Minitab、SPSS、JMP、Origin、MATLAB 五种长表预设。可设置运行顺序、独立排序种子、`StdOrder` 和文件名模板。 |
 
 数据生成、统计分析、图表绘制和文件导出均在本机完成。桌面程序和 CLI 共用统计内核与配置规则。统计口径及外部软件的参数差异见 [Minitab 导入与对标](docs/Minitab导入与对标.md)和 [ANOVA 对标记录](docs/ANOVA设计与五软件对标.md)。
+
+## v1.0.1 更新
+
+- **生成设置** · 新增部件取样、最低部件跨度和近似正态筛选。沿用默认取样并关闭新增筛选时，原有固定种子可继续复现同一组测量值。
+- **选项与反馈** · 补充规格、指标与分析选项的联动检查，修复随机化模式切换后运行顺序种子提示不刷新的问题。
+- **帮助与对标** · 重整内置帮助，并补充 Minitab 22 单侧规格 P/T 的计算口径和复现步骤。
 
 ## 命令行
 
@@ -79,6 +85,6 @@ ctest --test-dir build -C Release --output-on-failure
 
 欢迎提交可复现的问题。反馈时可附上软件版本、研究设置、操作步骤和预期结果。[GitHub Issues](https://github.com/print-yuhuan/Msa-Data-Generator/issues)
 
-[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.0
-[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.0/MSA_Data_Generator_v1.0.0_Windows_x64.zip
-[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.0/MSA_Data_Generator_v1.0.0_Windows_x64.zip.sha256
+[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.1
+[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.1/MSA_Data_Generator_v1.0.1_Windows_x64.zip
+[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.1/MSA_Data_Generator_v1.0.1_Windows_x64.zip.sha256

@@ -1,6 +1,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
+#include "components/input.h"
 #include "components/scrollview.h"
 #include "core/dsl_runtime.h"
 #include "core/render/render_backend.h"
@@ -180,6 +181,41 @@ void checkFractionalText(core::window::Handle window, core::render::RenderBacken
     }
     std::cout << int(scale * 100) << "%: fractional text pixel comparison passed\n";
 }
+
+void checkInputPlaceholder(core::window::Handle window, core::render::RenderBackend &backend,
+                           float scale) {
+    core::dsl::Runtime runtime;
+    runtime.initialize(window);
+    const auto render = [&](const char *placeholder, const char *value = "") {
+        runtime.compose("input-placeholder", width / scale, height / scale,
+                        [&](core::dsl::Ui &ui, const core::dsl::Screen &) {
+                            components::input(ui, "run-order-seed")
+                                .position(8, 8)
+                                .size(230, 40)
+                                .value(value)
+                                .placeholder(placeholder)
+                                .build();
+                        });
+        runtime.update(window, 0, 1, scale, false);
+        runtime.requestFullPaint();
+        backend.beginFrame(
+            {window, core::window::nativeWindowInfo(window), width, height, scale});
+        runtime.render(width, height, scale, core::Color("#FFFFFF"));
+        return readPixels();
+    };
+
+    const auto standard = render("随机化时可用");
+    const auto randomized = render("选填正整数，留空自动选取");
+    if (randomized == standard || render("随机化时可用") != standard)
+        throw std::runtime_error("an empty input did not repaint a changed placeholder");
+
+    const auto populated = render("随机化时可用", "321");
+    if (populated == standard || render("选填正整数，留空自动选取", "321") != populated)
+        throw std::runtime_error("an input with a value painted the placeholder");
+    if (render("选填正整数，留空自动选取") != randomized)
+        throw std::runtime_error("clearing a value did not restore the current placeholder");
+    runtime.shutdown();
+}
 } // namespace
 
 int wmain(int argc, wchar_t **argv) {
@@ -211,6 +247,7 @@ int wmain(int argc, wchar_t **argv) {
         for (float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
             check(window, *backend, scale, output);
             checkFractionalText(window, *backend, scale, output);
+            checkInputPlaceholder(window, *backend, scale);
         }
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

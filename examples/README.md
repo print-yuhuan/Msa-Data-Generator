@@ -1,6 +1,6 @@
 # 配置示例
 
-示例适用于 v1.0.0，使用 `schema_version=1`。GUI 与 CLI 共用字段及校验规则。业务参数含义、类型及默认值见[配置参考](../docs/配置参考.md)，命令行覆盖方式见[使用说明](../docs/使用说明.md#cli)。
+示例适用于 v1.0.1，使用 `schema_version=1`。GUI 与 CLI 共用字段及校验规则。业务参数含义、类型及默认值见[配置参考](../docs/配置参考.md)，命令行覆盖方式见[使用说明](../docs/使用说明.md#cli)。
 
 | 文件 | 用途 |
 |---|---|
@@ -17,6 +17,14 @@
 ```
 
 显式路径已存在时应更换路径或添加`--overwrite`。省略`--output`则使用配置中的输出目录、文件名模板和同名策略。空/相对输出目录以用户默认配置目录为基准；每次 CLI 正常执行都会生成研究，相同生成种子、参数、版本且搜索未被超时截断时可复现。
+
+以下示例选择等距取样，要求部件均值跨度至少达到规格宽度的 60%，并筛选近似正态的测量值。
+
+```powershell
+.\build\Release\msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 `
+  --part-sampling even --minimum-part-span-pct 60 --require-normality true `
+  --output ".\build\example-sampling.csv"
+```
 
 `generation.seed` 控制测量值，`output.run_order.seed` 控制行序。比较运行顺序时应使用同一份已生成数据。实测脚本为 `tests/test_minitab_run_order.ps1`，操作步骤见 [Minitab 导入与对标](../docs/Minitab导入与对标.md#重复执行实测)。
 

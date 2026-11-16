@@ -1,6 +1,7 @@
 #include "msa/core.hpp"
 #include "msa/task.hpp"
 #include "ui_model.hpp"
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <cmath>
@@ -10,6 +11,7 @@
 #include <limits>
 #include <mutex>
 #include <set>
+#include <string_view>
 #include <thread>
 #ifdef _WIN32
 #include "platform/clipboard_win.hpp"
@@ -136,6 +138,85 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
                     require(m == a.metrics);
                 }
     });
+    test("normality_rule_rejects_poor_fit_without_relaxing_generation_constraints", [] {
+        auto c = example();
+        c["specification"]["lsl"] = 9.5;
+        c["specification"]["usl"] = 10.5;
+        c["targets"] = {
+            {"EV_pct", {{"mode", "target"}, {"value", 10}, {"tolerance_pp", .1}}},
+            {"AV_pct", {{"mode", "at_most"}, {"value", 10}}},
+            {"GRR_pct", {{"mode", "between"}, {"min", 10}, {"max", 20}}},
+            {"PT_pct", {{"mode", "at_most"}, {"value", 20}}},
+            {"ndc", {{"mode", "at_least"}, {"value", 5}}}};
+        for (const bool anova : {false, true}) {
+            c["analysis"]["method"] = anova ? "crossed_anova" : "crossed_xbarr";
+            c["generation"]["seed"] = anova ? 7 : 6;
+            c["generation"]["max_attempts"] = 1;
+            c["generation"].erase("require_normality");
+            const auto original = generate(c);
+            require(qualified(original.metrics, c));
+            c["generation"]["require_normality"] = false;
+            require(generate(c).matrix == original.matrix, "legacy seed sequence changed");
+            // The first rounded candidate has adjusted A² above 1 for both seeds.
+            c["generation"]["require_normality"] = true;
+            throws<SearchError>([&] { generate(c); });
+            c["generation"]["max_attempts"] = 5000;
+            const auto filtered = generate(c);
+            require(filtered.matrix != original.matrix && qualified(filtered.metrics, c));
+            require(generate(c).matrix == filtered.matrix, "normality screening is not reproducible");
+        }
+    });
+    test("part_sampling_shapes_and_minimum_span_use_final_measurements", [] {
+        const auto sorted_part_means = [](const Matrix &matrix) {
+            std::vector<double> means(matrix.front().size());
+            for (const auto &row : matrix)
+                for (std::size_t part = 0; part < row.size(); ++part)
+                    means[part] += row[part];
+            for (auto &mean : means)
+                mean /= matrix.size();
+            std::sort(means.begin(), means.end());
+            return means;
+        };
+        for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
+            auto c = example();
+            c["analysis"]["method"] = method;
+            clear_targets(c);
+            const auto legacy = generate(c).matrix;
+            c["generation"].erase("part_sampling");
+            c["generation"].erase("minimum_part_span_pct");
+            require(generate(c).matrix == legacy, "omitting new settings changes the default");
+            c["generation"]["minimum_part_span_pct"] = 80;
+            for (const char *mode : {"even", "stratified", "center_dense", "end_dense"}) {
+                c["generation"]["part_sampling"] = mode;
+                const auto result = generate(c);
+                const auto means = sorted_part_means(result.matrix);
+                require(qualified(result.metrics, c) && means.back() - means.front() + 1e-12 >= 1.6,
+                        std::string("specification or measured part span not met: ") + mode);
+                const double outer_gap = (means[1] - means[0] + means[9] - means[8]) / 2;
+                const double middle_gap = means[5] - means[4];
+                if (std::string_view(mode) == "even")
+                    require(std::abs(outer_gap - middle_gap) < .0003, "equal spacing changed");
+                if (std::string_view(mode) == "center_dense")
+                    require(outer_gap > middle_gap * 1.5, "center is not denser");
+                if (std::string_view(mode) == "end_dense")
+                    require(middle_gap > outer_gap * 1.5, "ends are not denser");
+                if (std::string_view(mode) == "stratified")
+                    require(generate(c).matrix == result.matrix, "stratified seed is not reproducible");
+            }
+        }
+        auto c = example();
+        clear_targets(c);
+        c["specification"] = {{"lsl", 9.49}, {"usl", 10.51}, {"compliance", "strict"}};
+        c["generation"]["decimal_places"] = 1;
+        c["generation"]["max_attempts"] = 100;
+        c["generation"]["minimum_part_span_pct"] = 100;
+        throws<InfeasibleError>([&] { validate_request(c); });
+        c["specification"] = {{"lsl", 9.5}, {"usl", 10.5}, {"compliance", "strict"}};
+        require(validate_request(c)["generation"]["minimum_part_span_pct"] == 100,
+                "the threshold equal to the usable grid span was rejected");
+        c["specification"]["lsl"] = nullptr;
+        throws<ConfigError>([&] { validate_request(c); });
+    });
     test("overlapping_bands_not_nominal_conflict", [] {
         auto c = example();
         c["targets"]["GRR_pct"]["value"] = 10.15;
@@ -193,6 +274,11 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         auto m = calculate(Matrix(9, std::vector<double>(10, 0)), c);
         require(!qualified(m, c) && m["EV_pct"].is_null() && m["PT_pct"] == 0);
         throws<std::invalid_argument>([&] { calculate(Matrix(8, std::vector<double>(10, 0)), c); });
+        c["targets"]["ndc"] = {{"mode", "at_least"}, {"value", 1}};
+        throws<InfeasibleError>([&] { validate_request(c); });
+        for (auto key : {"EV_pct", "AV_pct", "GRR_pct"})
+            c["targets"][key] = nullptr;
+        throws<InfeasibleError>([&] { validate_request(c); });
     });
     test("historical_variation_does_not_qualify_constant_samples", [&] {
         for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
@@ -253,6 +339,97 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
                 require(a.metrics["minimum"].get<double>() >= 2);
         }
     });
+    test("one_sided_pt_uses_final_mean_when_soft_center_lies_at_the_limit", [] {
+        for (const auto *method : {"crossed_xbarr", "crossed_anova"})
+            for (const bool lower : {true, false}) {
+                auto c = example();
+                clear_targets(c);
+                const double limit = lower ? 10. : -10.;
+                c["analysis"]["method"] = method;
+                c["specification"][lower ? "usl" : "lsl"] = nullptr;
+                c["specification"][lower ? "lsl" : "usl"] = limit;
+                c["generation"]["reference_tv_sd"] = .1;
+                c["generation"]["max_attempts"] = 1;
+                c["targets"]["PT_pct"] = {{"mode", "at_most"}, {"value", 1000}};
+                for (const double epsilon : {0., 1e-10}) {
+                    c["generation"]["center"] = lower ? limit + epsilon : limit - epsilon;
+                    auto result = generate(c);
+                    const double expected_mean = result.metrics["mean"];
+                    require(qualified(result.metrics, c) &&
+                                (lower ? expected_mean > limit : expected_mean < limit),
+                            "one-sided placement did not produce a valid nonzero P/T denominator");
+                    expect_near(result.metrics["PT_pct"],
+                                300 * result.metrics["GRR"].get<double>() / std::abs(limit - expected_mean));
+                }
+                c["generation"]["center"] = limit;
+                c["analysis"]["historical_mean"] = limit;
+                throws<InfeasibleError>([&] { validate_request(c); });
+                c["analysis"]["tolerance"] = 1;
+                require(qualified(generate(c).metrics, c),
+                        "independent tolerance did not override zero historical distance");
+            }
+    });
+    test("automatic_reference_scale_uses_entered_reference_before_history", [] {
+        for (const auto *method : {"crossed_xbarr", "crossed_anova"})
+            for (const bool has_limit : {true, false}) {
+                auto c = example();
+                clear_targets(c);
+                c["analysis"]["method"] = method;
+                c["analysis"]["historical_sd"] = 5;
+                c["specification"]["lsl"] = has_limit ? Json(10) : Json(nullptr);
+                c["specification"]["usl"] = nullptr;
+                c["specification"]["compliance"] = has_limit ? "strict" : "relaxed";
+                c["generation"]["reference_tv_sd"] = .1;
+                c["generation"]["decimal_places"] = 6;
+                const auto automatic = generate(c);
+                require(automatic.metrics["TV"] == 5 &&
+                            automatic.metrics["study"]["historical_applied"] == true &&
+                            std::abs(automatic.metrics["study"]["sample_tv"].get<double>() - .1) < 1e-6,
+                        "historical TV replaced the entered generation scale");
+                c["generation"]["scale_mode"] = "reference_tv_sd";
+                const auto explicit_reference = generate(c);
+                require(explicit_reference.matrix == automatic.matrix &&
+                            explicit_reference.metrics == automatic.metrics,
+                        "implicit and explicit reference scale produced different results");
+            }
+    });
+    test("historical_reference_generation_can_use_proven_sample_tv_fallback", [] {
+        for (const bool one_sided : {false, true}) {
+            auto c = example();
+            clear_targets(c);
+            if (one_sided) {
+                c["specification"]["usl"] = nullptr;
+                c["analysis"]["historical_mean"] = 10;
+            }
+            c["analysis"]["historical_sd"] = .01;
+            c["generation"]["scale_mode"] = "reference_tv_sd";
+            c["generation"]["reference_tv_sd"] = .2;
+            c["targets"]["GRR_pct"] = {{"mode", "between"}, {"min", 45}, {"max", 55}};
+            c["targets"]["PT_pct"] = {{"mode", "between"}, {"min", 29}, {"max", 31}};
+            const auto result = generate(c);
+            require(qualified(result.metrics, c) &&
+                        result.metrics["study"]["historical_applied"] == false,
+                    "the fixed P/T denominator requires GRR above historical SD");
+            auto study = c;
+            study["analysis"]["process_variation"] = "study";
+            const auto witness = generate(study);
+            require(qualified(calculate(witness.matrix, c), c),
+                    "study-generated data should qualify after history falls back to sample TV");
+        }
+        auto c = example();
+        clear_targets(c);
+        c["specification"]["usl"] = nullptr;
+        c["analysis"]["historical_mean"] = 11;
+        c["analysis"]["historical_sd"] = .15;
+        c["analysis"]["tolerance"] = 2;
+        c["generation"]["reference_tv_sd"] = .2;
+        c["targets"]["GRR_pct"] = {{"mode", "between"}, {"min", 65}, {"max", 69}};
+        c["targets"]["PT_pct"] = {{"mode", "between"}, {"min", 29}, {"max", 31}};
+        const auto result = generate(c);
+        require(qualified(result.metrics, c) && result.metrics["TV"] == .15 &&
+                    result.metrics["study"]["historical_applied"] == true,
+                "independent tolerance preserves the valid historical process variation");
+    });
     test("required_parameters", [] {
         throws<ConfigError>([] { validate_request(default_config()); });
         auto c = example();
@@ -268,6 +445,10 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         for (auto edit : std::vector<Json>{
                  {{"design", {{"operators", true}}}},
                  {{"generation", {{"seed", 1.2}}}},
+                 {{"generation", {{"require_normality", "true"}}}},
+                 {{"generation", {{"part_sampling", "unknown"}}}},
+                 {{"generation", {{"minimum_part_span_pct", 0}}}},
+                 {{"generation", {{"minimum_part_span_pct", 101}}}},
                  {{"generation", {{"center", "NaN"}}}},
                  {{"analysis", {{"study_multiplier", 0}}}},
                  {{"targets", {{"ndc", {{"mode", "target"}, {"value", 5.5}}}}}},
