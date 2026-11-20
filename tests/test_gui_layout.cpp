@@ -403,6 +403,11 @@ void xbar_details(const msa::Result &generated) {
         if (gui::state.resultTab != 2 || !grr || grr->text.find(expected) == std::string::npos ||
             details.find("anova.pending"))
             throw std::runtime_error("Xbar-R details tab resets or loses study results");
+        const auto *sampling = details.find("search.sampling");
+        const auto percent = native_ui::review_number(generated.search_diagnostics.at("part_mean_span_pct"), 2);
+        if (!sampling || sampling->text.find("部件取样：默认取样。") == std::string::npos ||
+            sampling->text.find(percent + "%") == std::string::npos)
+            throw std::runtime_error("生成详情未显示该研究的取样方案和实际跨度占比");
         controls_fit(details, width, "Xbar-R details");
     }
     gui::state.resultTab = 0;
@@ -817,10 +822,14 @@ void regrouped_settings_state(const msa::Result &generated) {
         gui::state.draft.lsl = "9.5";
         gui::state.draft.usl = compact ? "" : "10.5";
         eui::Ui ui;
-        ui.begin("part-sampling-and-span");
-        gui::optionsPage(ui, width, height);
-        ui.end();
-        ui.layout(width, height);
+        const auto compose = [&] {
+            ui.begin("part-sampling-and-span");
+            gui::optionsPage(ui, width, height);
+            gui::menuOverlay(ui, {width, height});
+            ui.end();
+            ui.layout(width, height);
+        };
+        compose();
         const auto *sampling = ui.find("part.sampling");
         const auto *span = ui.find("part.span.hit");
         const auto *spanNote = ui.find("part.span.note");
@@ -832,21 +841,45 @@ void regrouped_settings_state(const msa::Result &generated) {
             span->frame.y + span->frame.height > reachableBottom + .1f ||
             (spanNote->text.find("填写上下规格限") != std::string::npos) != compact)
             throw std::runtime_error("部件取样和跨度设置超出滚动范围或缺少双侧规格提示");
-        sampling->onPress({}, {});
+        gui::state.configOffset = std::clamp(sampling->frame.y - scroll->frame.y - 40.f,
+                                             0.f, scroll->scrollMaxOffset);
+        compose();
+        ui.find("part.sampling")->onKeyEvent({eui::InputKey::Enter});
+        compose();
         const std::vector<std::string> expected{
-            "默认", "等距覆盖", "分层随机", "中心加密", "两端加密"};
+            "默认取样", "随机取样", "分层随机", "等距覆盖", "正态分位",
+            "中心加密", "两端加密", "低值加密", "高值加密", "双批取样"};
         if (!gui::menu.select || gui::menu.items != expected)
-            throw std::runtime_error("部件取样下拉框应列出五种方案");
-        const int selected = compact ? 2 : 4;
-        gui::menu.select(selected);
-        gui::menu.id.clear();
-        if (gui::state.draft.partSampling != selected || !staleResult())
-            throw std::runtime_error("部件取样变更应保存选项并标记旧结果");
+            throw std::runtime_error("部件取样下拉框缺少方案或顺序错误");
+        const int selected = compact ? 9 : 8;
+        if (compact) {
+            const auto *menuScroll = ui.find("menuoverlay");
+            if (!menuScroll || !menuScroll->onScrollOffsetChanged || menuScroll->scrollMaxOffset <= 0)
+                throw std::runtime_error("窄窗口的取样菜单应支持滚动");
+            menuScroll->onScrollOffsetChanged(menuScroll->scrollMaxOffset);
+            compose();
+            const auto &last = *ui.find("menuitem9");
+            const auto item = gui::menuAnchor(ui, last);
+            const auto &box = ui.find("menubox")->frame;
+            if (box.y < 0 || box.y + box.height > height + .1f || item.y < box.y - .1f ||
+                item.y + item.height > box.y + box.height + .1f)
+                throw std::runtime_error("滚动后最后一项未完整显示在取样菜单中");
+            click(ui, "menuitem9");
+        } else {
+            const auto *control = ui.find("part.sampling");
+            control->onKeyEvent({eui::InputKey::End});
+            control->onKeyEvent({eui::InputKey::Up});
+            control->onKeyEvent({eui::InputKey::Enter});
+        }
+        compose();
+        if (!gui::menu.id.empty() || gui::state.draft.partSampling != selected || !staleResult() ||
+            ui.find("part.sampling.note")->text != msa::part_sampling_methods[selected].description)
+            throw std::runtime_error("取样方案选择后未更新说明或标记旧结果");
         auto saved = native_ui::to_config(gui::state.draft);
         const auto generation =
             native_ui::to_config(gui::state.draft, native_ui::ConfigUse::Generation);
         const auto loaded = native_ui::from_config(saved);
-        if (saved["generation"]["part_sampling"] != native_ui::part_sampling_modes[selected] ||
+        if (saved["generation"]["part_sampling"] != (compact ? "two_cluster" : "high_dense") ||
             saved["generation"]["minimum_part_span_pct"] != 80.5 ||
             generation["generation"] != saved["generation"] || loaded.partSampling != selected ||
             loaded.minimumPartSpanPct != "80.5")
@@ -856,6 +889,31 @@ void regrouped_settings_state(const msa::Result &generated) {
         const auto legacy = native_ui::from_config(saved);
         if (legacy.partSampling != 0 || !legacy.minimumPartSpanPct.empty())
             throw std::runtime_error("旧配置应采用默认取样和自动跨度");
+        for (const auto &method : msa::part_sampling_methods) {
+            saved["generation"]["part_sampling"] = method.key;
+            const auto restored = native_ui::from_config(saved);
+            if (expected.at(restored.partSampling) != method.label ||
+                native_ui::to_config(restored)["generation"]["part_sampling"] != method.key)
+                throw std::runtime_error("取样重排序后未按配置键恢复选项");
+        }
+        ui.find("part.sampling")->onKeyEvent({eui::InputKey::Enter});
+        compose();
+        const auto *control = ui.find("part.sampling");
+        control->onKeyEvent({eui::InputKey::Home});
+        control->onKeyEvent({eui::InputKey::Down});
+        control->onKeyEvent({eui::InputKey::Enter});
+        if (native_ui::to_config(gui::state.draft)["generation"]["part_sampling"] != "uniform_random")
+            throw std::runtime_error("随机取样未保存为正确的配置键");
+        for (const bool lower : {false, true})
+            for (const bool upper : {false, true}) {
+                gui::state.draft.lsl = lower ? "9.5" : "";
+                gui::state.draft.usl = upper ? "10.5" : "";
+                compose();
+                const auto *hint = ui.find("part.sampling.limits");
+                if (bool(hint) != (!lower || !upper) ||
+                    (hint && hint->text.find("填齐上下规格限") == std::string::npos))
+                    throw std::runtime_error("随机取样未随双侧规格限更新填写提示");
+            }
     }
     reset(2);
     gui::state.draft.csvFormat = 1;
@@ -1103,6 +1161,14 @@ void help_topics() {
             if (topic == 0) {
                 checkShortcut("help.rules.open.bg");
                 checkShortcut("help.logs.open.bg");
+                for (const auto &method : msa::part_sampling_methods) {
+                    const auto id = std::string("help.part.sampling.") + method.key;
+                    const auto *label = page.find(id + ".label");
+                    const auto *copy = page.find(id + ".copy");
+                    if (!label || label->text != method.label || !copy ||
+                        copy->text != method.description || bottom(*copy) > reachableBottom + tolerance)
+                        throw std::runtime_error("取样帮助的方案名称或说明缺失：" + id);
+                }
             }
             if (topic == 4) {
                 checkShortcut("help.cli.help.copy.bg");

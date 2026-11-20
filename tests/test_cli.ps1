@@ -267,7 +267,7 @@ $invalidArguments=@(
     @('--ev','between:20:10'), @('--av','target:10:'), @('--grr','target'), @('--pt','at_most:2:3'),
     @('--ndc','target:5:0.1'), @('--ev','none:1'), @('--run-seed','0'), @('--run-seed','-1'),
     @('--run-order','invalid'), @('--randomize-operators','yes'), @('--store-standard-order','1'),
-    @('--csv-format','invalid'),
+    @('--csv-format','invalid'), @('--part-sampling','unknown'),
     @('--operators'), @('--seed','--parts','5'), @('--no-config=true'), @('--unknown','1'),
     @('--no-config','--config',$config), @('--init','--parts','5'), @('--output='))
 $invalidIndex=0
@@ -287,6 +287,21 @@ $helpFlags=@('--operators','--replicates','--trials','--parts','--study-multipli
     '--ev','--av','--grr','--pt','--ndc','--output-directory','--filename','--file-type','--existing-file',
     '--csv-format','--run-order','--randomize-operators','--run-seed','--store-standard-order','--no-config')
 Check (@($helpFlags | Where-Object { -not $help.stdout.Contains($_) }).Count -eq 0 -and $help.stdout.Contains('target:VALUE[:ERROR]')) 'help lists every GUI business option, aliases and constraint syntax'
+foreach ($mode in 'uniform_random','normal_quantile','low_dense','high_dense','two_cluster') {
+    $samplingReport = Join-Path $runRoot "$mode.json"
+    $sample = Run-Cli @('--no-config','--lsl','9','--usl','11','--seed','123','--parts','7',
+        '--part-sampling',$mode,'--minimum-part-span-pct','75','--report',$samplingReport,
+        '--output',(Join-Path $runRoot "$mode.csv")) $true
+    Check ($sample.exit -eq 0 -and $help.stdout.Contains($mode)) "CLI documents and generates the $mode part sampling method"
+    $sampling = Get-Content -LiteralPath $samplingReport -Raw -Encoding UTF8 | ConvertFrom-Json
+    Check ($sampling.config.generation.part_sampling -ceq $mode -and $sampling.search.part_mean_span_pct -ge 75) "saved report retains $mode and its measured span"
+}
+$noLimitsOutput = Join-Path $runRoot 'missing-sampling-limit.csv'
+$noUpperLimit = Run-Cli @('--no-config','--part-sampling','uniform_random','--lsl','9',
+    '--reference-tv-sd','0.2','--output',$noLimitsOutput) $true
+Check ($noUpperLimit.exit -ne 0 -and $noUpperLimit.stderr.Contains('随机取样') -and -not (Test-Path -LiteralPath $noLimitsOutput)) 'uniform sampling explains the missing limit before writing'
+$samplingLabels = [regex]::Matches($help.stdout, '(?m)^      [a-z_]+ +(?<name>默认取样|随机取样|分层随机|等距覆盖|正态分位|中心加密|两端加密|低值加密|高值加密|双批取样)  ')
+Check ((($samplingLabels | ForEach-Object { $_.Groups['name'].Value }) -join ',') -ceq '默认取样,随机取样,分层随机,等距覆盖,正态分位,中心加密,两端加密,低值加密,高值加密,双批取样') 'CLI help lists all sampling modes in GUI order'
 
 # Legal JSON whitespace widens the preflight/commit interval without changing parameters.
 $data = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json

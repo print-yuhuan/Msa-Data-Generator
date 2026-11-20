@@ -606,6 +606,10 @@ void text(Ui &u, const std::string &id, const std::string &s, float w, float h =
         .verticalAlign(eui::VerticalAlign::Center)
         .build();
 }
+void paragraph(Ui &u, const std::string &id, const std::string &content, float w,
+               const char *color = muted, float fontSize = 19) {
+    u.text(id).width(w).text(content).wrap().maxWidth(w).fontSize(fontSize).color(color).build();
+}
 void badge(Ui &u, const std::string &id, const std::string &label, float w,
            const char *color = blue, const char *fill = blueWash) {
     u.stack(id)
@@ -1896,9 +1900,25 @@ void results(Ui &u, float w, bool summary = true, float contentHeight = 0) {
                     }
                     if (!state.result->search_diagnostics.empty()) {
                         text(u, "search.summary.title", "生成搜索记录", c, 28, 14);
+                        const auto &diagnostics = state.result->search_diagnostics;
+                        if (diagnostics.contains("part_mean_span")) {
+                            const auto &settings = state.result->config.at("generation");
+                            const auto *method = msa::find_part_sampling(
+                                settings.value("part_sampling", std::string("default")));
+                            std::ostringstream summary;
+                            summary.imbue(std::locale::classic());
+                            if (method)
+                                summary << "部件取样：" << method->label << "。";
+                            summary << "实际部件均值跨度 " << std::setprecision(8)
+                                    << diagnostics.at("part_mean_span").get<double>();
+                            const auto pct = diagnostics.find("part_mean_span_pct");
+                            if (pct != diagnostics.end() && native_ui::finite_metric(*pct))
+                                summary << "，占规格宽度的 " << native_ui::review_number(*pct, 2) << "%";
+                            paragraph(u, "search.sampling", summary.str() + "。", c, ink, 17.5f);
+                        }
                         u.text("search.summary")
                             .width(c)
-                            .text(searchSummary(state.result->search_diagnostics))
+                            .text(searchSummary(diagnostics))
                             .fontSize(16)
                             .lineHeight(24)
                             .wrap()
@@ -2007,7 +2027,6 @@ void exportData() {
         state.feedback("测量数据导出失败", state.dataExportError, Level::Error);
     }
 }
-void paragraph(Ui &, const std::string &, const std::string &, float, const char *, float);
 void methodSettings(Ui &u, float w) {
     section(u, "analysis", "分析方法", w, [&](float c) {
         choiceChips(u, "analysis.method", {"Xbar-R（均值极差法）", "ANOVA（方差分析法）"},
@@ -2128,14 +2147,12 @@ void designSettings(Ui &u, float w) {
     });
 }
 void generationRules(Ui &u, float w) {
-    static const std::vector<std::string> samplingNames{
-        "默认", "等距覆盖", "分层随机", "中心加密", "两端加密"};
-    static constexpr std::array<const char *, native_ui::part_sampling_modes.size()> samplingNotes{
-        "沿用现有方式，在区间两端和中间取样。",
-        "按近似相等的间距布置部件尺寸。",
-        "等分取样区间，每段随机取一件。",
-        "部件尺寸在中心附近较密，两端逐渐稀疏。",
-        "部件尺寸在区间两端较密，中心较稀疏。"};
+    static const auto samplingNames = [] {
+        std::vector<std::string> names;
+        for (const auto &method : msa::part_sampling_methods)
+            names.emplace_back(method.label);
+        return names;
+    }();
     section(u, "generation.rules", "生成规则", w, [&](float c) {
         const float f = (c - 16) / 2;
         u.row("generation.rules.values")
@@ -2218,7 +2235,12 @@ void generationRules(Ui &u, float w) {
                     state.draft.partSampling = i;
                     state.changed();
                 });
-                paragraph(u, "part.sampling.note", samplingNotes[selected], c, muted, 17.5f);
+                const auto &method = msa::part_sampling_methods[selected];
+                paragraph(u, "part.sampling.note", method.description, c, muted, 17.5f);
+                if (method.mode == msa::PartSampling::UniformRandom &&
+                    (native_ui::trim(state.draft.lsl).empty() || native_ui::trim(state.draft.usl).empty()))
+                    paragraph(u, "part.sampling.limits", "请在「数据」页填齐上下规格限，再生成随机取样数据。",
+                              c, levelColor(Level::Warning), 17.5f);
             })
             .build();
         if (state.draft.analysisMethod == 1) {
@@ -3166,10 +3188,6 @@ void menuOverlay(Ui &u, const eui::Screen &screen) {
         })
         .build();
 }
-void paragraph(Ui &u, const std::string &id, const std::string &content, float w,
-               const char *color = muted, float fontSize = 19) {
-    u.text(id).width(w).text(content).wrap().maxWidth(w).fontSize(fontSize).color(color).build();
-}
 void helpText(Ui &u, const std::string &id, const std::string &copy, float w,
               const char *color = ink) {
     u.text(id)
@@ -3715,23 +3733,23 @@ void helpItem(Ui &u, const std::string &id, const std::string &title, const std:
     helpSubheading(u, id + ".title", title, w);
     helpText(u, id, copy, w);
 }
-template <std::size_t N>
-void helpRows(Ui &u, const std::string &id,
-             const std::array<std::pair<const char *, const char *>, N> &rows, float w) {
+void helpRow(Ui &u, const std::string &row, const char *label, const char *copy, float w) {
     constexpr float gap = 14.f;
     const float labelWidth = std::min(150.f, w * .29f);
-    for (std::size_t i = 0; i < rows.size(); ++i) {
-        const auto row = id + "." + std::to_string(i);
-        const auto &[label, copy] = rows[i];
-        u.row(row)
-            .width(w)
-            .gap(gap)
-            .content([&] {
-                helpText(u, row + ".label", label, labelWidth, blue);
-                helpText(u, row + ".copy", copy, w - labelWidth - gap);
-            })
-            .build();
-    }
+    u.row(row)
+        .width(w)
+        .gap(gap)
+        .content([&] {
+            helpText(u, row + ".label", label, labelWidth, blue);
+            helpText(u, row + ".copy", copy, w - labelWidth - gap);
+        })
+        .build();
+}
+template <std::size_t N>
+void helpRows(Ui &u, const std::string &id,
+              const std::array<std::pair<const char *, const char *>, N> &rows, float w) {
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        helpRow(u, id + "." + std::to_string(i), rows[i].first, rows[i].second, w);
 }
 void helpCommand(Ui &u, const std::string &id, const std::string &command, float w) {
     helpExample(u, id, command, w);
@@ -3782,7 +3800,7 @@ void helpQuickStart(Ui &v, float cw) {
              "在「选项 → 研究」设置操作员数、重复测量次数和部件数。在「选项 → 分析」选择分析方法。");
         step("help.step2", "2", "填写生成条件",
              "在「数据」页填写规格限和指标约束，数据中心可留空。「规格内生成」需要至少一侧规格限，"
-             "「最低部件跨度」需要上下规格限。");
+             "「随机取样」和「最低部件跨度」都需要上下规格限。");
         step("help.step3", "3", "生成并核对结果",
              "点击「生成数据」。在「指标复核」核对实际值，在「数据预览」检查测量记录，"
              "再到「分析详情」或「ANOVA 详情」查看计算结果。搜索期间可在底栏取消。");
@@ -3800,21 +3818,22 @@ void helpQuickStart(Ui &v, float cw) {
             state.configOffset = 0;
             state.navigate(Page::Options);
         });
-        constexpr std::array<std::pair<const char *, const char *>, 5> sampling{{
-            {"默认", "两端各取一点，中间随机取样。跨度留空时可复现原有固定种子的结果。"},
-            {"等距覆盖", "按近似相等的间距布置部件，减少尺寸扎堆。"},
-            {"分层随机", "等分取样区间，每段随机取一件，让取样覆盖整个区间。"},
-            {"中心加密", "中心附近的部件较密，两端逐渐稀疏。"},
-            {"两端加密", "较小和较大的部件各成一组，中间较稀疏。"},
-        }};
-        helpRows(v, "help.part.sampling.modes", sampling, c);
+        for (const auto &method : msa::part_sampling_methods)
+            helpRow(v, std::string("help.part.sampling.") + method.key, method.label,
+                    method.description, c);
+        helpItem(v, "help.part.random", "随机取样的中心与尺度",
+                 "请在「数据」页填写上下规格限。每件部件的基础尺寸各自独立抽取，两端可能都没有部件。"
+                 "填写数据中心后，搜索会按生成优先级挑选候选结果。选择参考总变异时，参考标准差控制"
+                 "测量扰动的尺度，部件基础尺寸仍从整个规格区间抽取。",
+                 c);
         helpItem(v, "help.part.span", "最低部件跨度",
                  "在「生成参数」选填百分比，留空时沿用生成尺度。程序先按最终精度舍入读数，"
                  "再按部件求均值。规格为 9.5～10.5 时，填写 80 表示最大与最小部件均值至少相差 0.8。",
                  c);
         helpItem(v, "help.normality", "要求近似正态",
                  "开启后，程序用 Anderson–Darling 的 5% 参考阈值筛选舍入后的全部读数。"
-                 "这个开关可与各取样方案组合。两端加密时，同时满足正态筛选可能需要更多搜索。",
+                 "「正态分位」安排的是部件基础尺寸，最终读数仍需通过筛选。选择「两端加密」或"
+                 "「双批取样」时，满足这项要求可能需要更多尝试。",
                  c);
     });
 
@@ -4116,6 +4135,7 @@ void helpCli(Ui &v, float cw) {
                     "--csv-format minitab --output data.csv --report result.json",
                     c);
         helpText(v, "help.cli.normality",
+                 "将 --part-sampling 的值换为 uniform_random，可在 --lsl 和 --usl 之间随机抽取部件基础尺寸。"
                  "加上 --require-normality true 可筛选舍入后的整批测量值。"
                  "启用的规格、指标、跨度和近似正态要求须同时满足。",
                  c);

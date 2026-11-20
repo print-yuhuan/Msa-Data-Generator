@@ -1,5 +1,6 @@
 #pragma once
 #include "msa/core.hpp"
+#include "msa/part_sampling.hpp"
 #include <cmath>
 
 namespace native_ui {
@@ -37,8 +38,6 @@ inline constexpr std::array<const char *, 6> csv_formats{"default", "minitab", "
                                                          "jmp19",   "origin",  "matlab"};
 inline constexpr std::array<const char *, 3> run_order_modes{"standard", "all", "within_operator"};
 inline constexpr std::array<const char *, 3> interaction_modes{"auto", "include", "exclude"};
-inline constexpr std::array<const char *, 5> part_sampling_modes{
-    "default", "even", "stratified", "center_dense", "end_dense"};
 struct Draft {
     std::string operators = "3", replicates = "3", parts = "10", lsl, usl, multiplier = "6",
                 reference, minimumPartSpanPct;
@@ -196,7 +195,7 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
                           {"compliance", d.compliance ? "relaxed" : "strict"}};
     if (use == ConfigUse::Analysis)
         return msa::normalize_config(c);
-    if (d.partSampling < 0 || d.partSampling >= int(part_sampling_modes.size()))
+    if (d.partSampling < 0 || d.partSampling >= int(msa::part_sampling_methods.size()))
         throw msa::ConfigError("部件取样方案无效");
     const bool needsReference =
         d.scale == 1 || c["specification"]["lsl"].is_null() || c["specification"]["usl"].is_null();
@@ -204,7 +203,7 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
                        {"priority", d.priority ? "indicators" : "center"},
                        {"require_normality", d.requireNormality},
                        {"residual_model", anova && d.variedResiduals ? "varied" : "standard"},
-                       {"part_sampling", part_sampling_modes[d.partSampling]},
+                       {"part_sampling", msa::part_sampling_methods[d.partSampling].key},
                        {"minimum_part_span_pct",
                         numeric(d.minimumPartSpanPct, "最低部件跨度", false, true)},
                        {"scale_mode", d.scale ? "reference_tv_sd" : "auto"},
@@ -275,8 +274,8 @@ inline Draft from_config(const msa::Json &raw) {
     d.priority = g["priority"] == "indicators";
     d.requireNormality = g["require_normality"].get<bool>();
     d.variedResiduals = g["residual_model"] == "varied";
-    for (int i = 0; i < int(part_sampling_modes.size()); ++i)
-        if (g["part_sampling"] == part_sampling_modes[i])
+    for (int i = 0; i < int(msa::part_sampling_methods.size()); ++i)
+        if (g["part_sampling"] == msa::part_sampling_methods[i].key)
             d.partSampling = i;
     d.minimumPartSpanPct = text(g["minimum_part_span_pct"]);
     d.scale = g["scale_mode"] == "reference_tv_sd";

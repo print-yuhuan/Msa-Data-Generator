@@ -1,6 +1,7 @@
 #include "msa/core.hpp"
 #include "msa/comparison_report.hpp"
 #include "msa/license_text.hpp"
+#include "msa/part_sampling.hpp"
 #include "msa/project.hpp"
 #include <algorithm>
 #include <csignal>
@@ -64,9 +65,7 @@ const Option options[]{
      "要求近似正态（筛选最终测量值）：true / false（默认）"},
     {"--residual-model", "/generation/residual_model", ValueType::Text,
      "模拟误差模式：standard 标准（默认）/ varied 变化残差"},
-    {"--part-sampling", "/generation/part_sampling", ValueType::Text,
-     "部件取样：default 默认 / even 等距覆盖 / stratified 分层随机 / "
-     "center_dense 中心加密 / end_dense 两端加密"},
+    {"--part-sampling", "/generation/part_sampling", ValueType::Text, "部件基础尺寸的取样方案（默认取样：default）"},
     {"--scale-mode", "/generation/scale_mode", ValueType::Text,
      "波动尺度：auto 自动（默认）/ reference_tv_sd 参考总变异标准差"},
     {"--minimum-part-span-pct", "/generation/minimum_part_span_pct", ValueType::NullableNumber,
@@ -174,6 +173,11 @@ void help() {
             std::cout << "\n运行顺序（长表）：\n";
         std::cout << "  " << std::left << std::setw(29) << option.name << option.description
                   << '\n';
+        if (name == "--part-sampling") {
+            for (const auto &method : msa::part_sampling_methods)
+                std::cout << "      " << std::setw(16) << method.key << method.label << "  "
+                          << method.description << '\n';
+        }
     }
     std::cout << R"(
 指标约束 SPEC（替换整个旧约束，不继承该指标原有的允许误差或区间）：
@@ -193,6 +197,8 @@ void help() {
 该文件不存在则使用内置默认值，不自动创建。普通运行不保存命令行覆盖。
 生成时，严格规格至少需要一个规格限；P/T 约束需要规格限或分析容差。
 缺少双侧规格或选择参考尺度时，须指定参考 TV_SD 或历史标准差。
+随机取样（--part-sampling uniform_random）须同时指定 --lsl 和 --usl。
+每件部件独立从整个规格区间抽取一个基础尺寸，供该部件的所有重复测量使用。
 设置最低部件跨度须同时提供 LSL 和 USL。先计算舍入后每件部件的测量均值。
 跨度百分比 = 100 × (最大部件均值 − 最小部件均值) / (USL − LSL)，该值须达到所设下限。
 百分比目标允许误差的单位为百分点；ndc 的目标、区间和允许误差均为整数。

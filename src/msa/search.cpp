@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "analysis_detail.hpp"
+#include "part_sampling.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -49,37 +50,106 @@ std::vector<double> profile(int n, Random &rng) {
     shuffle_and_center(seq, rng);
     return seq;
 }
-std::vector<double> part_profile(int n, const std::string &sampling, Random &rng) {
-    if (sampling == "default")
-        return profile(n, rng);
-
-    std::vector<double> seq;
-    seq.reserve(n);
-    for (int i = 0; i < n; ++i) {
-        if (sampling == "stratified") {
-            seq.push_back(rng.uniform(static_cast<double>(i) / n, static_cast<double>(i + 1) / n));
-            continue;
-        }
-        const double position = 2.0 * i / (n - 1) - 1;
-        double value = position;
-        if (sampling == "center_dense")
-            value *= .5 + .5 * position * position;
-        else if (sampling == "end_dense")
-            value *= 2 - std::abs(position);
-        seq.push_back(value);
-    }
+void normalize_part_span(std::vector<double> &positions) {
     // Xbar-R constructs the intended PV from a profile with unit range.
-    const double span = seq.back() - seq.front();
-    for (double &value : seq)
+    const double span = positions.back() - positions.front();
+    for (double &value : positions)
         value /= span;
-    shuffle_and_center(seq, rng);
-    return seq;
 }
-std::optional<std::pair<Matrix, double>>
-normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int attempt) {
+void append_stratified(std::vector<double> &positions, int count, double lo, double hi, Random &rng) {
+    for (int i = 0; i < count; ++i)
+        positions.push_back(rng.uniform(lo + (hi - lo) * i / count,
+                                        lo + (hi - lo) * (i + 1) / count));
+}
+
+// Fixed positions are calculated once per study; candidate generation only shuffles them.
+class PartSampler {
+  public:
+    PartSampler(int n, PartSampling requested_mode) : count(n), mode(requested_mode) {
+        if (mode == PartSampling::Default || mode == PartSampling::UniformRandom ||
+            mode == PartSampling::Stratified ||
+            mode == PartSampling::TwoCluster)
+            return;
+        fixed.resize(n);
+        if (mode == PartSampling::NormalQuantile) {
+            // Z² has a chi-square distribution with one degree of freedom. The
+            // midpoint quantiles at p and 1-p are negatives of one another.
+            for (int i = 0; i < n / 2; ++i) {
+                const double p = (i + .5) / n;
+                const double z = std::sqrt(chi_square_quantile(1 - 2 * p, 1));
+                fixed[i] = -z;
+                fixed[n - 1 - i] = z;
+            }
+        } else {
+            for (int i = 0; i < n; ++i) {
+                const double position = 2.0 * i / (n - 1) - 1;
+                const double t = static_cast<double>(i) / (n - 1);
+                if (mode == PartSampling::CenterDense)
+                    fixed[i] = position * (.5 + .5 * position * position);
+                else if (mode == PartSampling::EndDense)
+                    fixed[i] = position * (2 - std::abs(position));
+                else if (mode == PartSampling::LowDense)
+                    fixed[i] = t * t;
+                else if (mode == PartSampling::HighDense)
+                    fixed[i] = 1 - (1 - t) * (1 - t);
+                else
+                    fixed[i] = position;
+            }
+        }
+        normalize_part_span(fixed);
+    }
+
+    std::vector<double> draw(Random &rng, std::vector<double> &uniform_fractions) const {
+        if (mode == PartSampling::Default)
+            return profile(count, rng);
+        if (mode == PartSampling::UniformRandom) {
+            uniform_fractions.resize(count);
+            for (auto &fraction : uniform_fractions)
+                fraction = rng.unit();
+            const auto [low, high] = std::minmax_element(uniform_fractions.begin(), uniform_fractions.end());
+            const double span = *high - *low;
+            if (span == 0)
+                return {};
+            // Keep the draws in part-number order. Only the unit model for the
+            // measurement errors is standardized; placement uses the original draws.
+            auto model = uniform_fractions;
+            const double mean = accurate_sum(model) / count;
+            for (auto &position : model)
+                position = (position - mean) / span;
+            return model;
+        }
+        auto sampled = fixed;
+        if (sampled.empty()) {
+            sampled.reserve(count);
+            if (mode == PartSampling::TwoCluster) {
+                const int lower = count / 2 + (count % 2 && rng.unit() < .5 ? 1 : 0);
+                append_stratified(sampled, lower, 0, .25, rng);
+                append_stratified(sampled, count - lower, .75, 1, rng);
+            } else {
+                append_stratified(sampled, count, 0, 1, rng);
+            }
+            normalize_part_span(sampled);
+        }
+        shuffle_and_center(sampled, rng);
+        return sampled;
+    }
+
+  private:
+    int count;
+    PartSampling mode;
+    std::vector<double> fixed;
+};
+struct Candidate {
+    Matrix matrix;
+    double grr;
+    std::vector<double> model_parts;
+    std::vector<double> uniform_fractions;
+};
+std::optional<Candidate>
+normalized(const Json &c, const std::array<double, 6> &ratio, const PartSampler &sampler,
+           Random &rng, int attempt) {
     auto [el, eh, al, ah, gl, gh] = ratio;
     int o = c["design"]["operators"], r = c["design"]["replicates"], p = c["design"]["parts"];
-    const auto &sampling = c["generation"]["part_sampling"].get_ref<const std::string &>();
     const auto &t = c["targets"];
     bool et = !t["EV_pct"].is_null(), at = !t["AV_pct"].is_null();
     double fallback =
@@ -101,6 +171,7 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
     e2 = attempt % 3 == 0 ? std::min(e2hi, std::max(e2lo, e2)) : rng.uniform(e2lo, e2hi);
     double ev = std::sqrt(e2), av = std::sqrt(std::max(0., g * g - e2)),
            pv = std::sqrt(std::max(0., 1 - g * g));
+    std::vector<double> uniform_fractions;
     if (c["analysis"]["method"] == "crossed_anova") {
         // 正交分解构造指定均方；仅ANOVA采用此分支，旧均值极差法的随机序列不变。
         auto scale_norm = [](std::vector<double> &v, double sumsq) {
@@ -124,7 +195,9 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
             inter = 0;
             msi = ev * ev;
         }
-        auto parts = part_profile(p, sampling, rng), operators = profile(o, rng);
+        auto parts = sampler.draw(rng, uniform_fractions), operators = profile(o, rng);
+        if (parts.empty())
+            return {};
         scale_norm(parts, (p - 1) * (msi + o * r * pv * pv) / (o * r));
         scale_norm(operators, (o - 1) * (msi + p * r * (av * av - inter)) / (p * r));
         Matrix interaction(o, std::vector<double>(p));
@@ -166,9 +239,11 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
                 for (int k = 0; k < r; ++k)
                     matrix[i * r + k][j] =
                         parts[j] + operators[i] + flat[i * p + j] + residuals[(i * p + j) * r + k];
-        return std::make_pair(matrix, g);
+        return Candidate{std::move(matrix), g, std::move(parts), std::move(uniform_fractions)};
     }
-    auto parts = part_profile(p, sampling, rng);
+    auto parts = sampler.draw(rng, uniform_fractions);
+    if (parts.empty())
+        return {};
     for (auto &v : parts)
         v *= pv * pv_divisor(p);
     double arange = av > 1e-14 ? av_divisor(o) * std::sqrt(av * av + ev * ev / (p * r)) : 0;
@@ -187,7 +262,7 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
             for (int k = 0; k < r; ++k)
                 matrix[i * r + k][j] = parts[j] + opers[i] + residual[k] * er;
         }
-    return std::make_pair(matrix, g);
+    return Candidate{std::move(matrix), g, std::move(parts), std::move(uniform_fractions)};
 }
 double part_mean_span(const Matrix &matrix) {
     // Preserve the exact distance between two constant endpoint parts, even when
@@ -266,6 +341,40 @@ bool pt_excludes_historical_variation(const Json &c) {
     // At equality, the analysis still uses history. Match P/T's computation order.
     const double largest_pt_using_history = 100 * (multiplier * historical_sd) / width;
     return pt->first > largest_pt_using_history;
+}
+Matrix place_uniform_parts(Candidate &candidate, const Json &c) {
+    const auto &spec = c["specification"], &gen = c["generation"], &analysis = c["analysis"];
+    const double lo = spec["lsl"], width = spec["usl"].get<double>() - lo;
+    const auto [first, last] = std::minmax_element(candidate.uniform_fractions.begin(),
+                                                   candidate.uniform_fractions.end());
+    const auto [model_low, model_high] = std::minmax_element(candidate.model_parts.begin(),
+                                                             candidate.model_parts.end());
+    const double model_span = *model_high - *model_low;
+    // The two profiles differ only by translation and scale. Matching their
+    // ranges calibrates the measurement variation to the sampled part variation.
+    double error_scale = model_span > 0 ? width * (*last - *first) / model_span
+                                        : width / std::sqrt(12.);
+    if (gen["scale_mode"] == "reference_tv_sd" && !gen["reference_tv_sd"].is_null())
+        error_scale = gen["reference_tv_sd"];
+    else if (!analysis["historical_sd"].is_null() &&
+             (gen["scale_mode"] == "reference_tv_sd" || analysis["process_variation"] == "historical"))
+        error_scale = analysis["historical_sd"];
+    const auto pt = acceptance(c, "PT_pct");
+    if (pt && candidate.grr > 0 && gen["scale_mode"] == "auto") {
+        const double tolerance = analysis["tolerance"].is_null() ? width : analysis["tolerance"].get<double>();
+        const double per_percent = tolerance / (100 * analysis["study_multiplier"].get<double>() * candidate.grr);
+        error_scale = std::clamp(error_scale, pt->first * per_percent, pt->second * per_percent);
+    }
+    const int dp = gen["decimal_places"];
+    for (std::size_t j = 0; j < candidate.uniform_fractions.size(); ++j) {
+        const double part_size = std::clamp(lo + width * candidate.uniform_fractions[j],
+                                            lo, spec["usl"].get<double>());
+        for (auto &row : candidate.matrix) {
+            const double error = row[j] - candidate.model_parts[j];
+            row[j] = parse_number(fixed(part_size + error_scale * error, dp));
+        }
+    }
+    return std::move(candidate.matrix);
 }
 std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &c, Random &rng,
                                   int attempt, double minimum_part_span) {
@@ -467,6 +576,8 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
     Json construction = c;
     const auto &analysis = c["analysis"];
     const auto &generation = c["generation"];
+    const auto &sampling_key = generation["part_sampling"].get_ref<const std::string &>();
+    const PartSampler sampler(c["design"]["parts"].get<int>(), find_part_sampling(sampling_key)->mode);
     const auto &specification = c["specification"];
     const bool require_normality = generation["require_normality"].get<bool>();
     const double minimum_part_span =
@@ -523,12 +634,14 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
     int rejected_construction = 0, rejected_placement = 0, rejected_indicators = 0,
         rejected_span = 0, rejected_normality = 0, accepted = 0;
     const auto consider = [&](int attempt) {
-        auto n = normalized(construction, ratio, rng, attempt);
+        auto n = normalized(construction, ratio, sampler, rng, attempt);
         if (!n) {
             ++rejected_construction;
             return;
         }
-        auto matrix = scale_place(n->first, n->second, c, rng, attempt, minimum_part_span);
+        auto matrix = n->uniform_fractions.empty()
+                          ? scale_place(n->matrix, n->grr, c, rng, attempt, minimum_part_span)
+                          : std::optional<Matrix>(place_uniform_parts(*n, c));
         if (!matrix) {
             ++rejected_placement;
             return;

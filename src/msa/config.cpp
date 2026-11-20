@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "part_sampling.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -155,7 +156,8 @@ Json normalize_config(const Json &raw) {
         throw ConfigError("生成规则或尺度模式无效");
     if (!g["require_normality"].is_boolean())
         throw ConfigError("要求近似正态必须为布尔值");
-    if (!one_of(g["part_sampling"], {"default", "even", "stratified", "center_dense", "end_dense"}))
+    if (!g["part_sampling"].is_string() ||
+        !find_part_sampling(g["part_sampling"].get_ref<const std::string &>()))
         throw ConfigError("部件取样方案无效");
     if (!one_of(g["residual_model"], {"standard", "varied"}))
         throw ConfigError("ANOVA 子组残差模式须为 standard 或 varied");
@@ -313,6 +315,8 @@ Json validate_request(const Json &raw) {
     auto &s = c["specification"];
     auto &g = c["generation"];
     bool both = !s["lsl"].is_null() && !s["usl"].is_null();
+    if (g["part_sampling"] == "uniform_random" && !both)
+        throw ConfigError("随机取样需要同时填写下规格限和上规格限。");
     if (!g["minimum_part_span_pct"].is_null() && !both)
         throw ConfigError("设置最低部件跨度时，请填写下规格限和上规格限。也可将最低部件跨度留空。");
     if (s["compliance"] == "strict" && s["lsl"].is_null() && s["usl"].is_null())

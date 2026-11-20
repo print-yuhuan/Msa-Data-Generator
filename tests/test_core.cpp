@@ -67,6 +67,16 @@ void clear_targets(Json &c) {
     for (auto key : metric_keys)
         c["targets"][key] = nullptr;
 }
+std::vector<double> sorted_part_means(const Matrix &matrix) {
+    std::vector<double> means(matrix.front().size());
+    for (const auto &row : matrix)
+        for (std::size_t part = 0; part < row.size(); ++part)
+            means[part] += row[part];
+    for (auto &mean : means)
+        mean /= matrix.size();
+    std::sort(means.begin(), means.end());
+    return means;
+}
 struct Comma : std::numpunct<char> {
     char do_decimal_point() const override { return ','; }
 };
@@ -171,16 +181,6 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         }
     });
     test("part_sampling_shapes_and_minimum_span_use_final_measurements", [] {
-        const auto sorted_part_means = [](const Matrix &matrix) {
-            std::vector<double> means(matrix.front().size());
-            for (const auto &row : matrix)
-                for (std::size_t part = 0; part < row.size(); ++part)
-                    means[part] += row[part];
-            for (auto &mean : means)
-                mean /= matrix.size();
-            std::sort(means.begin(), means.end());
-            return means;
-        };
         for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
             auto c = example();
             c["analysis"]["method"] = method;
@@ -220,6 +220,216 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
                 "the threshold equal to the usable grid span was rejected");
         c["specification"]["lsl"] = nullptr;
         throws<ConfigError>([&] { validate_request(c); });
+    });
+    test("existing_part_sampling_preserves_1_0_2_seeded_measurements", [] {
+        // First operator/trial on part 3, and last operator/trial on the last part,
+        // from the released 1.0.2 CLI (seed 123, 2 operators x 2 trials x 5 parts).
+        struct Baseline {
+            const char *mode;
+            std::array<double, 2> xbarr, anova;
+        };
+        const Baseline baselines[]{
+            {"default", {9.7607, 9.3398}, {10.2982, 9.2614}},
+            {"even", {9.7611, 10.5130}, {10.3308, 9.7464}},
+            {"stratified", {9.7495, 10.2981}, {10.5119, 10.1819}},
+            {"center_dense", {9.8656, 10.5130}, {10.2247, 9.8480}},
+            {"end_dense", {9.6218, 10.5130}, {10.4713, 9.6143}}};
+        auto c = example(2, 2, 5);
+        clear_targets(c);
+        for (const auto &baseline : baselines) {
+            c["generation"]["part_sampling"] = baseline.mode;
+            for (const bool anova : {false, true}) {
+                c["analysis"]["method"] = anova ? "crossed_anova" : "crossed_xbarr";
+                const auto matrix = generate(c).matrix;
+                const auto &expected = anova ? baseline.anova : baseline.xbarr;
+                expect_near(matrix.front()[2], expected[0]);
+                expect_near(matrix.back().back(), expected[1]);
+            }
+        }
+    });
+    test("new_part_sampling_shapes_on_rounded_measurements", [] {
+        // Independently tabulated standard-normal quantiles at p = 1 - 0.5 / n.
+        constexpr std::array<double, 6> upper_z{
+            1.2815515655, 1.3829941271, 1.4652337927, 1.5341205444, 1.5932188180, 1.6448536270};
+        constexpr double tolerance = 1e-6;
+        for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
+            for (int n = 5; n <= 10; ++n) {
+                auto c = example(2, 3, n);
+                clear_targets(c);
+                c["analysis"]["method"] = method;
+                c["generation"]["minimum_part_span_pct"] = 80;
+                c["generation"]["decimal_places"] = 8;
+                c["targets"]["GRR_pct"] = {{"mode", "at_most"}, {"value", 15}};
+                std::vector<double> low_positions;
+                for (const std::string mode : {"normal_quantile", "low_dense", "high_dense", "two_cluster"}) {
+                    c["generation"]["part_sampling"] = mode;
+                    const auto study = generate(c);
+                    const auto tag = std::string(method) + "/" + mode + "/" + std::to_string(n);
+                    require(qualified(study.metrics, c) && study.metrics["GRR_pct"] <= 15, tag);
+                    require(study.matrix == generate(c).matrix, "seed not reproducible: " + tag);
+                    auto x = sorted_part_means(study.matrix);
+                    const double low = x.front(), span = x.back() - low;
+                    require(span >= 1.6 - 1e-12, "80% measured span: " + tag);
+                    expect_near(study.search_diagnostics.at("part_mean_span"), span);
+                    for (auto &value : x)
+                        value = (value - low) / span;
+                    if (mode == "normal_quantile") {
+                        for (int i = 0; i < n; ++i) {
+                            const double z = (2 * x[i] - 1) * upper_z[n - 5];
+                            const double probability = .5 * std::erfc(-z / std::sqrt(2.));
+                            require(std::abs(probability - (i + .5) / n) < tolerance,
+                                    "normal midpoint quantile: " + tag);
+                        }
+                    } else if (mode == "low_dense") {
+                        for (int i = 1; i + 1 < n; ++i)
+                            require(x[i] - x[i - 1] < x[i + 1] - x[i], "low-end spacing: " + tag);
+                        low_positions = x;
+                    } else if (mode == "high_dense") {
+                        for (int i = 0; i < n; ++i)
+                            require(std::abs(x[i] + low_positions[n - 1 - i] - 1.) < tolerance,
+                                    "high/low mirrored positions: " + tag);
+                    } else {
+                        const int split = int(std::lower_bound(x.begin(), x.end(), .5) - x.begin());
+                        require(std::abs(n - 2 * split) <= 1, "unequal batch counts: " + tag);
+                        require(x[split] - x[split - 1] >= .5 - tolerance, "missing inter-batch gap: " + tag);
+                        require(x[split - 1] > tolerance && x[split] < 1 - tolerance,
+                                "no within-batch spread: " + tag);
+                    }
+                }
+            }
+        }
+    });
+    test("two_cluster_varies_odd_batch_assignment_and_within_batch_positions", [] {
+        for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
+            auto c = example(2, 2, 7);
+            clear_targets(c);
+            c["analysis"]["method"] = method;
+            c["generation"]["part_sampling"] = "two_cluster";
+            c["generation"]["decimal_places"] = 8;
+            std::array<std::vector<double>, 2> interior_positions;
+            for (int seed = 1; seed <= 16; ++seed) {
+                c["generation"]["seed"] = seed;
+                const auto x = sorted_part_means(generate(c).matrix);
+                const auto midpoint = (x.front() + x.back()) / 2;
+                const auto split = std::lower_bound(x.begin(), x.end(), midpoint) - x.begin();
+                require(split == 3 || split == 4, "seven parts must split 3/4 or 4/3");
+                const auto width = x[split - 1] - x[0];
+                require(width > 0, "lower batch collapsed");
+                interior_positions[split - 3].push_back((x[1] - x[0]) / width);
+            }
+            for (const auto &positions : interior_positions) {
+                require(!positions.empty(), "odd extra part always assigned to the same batch");
+                const auto [low, high] = std::minmax_element(positions.begin(), positions.end());
+                require(*high - *low > .001, "seed did not vary positions within a batch");
+            }
+        }
+    });
+    test("uniform_random_limits_are_required_only_for_generation", [] {
+        auto c = example(2, 2, 5);
+        clear_targets(c);
+        const auto matrix = generate(c).matrix;
+        c["generation"]["part_sampling"] = "uniform_random";
+        c["generation"]["reference_tv_sd"] = .2;
+        for (const char *compliance : {"strict", "relaxed"}) {
+            c["specification"]["compliance"] = compliance;
+            for (int mask = 0; mask < 3; ++mask) {
+                c["specification"]["lsl"] = mask & 1 ? Json(9) : Json(nullptr);
+                c["specification"]["usl"] = mask & 2 ? Json(11) : Json(nullptr);
+                require(normalize_config(c)["generation"]["part_sampling"] == "uniform_random");
+                require(calculate(matrix, c)["GRR_pct"].is_number(), "analysis required sampling limits");
+                throws<ConfigError>([&] { generate(c); });
+            }
+        }
+        c["specification"]["lsl"] = 11;
+        c["specification"]["usl"] = 9;
+        throws<ConfigError>([&] { validate_request(c); });
+    });
+    test("uniform_random_draws_independent_part_sizes_across_the_specification", [] {
+        // Zero GRR makes the rounded readings equal to the sampled sizes. No minimum
+        // span or target center is requested, so the first draw is observable.
+        for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
+            auto c = example(2, 2, 5);
+            clear_targets(c);
+            c["analysis"]["method"] = method;
+            c["specification"] = {{"lsl", 31.5}, {"usl", 35.5}, {"compliance", "relaxed"}};
+            c["generation"]["part_sampling"] = "uniform_random";
+            c["generation"]["decimal_places"] = 6;
+            c["generation"]["max_attempts"] = 1;
+            c["targets"]["GRR_pct"] = {{"mode", "at_most"}, {"value", 0}};
+            std::array<int, 4> quarters{};
+            bool all_above = false, all_below = false, near_low = false, near_high = false;
+            for (int seed = 1; seed <= 128; ++seed) {
+                c["generation"]["seed"] = seed;
+                const auto study = generate(c);
+                require(study.attempts == 1 && qualified(study.metrics, c));
+                for (const auto &row : study.matrix)
+                    require(row == study.matrix.front(), "zero-GRR replicates changed sampled sizes");
+                const auto [low, high] = std::minmax_element(study.matrix.front().begin(),
+                                                             study.matrix.front().end());
+                require(*low >= 31.5 && *high <= 35.5, "uniform draw outside the supplied limits");
+                for (double size : study.matrix.front())
+                    ++quarters[std::min(3, static_cast<int>(size - 31.5))];
+                all_above |= *low > 31.5 + .4 * 4;
+                all_below |= *high < 31.5 + .6 * 4;
+                near_low |= *low < 31.5 + .02 * 4;
+                near_high |= *high > 31.5 + .98 * 4;
+                if (seed == 1)
+                    require(study.matrix == generate(c).matrix, "uniform draw is not reproducible");
+            }
+            require(all_above && all_below, "every draw was centered, stratified or forced to span the limits");
+            require(near_low && near_high, "uniform sampler failed to reach the tails of the specified interval");
+            // For these 640 fixed, unfiltered draws the expected count per quarter is 160.
+            for (int count : quarters)
+                require(count >= 115 && count <= 205, "uniform part sizes concentrate in particular quarters");
+        }
+    });
+    test("uniform_random_verifies_final_span_rounding_and_compliance", [] {
+        for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
+            auto c = example(2, 3, 7);
+            clear_targets(c);
+            c["analysis"]["method"] = method;
+            c["generation"]["part_sampling"] = "uniform_random";
+            c["generation"]["decimal_places"] = 3;
+            c["generation"]["minimum_part_span_pct"] = 65;
+            c["targets"]["GRR_pct"] = {{"mode", "at_most"}, {"value", 15}};
+            const auto study = generate(c);
+            require(qualified(calculate(study.matrix, c), c), "rounded measurements failed the target");
+            for (const auto &row : study.matrix)
+                for (double value : row) {
+                    require(value >= 9 && value <= 11, "strict reading outside specification");
+                    require(value == parse_number(fixed(value, 3)), "incorrect output precision");
+                }
+            const auto means = sorted_part_means(study.matrix);
+            const double span = means.back() - means.front();
+            require(span >= 1.3 - 1e-12, "minimum span lost after rounding");
+            expect_near(study.search_diagnostics.at("part_mean_span_pct"), 50 * span);
+
+            clear_targets(c);
+            c["generation"]["minimum_part_span_pct"] = 100;
+            c["generation"]["max_attempts"] = 1;
+            c["generation"]["decimal_places"] = 8;
+            throws<SearchError>([&] { generate(c); }); // No manufactured endpoint parts.
+            c["generation"]["decimal_places"] = 0;
+            c["generation"]["max_attempts"] = 200;
+            const auto at_limits = generate(c);
+            require(at_limits.search_diagnostics.at("part_mean_span_pct") == 100,
+                    "an attainable rounded span was rejected");
+
+            c["specification"]["compliance"] = "relaxed";
+            c["generation"]["minimum_part_span_pct"] = nullptr;
+            c["generation"]["decimal_places"] = 8;
+            c["generation"]["max_attempts"] = 1;
+            c["generation"]["scale_mode"] = "reference_tv_sd";
+            c["generation"]["reference_tv_sd"] = 100;
+            const auto relaxed = generate(c);
+            bool outside = false;
+            for (const auto &row : relaxed.matrix)
+                for (double value : row)
+                    outside |= value < 9 || value > 11;
+            const auto relaxed_means = sorted_part_means(relaxed.matrix);
+            require(outside && relaxed_means.front() >= 9 - 1e-8 && relaxed_means.back() <= 11 + 1e-8,
+                    "relaxed measurement noise or independently sampled part locations were lost");
+        }
     });
     test("overlapping_bands_not_nominal_conflict", [] {
         auto c = example();
