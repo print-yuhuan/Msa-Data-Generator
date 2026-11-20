@@ -157,13 +157,18 @@ inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
                                    {"filename", d.reportFilename}};
     return msa::normalize_output(output);
 }
-enum class ConfigUse { Full, Generation, Analysis };
+enum class ConfigUse { Full, Generation, Analysis, DataImport };
 inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
     auto c = msa::default_config();
-    c["design"] = {{"operators", numeric(d.operators, "操作员数", true)},
-                   {"operator_names", d.operatorNames},
-                   {"replicates", numeric(d.replicates, "重复测量次数", true)},
-                   {"parts", numeric(d.parts, "部件数", true)}};
+    if (use == ConfigUse::DataImport) {
+        // 唯有无标签的六行宽表需要由当前重复测量次数区分两种设计。
+        c["design"]["replicates"] = d.replicates == "2" ? 2 : 3;
+    } else {
+        c["design"] = {{"operators", numeric(d.operators, "操作员数", true)},
+                       {"operator_names", d.operatorNames},
+                       {"replicates", numeric(d.replicates, "重复测量次数", true)},
+                       {"parts", numeric(d.parts, "部件数", true)}};
+    }
     c["analysis"]["study_multiplier"] = numeric(d.multiplier, "研究变异倍数");
     if (d.analysisMethod < 0 || d.analysisMethod > 1 || d.interactionMode < 0 ||
         d.interactionMode > 2)
@@ -195,6 +200,8 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
     c["specification"] = {{"lsl", numeric(d.lsl, "LSL", false, true)},
                           {"usl", numeric(d.usl, "USL", false, true)},
                           {"compliance", d.compliance ? "relaxed" : "strict"}};
+    if (use == ConfigUse::DataImport)
+        return c; // 完整分析校验使用实际导入的设计（包括 MLS 置信限所需的操作员人数）。
     if (use == ConfigUse::Analysis)
         return msa::normalize_config(c);
     if (d.partSampling < 0 || d.partSampling >= int(msa::part_sampling_methods.size()))

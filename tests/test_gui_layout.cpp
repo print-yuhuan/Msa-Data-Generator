@@ -2946,14 +2946,17 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         ("msa-chart-ui-" + std::to_string(gui::Clock::now().time_since_epoch().count()));
     const auto csv = folder / "study.csv";
     std::filesystem::create_directories(folder);
-    msa::atomic_text(csv, msa::export_csv_text(generated, generated.config.at("output")));
+    auto sourceStudy = generated;
+    const std::array<std::string, 3> fileNames{"张工", "李师傅", "赵师"};
+    sourceStudy.config["design"]["operator_names"] = fileNames;
+    msa::atomic_text(csv, msa::export_csv_text(sourceStudy, sourceStudy.config.at("output")));
     const auto xlsx = folder / "study.xlsx";
     require(platform::importFilenameSuggestion(folder, "study") == "study.csv" &&
                 platform::importFilenameSuggestion(folder, "").empty(),
             "仅有 CSV 或未设置导入名时预填错误");
     auto workbookOutput = generated.config.at("output");
     workbookOutput["file_type"] = "xlsx";
-    msa::export_data(generated, xlsx, workbookOutput, msa::ExistingFile::Preserve);
+    msa::export_data(sourceStudy, xlsx, workbookOutput, msa::ExistingFile::Preserve);
     require(platform::importFilenameSuggestion(folder, "study") == "study",
             "同一基本名有 CSV 与 XLSX 时预填不应锁定任一扩展名");
     std::filesystem::copy_file(xlsx, folder / L"独立工作簿.xlsx");
@@ -2962,6 +2965,11 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     gui::state.draft.filename = "[unclosed.csv";
     gui::state.draft.attempts = "未填写";
     gui::state.draft.targets[0] = {1, "待定", ""};
+    gui::state.draft.operators = "2";
+    gui::state.draft.replicates = "2";
+    gui::state.draft.parts = "5";
+    const std::array<std::string, 3> defaultNames{"默认甲", "默认乙", "默认丙"};
+    gui::state.draft.operatorNames = defaultNames;
     const auto importPicker = gui::state.chooseImportData;
     gui::state.draft.importDirectory.clear();
     gui::state.draft.importFilename.clear();
@@ -2987,17 +2995,30 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     require(requested && gui::state.draft.importDirectory == "自定义导入位置" &&
                 gui::state.draft.importFilename == "来料_[人员数量]_[[复核]]" && gui::visual.importedSelected &&
                 gui::visual.imported->matrix == generated.matrix &&
+                gui::visual.imported->config.at("design") == sourceStudy.config.at("design") &&
+                gui::state.draft.operators == "2" && gui::state.draft.replicates == "2" &&
+                gui::state.draft.parts == "5" && gui::state.draft.operatorNames == defaultNames &&
                 gui::visual.imported->config["analysis"] == generated.config["analysis"] &&
                 gui::visual.imported->config["targets"]["EV_pct"].is_null(),
-            "无关的生成或导出草稿影响了 CSV 导入与分析");
+            "CSV 导入未使用文件研究设计、覆盖了默认研究设计，或被无关草稿阻止");
+    const auto analysisDraft = gui::state.draft;
+    gui::state.draft.analysisMethod = 1;
+    gui::state.draft.confidenceEnabled = true;
+    gui::state.draft.confidenceLevel = "30"; // 此 MLS 双侧水平仅适用于三人研究。
+    require(gui::loadInsightData(xlsx) && gui::visual.imported->config.at("design").at("operators") == 3 &&
+                gui::state.draft.operators == "2",
+            "导入分析错误地按默认操作员人数校验了 MLS 置信限");
+    gui::state.draft = analysisDraft;
     require(gui::loadInsightData(xlsx) && gui::visual.importedName == "study.xlsx" &&
                 gui::visual.imported->matrix == generated.matrix &&
+                gui::visual.imported->config.at("design") == sourceStudy.config.at("design") &&
+                gui::state.draft.operatorNames == defaultNames && gui::state.draft.operators == "2" &&
                 gui::visual.imported->metrics == msa::calculate(generated.matrix, gui::visual.imported->config),
             "从 XLSX 导入的测量记录或分析结果与原矩阵不一致");
     require(gui::loadInsightData(csv), "切回 CSV 数据源失败");
     const auto importedConfig = gui::visual.imported->config;
     gui::state.draft.analysisMethod = gui::state.draft.analysisMethod ? 0 : 1;
-    gui::state.draft.operatorNames = {"新操作员", "", ""};
+    gui::state.draft.operatorNames = {"未完成", "未完成", ""};
     require(gui::insightResult()->config == importedConfig, "选项变化悄悄改变了已导入快照");
     auto heldCsv = folder / "源文件暂时移开.csv";
     std::filesystem::rename(csv, heldCsv);
@@ -3018,10 +3039,16 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
             "重算没有在内存中的原矩阵应用当前分析方法");
     const auto recalculated = *gui::visual.imported;
     gui::state.draft.parts = gui::state.draft.parts == "5" ? "6" : "5";
+    require(gui::reanalyzeInsightData() && gui::visual.imported->config == recalculated.config &&
+                gui::visual.imported->metrics == recalculated.metrics,
+            "修改默认部件数影响了已经导入的数据");
+    const auto oldMultiplier = gui::state.draft.multiplier;
+    gui::state.draft.multiplier = "无效";
     require(!gui::reanalyzeInsightData() && gui::visual.imported->config == recalculated.config &&
                 gui::visual.imported->metrics == recalculated.metrics &&
                 gui::visual.errorKind == "reanalysis",
-            "不匹配的设计破坏了原快照");
+            "无效分析设置破坏了原快照");
+    gui::state.draft.multiplier = oldMultiplier;
     std::filesystem::rename(heldCsv, csv);
     const auto finishExport = [&] {
         const auto deadline = gui::Clock::now() + std::chrono::seconds(60);
@@ -3060,6 +3087,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         finishExport();
         const auto html = msa::read_text(report);
         require(html.find(imported ? "数据导入" : "模拟生成") != html.npos &&
+                    (html.find("操作员为张工、李师傅、赵师") != html.npos) == imported &&
                     html.find("Xbar-R") != html.npos && html.find("ANOVA") != html.npos,
                 "方法报告未采用选中数据源");
     };
@@ -3220,9 +3248,9 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
             "图表页未跳转到集中管理目录与文件名的位置");
     gui::state.chooseExportPath = picker;
     const auto chooser = gui::state.chooseWorksheet;
-    gui::state.draft.operators = "2";
-    gui::state.draft.replicates = "2";
-    gui::state.draft.parts = "5";
+    gui::state.draft.operators = "3";
+    gui::state.draft.replicates = "3";
+    gui::state.draft.parts = "10";
     int sheetRequests = 0;
     bool cancelSheet = false;
     gui::state.chooseWorksheet = [&](const std::vector<std::string> &names) -> std::optional<std::size_t> {
@@ -3231,7 +3259,9 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         return cancelSheet ? std::nullopt : std::optional<std::size_t>(1);
     };
     require(gui::loadInsightData(multiSheetWorkbook) && gui::visual.importedSheet == "复测 数据" &&
-                gui::visual.imported->matrix[0][0] == 110.11 && sheetRequests == 1,
+                gui::visual.imported->matrix[0][0] == 110.11 && sheetRequests == 1 &&
+                gui::visual.imported->config.at("design").at("operators") == 2 &&
+                gui::state.draft.operators == "3",
             "未导入选择的第二张工作表");
     const auto oldMatrix = gui::visual.imported->matrix;
     const auto oldFeedback = gui::state.footerMessage;

@@ -442,8 +442,17 @@ $readBook = Run-Cli @('--no-config','--lsl','9','--usl','11','--input',$book,'--
 Check ($readBook.exit -eq 0) 'import of randomized XLSX long table succeeds'
 $bookReadBack = Get-Content -LiteralPath $bookAnalysis -Raw -Encoding UTF8 | ConvertFrom-Json
 Check (($bookManifest.matrix | ConvertTo-Json -Compress) -ceq ($bookReadBack.matrix | ConvertTo-Json -Compress)) 'XLSX round trip preserves all measurements and identities'
+$inferredReport = Join-Path $runRoot '异名研究.json'
+$inferred = Run-Cli @('--config',$config,'--input',$overrideCsv,'--report',$inferredReport) $true
+Check ($inferred.exit -eq 0) 'import a two-person randomized long table using saved three-person defaults'
+$inferredDesign = ($inferred.stdout | ConvertFrom-Json).design
+$inferredData = Get-Content -LiteralPath $inferredReport -Raw -Encoding UTF8 | ConvertFrom-Json
+Check ($inferredDesign.operators -eq 2 -and $inferredDesign.replicates -eq 2 -and $inferredDesign.parts -eq 5 -and
+       ($inferredDesign.operator_names -join '|') -ceq 'B|张 敏|' -and
+       ($inferredData.config.design | ConvertTo-Json -Compress) -ceq ($inferredDesign | ConvertTo-Json -Compress)) 'stdout and report identify only the actual operators in standard order'
+Check ((Get-FileHash -LiteralPath $config).Hash -eq $before) 'auto detection leaves the saved generation settings intact'
 $multiBook = Join-Path $PSScriptRoot 'fixtures/xlsx-multiple-sheets.xlsx'
-$sheetArgs = @('--no-config','--input',$multiBook,'--operators','2','--replicates','2','--parts','5')
+$sheetArgs = @('--no-config','--input',$multiBook)
 $firstSheet = Run-Cli $sheetArgs $true
 $otherSheet = Run-Cli ($sheetArgs + @('--sheet','复测 数据')) $true
 Check ($firstSheet.exit -eq 0 -and $otherSheet.exit -eq 0) 'CLI reads first worksheet or an explicitly named hidden worksheet'

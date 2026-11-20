@@ -142,7 +142,14 @@ using WorksheetSelector =
 struct ImportedData {
     Matrix matrix;
     std::string sheet_name;
+    Json config;
 };
+ImportedData import_csv_study(const std::string &text, const Json &config);
+ImportedData read_study_data(const std::filesystem::path &path, const Json &config);
+ImportedData read_study_data(const std::filesystem::path &path, const Json &config,
+                             const std::string &sheet_name);
+std::optional<ImportedData> read_study_data(const std::filesystem::path &path, const Json &config,
+                                            const WorksheetSelector &selector);
 Matrix read_data(const std::filesystem::path &path, const Json &config);
 Matrix read_data(const std::filesystem::path &path, const Json &config,
                  const std::string &sheet_name);

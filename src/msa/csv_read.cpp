@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <map>
 #include <string_view>
+#include <utility>
 
 namespace msa {
 namespace {
@@ -94,7 +95,7 @@ void check_width(const CsvReader &reader, std::size_t expected) {
                           "：应有 " + std::to_string(expected) + " 列，实际 " +
                           std::to_string(reader.cells.size()) + " 列");
 }
-Matrix wide(CsvReader &reader, const Json *design) {
+Matrix wide(CsvReader &reader, const Json *design, std::vector<std::string> *file_names = nullptr) {
     const bool labeled = reader.cells.front().empty();
     const auto parts = labeled ? reader.cells.size() - 1 : reader.cells.size();
     std::map<std::string, std::size_t> group_sizes;
@@ -108,6 +109,8 @@ Matrix wide(CsvReader &reader, const Json *design) {
     if (design && parts != design->at("parts").get<std::size_t>())
         throw ConfigError("数据第 1 行：实际 " + std::to_string(parts) + " 个部件，研究设计要求 " +
                           design->at("parts").dump() + " 个");
+    if (file_names && (parts < 5 || parts > 10))
+        throw ConfigError("数据第 1 行：宽表须包含 5～10 个部件列");
     if (labeled) {
         for (std::size_t col = 1; col < reader.cells.size(); ++col)
             if (reader.cells[col] != std::to_string(col))
@@ -120,7 +123,9 @@ Matrix wide(CsvReader &reader, const Json *design) {
             throw ConfigError("数据第 " + std::to_string(reader.row) + " 行：已有 " +
                               std::to_string(matrix.size() + 1) + " 行数据，研究设计要求 " +
                               std::to_string(expected_rows) + " 行");
-        if (labeled || design)
+        if (file_names && matrix.size() == 9)
+            throw ConfigError(location(reader.row, 0) + "：宽表最多支持 3 人各重复测量 3 次");
+        if (labeled || design || file_names)
             check_width(reader, parts + (labeled ? 1 : 0));
         if (labeled) {
             const auto &label = reader.cells.front();
@@ -134,6 +139,8 @@ Matrix wide(CsvReader &reader, const Json *design) {
             } else {
                 if (label.empty() || (label != previous_label && group_sizes.count(label)))
                     throw ConfigError(location(reader.row, 0) + "：操作员名称须非空且分组连续排列");
+                if (file_names && label != previous_label)
+                    file_names->push_back(label);
                 ++group_sizes[label];
                 previous_label = label;
             }
@@ -153,9 +160,15 @@ Matrix wide(CsvReader &reader, const Json *design) {
 }
 constexpr std::array<std::string_view, 5> names{"Operator", "Part", "Trial", "Measurement",
                                                 "StdOrder"};
-Matrix long_table(CsvReader &reader, const Json &design) {
+bool is_long_header(const CsvReader &reader) {
+    return std::any_of(reader.cells.begin(), reader.cells.end(), [](const auto &name) {
+        return std::find(names.begin(), names.end(), name) != names.end();
+    });
+}
+using Columns = std::array<std::size_t, 5>;
+Columns long_columns(const CsvReader &reader) {
     const auto width = reader.cells.size();
-    std::array<std::size_t, 5> columns;
+    Columns columns;
     columns.fill(width);
     for (std::size_t col = 0; col < width; ++col) {
         const auto found = std::find(names.begin(), names.end(), reader.cells[col]);
@@ -169,6 +182,10 @@ Matrix long_table(CsvReader &reader, const Json &design) {
     for (std::size_t key = 0; key < 4; ++key)
         if (columns[key] == width)
             throw ConfigError("数据第 1 行缺少必需列 " + std::string(names[key]));
+    return columns;
+}
+Matrix long_table(CsvReader &reader, const Json &design, const Columns &columns) {
+    const auto width = reader.cells.size();
     const int ops = design.at("operators"), trials = design.at("replicates"),
               parts = design.at("parts");
     const auto configured = operator_names(design);
@@ -231,6 +248,63 @@ Matrix long_table(CsvReader &reader, const Json &design) {
     }
     return matrix;
 }
+struct FileDesign {
+    std::vector<std::string> operators;
+    int parts = 0, trials = 0;
+};
+FileDesign detect_long_design(CsvReader &reader, const Columns &columns) {
+    FileDesign result;
+    const auto width = reader.cells.size();
+    std::array<int, 3> first_orders{};
+    std::size_t records = 0;
+    while (reader.next()) {
+        check_width(reader, width);
+        if (++records > 90)
+            throw ConfigError(location(reader.row, columns[0]) + "：长表最多支持 90 次测量");
+        const auto &label = reader.cells[columns[0]];
+        if (label.empty())
+            throw ConfigError(location(reader.row, columns[0]) + "：Operator 名称不能为空");
+        const auto known = std::find(result.operators.begin(), result.operators.end(), label);
+        if (known == result.operators.end()) {
+            if (result.operators.size() == 3)
+                throw ConfigError(location(reader.row, columns[0]) + "：长表最多支持 3 名操作员");
+            if (columns[4] < width)
+                first_orders[result.operators.size()] = reader.index(columns[4], 90, "StdOrder") - 1;
+            result.operators.push_back(label);
+        }
+        result.parts = std::max(result.parts, reader.index(columns[1], 10, "Part"));
+        result.trials = std::max(result.trials, reader.index(columns[2], 3, "Trial"));
+    }
+    if (result.operators.size() < 2 || result.parts < 5 || result.trials < 2)
+        throw ConfigError("长表须包含 2～3 名操作员、5～10 个部件和每组 2～3 次重复测量");
+    if (columns[4] < width) {
+        // Once the operator count is known, the remainder of each zero-based StdOrder
+        // identifies the operator slot. The matrix parser checks every record against it.
+        const auto count = result.operators.size();
+        std::vector<std::string> ordered(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            auto &slot = ordered[first_orders[i] % count];
+            if (!slot.empty())
+                throw ConfigError("长表 StdOrder 将不同操作员分配到同一人员编号");
+            slot = result.operators[i];
+        }
+        result.operators = std::move(ordered);
+    }
+    return result;
+}
+int numeric_wide_trials(std::size_t rows, const Json &design) {
+    if (rows == 4)
+        return 2;
+    if (rows == 9)
+        return 3;
+    if (rows != 6)
+        throw ConfigError("纯数值宽表须有 4、6 或 9 行，才能组成两人或三人的平衡研究");
+    // Six rows fit either 2 × 3 or 3 × 2. This is the only layout that needs a hint.
+    const auto trials = design.value("replicates", default_config().at("design").at("replicates"));
+    if (!trials.is_number_integer() || (trials != 2 && trials != 3))
+        throw ConfigError("6 行纯数值宽表需要将重复测量次数设为 2 或 3");
+    return trials.get<int>();
+}
 } // namespace
 Matrix parse_csv(const std::string &bytes) {
     CsvReader reader(bytes);
@@ -241,10 +315,68 @@ Matrix parse_export_csv(const std::string &bytes, const Json &raw) {
     if (!reader.next())
         throw ConfigError("数据文件为空");
     const auto design = normalize_config(raw).at("design");
-    if (std::any_of(reader.cells.begin(), reader.cells.end(), [](const auto &name) {
-            return std::find(names.begin(), names.end(), name) != names.end();
-        }))
-        return long_table(reader, design);
+    if (is_long_header(reader))
+        return long_table(reader, design, long_columns(reader));
     return wide(reader, &design);
+}
+ImportedData import_csv_study(const std::string &bytes, const Json &raw) {
+    CsvReader reader(bytes);
+    if (!reader.next())
+        throw ConfigError("数据文件为空");
+    // A named first column followed by part numbers is also a labeled wide table.
+    if ((reader.cells.front() == "Operator" || reader.cells.front() == "操作员") &&
+        reader.cells.size() > 1) {
+        std::size_t col = 1;
+        while (col < reader.cells.size() && reader.cells[col] == std::to_string(col))
+            ++col;
+        if (col == reader.cells.size())
+            reader.cells.front().clear();
+    }
+    if (!raw.is_object() || (raw.contains("design") && !raw.at("design").is_object()))
+        throw ConfigError("配置及 design 必须是 JSON 对象");
+    Json config = raw;
+    if (!config.contains("design"))
+        config["design"] = Json::object();
+    auto &design = config.at("design");
+    FileDesign file;
+    Matrix matrix;
+    const bool is_long = is_long_header(reader);
+    Columns columns{};
+    if (is_long) {
+        columns = long_columns(reader);
+        file = detect_long_design(reader, columns);
+    } else {
+        matrix = wide(reader, nullptr, &file.operators);
+        file.parts = static_cast<int>(matrix.front().size());
+        if (file.operators.empty()) {
+            file.trials = numeric_wide_trials(matrix.size(), design);
+            const auto count = matrix.size() / file.trials;
+            file.operators.assign(legacy_names.begin(), legacy_names.begin() + count);
+        } else {
+            if (file.operators.size() < 2 || file.operators.size() > 3)
+                throw ConfigError("宽表须包含 2～3 名不同的操作员");
+            file.trials = static_cast<int>(matrix.size() / file.operators.size());
+            if (file.trials < 2 || file.trials > 3)
+                throw ConfigError("宽表每名操作员须有 2～3 行重复测量");
+        }
+    }
+    design["operators"] = file.operators.size();
+    design["parts"] = file.parts;
+    design["replicates"] = file.trials;
+    file.operators.resize(3);
+    design["operator_names"] = file.operators;
+    // File labels become JSON report metadata. Reject malformed input before exposing the study.
+    try {
+        design.at("operator_names").dump();
+    } catch (const Json::type_error &) {
+        throw ConfigError("操作员名称含无效 UTF-8 字符，请将数据文件另存为 UTF-8 CSV 或 XLSX");
+    }
+    config = normalize_config(config);
+    if (is_long) {
+        CsvReader records(bytes);
+        records.next();
+        matrix = long_table(records, config.at("design"), columns);
+    }
+    return {std::move(matrix), {}, std::move(config)};
 }
 } // namespace msa

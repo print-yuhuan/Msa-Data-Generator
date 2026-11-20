@@ -4176,7 +4176,7 @@ void helpCli(Ui &v, float cw) {
                  c);
         helpItem(v, "help.cli.syntax", "常用参数写法",
                  "含空格的路径用引号括起。用 null 清空可选数值，布尔选项填写 true 或 "
-                 "false。同一参数写多次时，以最后一次为准。用 --operator-a、--operator-b、"
+                 "false。同一参数写多次时，以最后一次为准。生成数据时可用 --operator-a、--operator-b、"
                  "--operator-c 分别指定三位操作员的名称，例如 --operator-a 张工。",
                  c);
     });
@@ -4201,12 +4201,13 @@ void helpCli(Ui &v, float cw) {
     });
     section(v, "help.cli.analyze.section", "分析已有测量数据", cw, [&](float c) {
         helpText(v, "help.cli.analyze",
-                 "用 --input 读取已有数据，程序按表头识别宽表或长表。操作员数、重复测量次数"
-                 "和部件数应与文件一致。分析 XLSX 时可加 --sheet \"复测 数据\" 指定工作表，"
+                 "用 --input 读取 CSV 或 XLSX。带标签的宽表和长表自动识别操作员名称、人数、"
+                 "部件数和重复次数。纯数值宽表按位置使用 A/B/C；若有六行，用 --replicates 2 或 3 "
+                 "指定每位操作员的重复次数。分析 XLSX 时可加 --sheet \"复测 数据\" 指定工作表，"
                  "省略时读取第一张数据工作表。用 --report 保存分析报告。下例分析上一步的 Minitab 长表。",
                  c);
         helpCommand(v, "help.cli.analyze.example",
-                    ".\\msa_cli.exe --no-config --input data.csv --csv-format minitab "
+                    ".\\msa_cli.exe --no-config --input data.csv "
                     "--method crossed_anova --lsl 9 --usl 11 --report analysis.json",
                     c);
     });
@@ -4234,16 +4235,22 @@ void helpCharts(Ui &v, float cw) {
                  "研究配置与统计结果。",
                  c);
         helpItem(v, "help.charts.source.import", "导入数据",
-                 "先在「选项」按文件设置操作员数、重复测量次数、部件数及分析方法。文件使用自定义"
-                 "操作员名称时，在「研究设计」按对应位置填写名称。再到「图表」"
-                 "点击「导入数据」，选择包含完整宽表或长表测量记录的 CSV 文件或 XLSX 工作簿。"
+                 "在「图表」点击「导入数据」，选择 CSV 文件或 XLSX 工作簿。带标签的宽表按首列识别"
+                 "操作员，长表按 Operator 列识别。程序从所选数据识别操作员名称、人数、部件数和"
+                 "重复次数。选项页保留原有的默认研究设计。"
                  "CSV 和只有一张数据工作表的 XLSX 会直接导入。若有多张，弹窗按工作簿顺序列出数据工作表，"
                  "也可选择隐藏的数据工作表。选中一张后点击「导入」或按回车。取消会保留原数据和图表。"
                  "「选项 → 文件 → 目录与文件名」可设置导入目录和用于预填的「测量数据导入名称」。",
                  c);
+        helpItem(v, "help.charts.source.order", "人员顺序与无标签宽表",
+                 "宽表按操作员分组顺序显示。长表有 StdOrder 时按标准序号确定人员顺序，省略时"
+                 "按名称首次出现的顺序排列。纯数值宽表按位置使用 A/B/C。六行纯数值既可能是两人各测三次，"
+                 "也可能是三人各测两次，程序按「研究设计」的重复测量次数区分，默认三次。",
+                 c);
         helpText(v, "help.charts.source.switch",
                  "导入成功后可在「当前结果」和「已导入数据」之间切换。修改分析选项后，点击"
-                 "「按当前设置重算」重新分析原始记录，保留导入时的操作员名称。「导出方法对比报告」可将当前数据源的"
+                 "「按当前设置重算」重新分析原始记录。重算、图表和方法对比报告均沿用导入的操作员名称和人数。"
+                 "「导出方法对比报告」可将当前数据源的"
                  " Xbar-R 与 ANOVA 结果保存为 PDF 或 HTML，默认选中 PDF。「选项 → 文件」中可设置"
                  "报告目录、文件名、默认格式和静默保存开关。",
                  c);

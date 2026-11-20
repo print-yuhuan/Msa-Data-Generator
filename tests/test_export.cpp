@@ -188,9 +188,129 @@ void operator_name_checks(const std::filesystem::path &out) {
         }
     }
 }
+void imported_operator_checks(const std::filesystem::path &out) {
+    auto preferences = config(3, 3, 10);
+    preferences["design"]["operator_names"] = {"默认甲", "默认乙", "默认丙"};
+    preferences["analysis"]["study_multiplier"] = 5.15;
+    const auto saved = preferences;
+    auto source = study(2, 2, 5);
+    source.config["design"]["operator_names"] = {"B", "001, \"张\" & 李", ""};
+    const auto original_names = operator_names(source.config["design"]);
+    for (const char *format : {"default", "minitab"}) {
+        auto settings = source.config["output"];
+        settings["format"] = format;
+        settings["run_order"]["mode"] = "all";
+        settings["run_order"]["seed"] = 3; // The shuffled table starts with the second operator.
+        for (bool numbered : {false, true}) {
+            settings["run_order"]["store_standard_order"] = numbered;
+            for (const auto *extension : {".csv", ".xlsx"}) {
+                const auto path = out / (std::string("import-operators-") + format + extension);
+                export_data(source, path, settings);
+                const auto data = read_study_data(path, preferences);
+                const auto &design = data.config.at("design");
+                check(design.at("operators") == 2 && design.at("parts") == 5 &&
+                          design.at("replicates") == 2 && design.at("operator_names")[2] == "",
+                      "import did not infer the file's design or retained an inactive default");
+                const auto names = operator_names(design);
+                const bool shuffled = settings["format"] != "default" && !numbered;
+                const int first = shuffled
+                                      ? export_records(source, settings).front().operator_number - 1
+                                      : 0;
+                check(names[0] == original_names[first] && names[1] == original_names[1 - first],
+                      "imported operator order or spelling differs from the file");
+                for (int op = 0; op < 2; ++op) {
+                    const int source_op = names[op] == original_names[0] ? 0 : 1;
+                    for (int trial = 0; trial < 2; ++trial)
+                        check(data.matrix.at(op * 2 + trial) ==
+                                  source.matrix.at(source_op * 2 + trial),
+                              "imported name attached to the wrong readings");
+                }
+                check(data.config.at("analysis") == preferences.at("analysis") &&
+                          preferences == saved,
+                      "import changed analysis settings or source preferences");
+            }
+        }
+    }
+    const auto plain = out / "legacy-numeric.csv";
+    for (const int rows : {4, 6, 9}) {
+        atomic_text(plain, csv_text(Matrix(rows, std::vector<double>(5, 1.5)), 2));
+        for (const int repeats : {2, 3}) {
+            auto options = preferences;
+            options["design"]["replicates"] = repeats;
+            const auto data = read_study_data(plain, options);
+            const int expected = rows == 4 ? 2 : rows == 9 ? 3 : rows / repeats;
+            check(data.config.at("design").at("operators") == expected &&
+                      data.config.at("design").at("replicates") == rows / expected &&
+                      data.config.at("design").at("parts") == 5 &&
+                      operator_names(data.config.at("design")) ==
+                          std::array<std::string, 3>{"A", "B", "C"},
+                  "numeric legacy table did not recover its design with fallback names");
+        }
+    }
+
+    const auto invalid_wide = [&](std::vector<std::string> labels) {
+        std::string csv = ",1,2,3,4,5\r\n";
+        for (const auto &label : labels)
+            csv += label + ",0,1,2,3,4\r\n";
+        rejects([&] { import_csv_study(csv, saved); });
+    };
+    invalid_wide({"甲", "甲", "乙", ""});
+    invalid_wide({"甲", "乙", "甲", "乙"});
+    invalid_wide({"甲", "甲", "乙", "乙", "丙"});
+    invalid_wide({"甲", "甲", "乙", "乙", "丙", "丙", "丁", "丁"});
+    auto ordered = source.config["output"];
+    ordered["format"] = "minitab";
+    ordered["run_order"]["store_standard_order"] = true;
+    const auto csv = export_csv_text(source, ordered);
+    const auto first = csv.find("\r\n") + 2;
+    auto wrong_order = csv;
+    wrong_order[first] = '2';
+    rejects([&] { import_csv_study(wrong_order, preferences); });
+    auto duplicate = csv + csv.substr(first, csv.find("\r\n", first) + 2 - first);
+    rejects([&] { import_csv_study(duplicate, preferences); });
+    const auto missing = csv.substr(0, csv.rfind("\r\n", csv.size() - 3) + 2);
+    rejects([&] { import_csv_study(missing, preferences); });
+}
+void inferred_design_edge_checks(const std::filesystem::path &out) {
+    auto settings = config(2, 2, 5);
+    settings["analysis"]["method"] = "crossed_anova";
+    settings["analysis"]["confidence"]["enabled"] = true;
+    settings["analysis"]["confidence"]["level"] = 30;
+    rejects([&] { normalize_config(settings); }); // MLS at 30% needs three operators.
+    const auto three = study(3, 2, 5);
+    const auto csv = export_csv_text(three, three.config.at("output"));
+    for (const auto *title : {"Operator", "操作员"}) {
+        auto titled = csv;
+        titled.insert(titled.find(','), title);
+        const auto path = out / "external-wide.csv";
+        atomic_text(path, titled);
+        const auto data = read_study_data(path, settings);
+        check(data.matrix == three.matrix && data.config.at("design").at("operators") == 3 &&
+                  data.config.at("analysis").at("confidence").at("level") == 30,
+              "external wide operator header or post-detection MLS validation failed");
+    }
+    settings["design"]["operators"] = 3;
+    const auto two = study(2, 2, 5);
+    rejects([&] { import_csv_study(export_csv_text(two, two.config.at("output")), settings); });
+
+    std::string gap = "Operator,Part,Trial,Measurement\n";
+    for (int trial : {1, 2})
+        for (int part : {1, 3, 4, 5})
+            for (char op : {'A', 'B'})
+                gap += std::string(1, op) + "," + std::to_string(part) + "," +
+                       std::to_string(trial) + ",10.5\n";
+    rejects([&] { import_csv_study(gap, Json::object()); });
+
+    auto malformed = csv;
+    for (std::size_t pos = 0; (pos = malformed.find("\nA,", pos)) != std::string::npos; ++pos)
+        malformed[pos + 1] = static_cast<char>(0xff);
+    rejects([&] { import_csv_study(malformed, Json::object()); });
+}
 int run(const std::filesystem::path &fixtures, const std::filesystem::path &out) {
     std::filesystem::create_directories(out);
     operator_name_checks(out);
+    imported_operator_checks(out);
+    inferred_design_edge_checks(out);
     auto reference = default_reference(fixtures / std::filesystem::u8path("默认.csv"));
     auto refCfg = config(3, 3, 10);
     const std::vector<std::string> referenceFiles{"Minitab.csv", "SPSS.csv", "JMP 19.csv",

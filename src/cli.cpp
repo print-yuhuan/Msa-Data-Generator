@@ -135,7 +135,7 @@ void help() {
   --report PATH   保存包含最终配置、矩阵和统计结果的 JSON 报告
   --comparison-report PATH  保存同一矩阵的 Xbar-R / ANOVA 对照报告，支持 .html 和 .pdf
   --replay-report PATH  从新版生成报告还原原始数据文件，核对 SHA-256 后写入 --output
-  --input PATH    分析 CSV 或 XLSX 宽表或长表，不能与 --output 合用
+  --input PATH    分析 CSV 或 XLSX，自动识别文件中的操作员名称和人数，不能与 --output 合用
   --sheet NAME    按名称选择 XLSX 工作表；省略时按工作簿顺序读取第一张数据工作表
   --overwrite     允许覆盖数据文件和报告；优先于 --existing-file，与参数排列顺序无关
   --init          创建缺失的默认配置，保留已有文件；仅可与 --config 合用
@@ -207,7 +207,12 @@ void help() {
 百分比目标允许误差的单位为百分点；ndc 的目标、区间和允许误差均为整数。
 --require-normality true 对按小数位数舍入后的整批测量值应用 Anderson–Darling 正态性筛选。
 采用独立正态样本的 5% 参考阈值，筛选用于控制模拟样本的分布形状。
---input 仅分析，不要求满足生成条件；操作员人数、重复次数与部件数量仍须与输入数据一致。
+--input 分析文件中的平衡交叉研究，自动读取操作员、部件数和重复测量次数。
+带标记的宽表按操作员分组排列。长表有 StdOrder 时按标准序号确定人员顺序，
+省略时按 Operator 首次出现的顺序列出。报告和图表使用文件中的名称。
+纯数值宽表按位置使用 A/B/C。只有 6 行时，--replicates 2 指 3 人各测 2 次，
+--replicates 3 指 2 人各测 3 次，省略时使用配置的重复次数（内置默认 3）。
+导入结果独立于生成用的默认操作员。分析成功时，标准输出的 design 显示本次识别结果。
 
 数据文件与运行顺序：
   default：带列号和操作员标记的宽表，左上角空白；按操作员、重复轮次排列。
@@ -605,7 +610,6 @@ int run(const std::vector<std::string> &args) {
             c["output"]["file_type"] = msa::data_file_type(output);
         if (overwrite)
             c["output"]["existing_file"] = "overwrite";
-        c = msa::normalize_config(c);
         for (const auto &destination : {report, comparison}) {
             if (destination.empty())
                 continue;
@@ -619,14 +623,16 @@ int run(const std::vector<std::string> &args) {
                 throw std::runtime_error("报告父路径不是目录：" + parent.u8string());
         }
         if (!input.empty()) {
+            auto imported = sheet ? msa::read_study_data(input, c, *sheet)
+                                  : msa::read_study_data(input, c);
             msa::Result result;
-            result.config = c;
-            result.matrix = sheet ? msa::read_data(input, c, *sheet) : msa::read_data(input, c);
-            result.metrics = msa::calculate(result.matrix, c);
+            result.config = std::move(imported.config);
+            result.matrix = std::move(imported.matrix);
+            result.metrics = msa::calculate(result.matrix, result.config);
             auto analysis = result.as_json();
             analysis["analysis_only"] = true;
             analysis["seed"] = nullptr;
-            analysis["checks"] = msa::checks(result.metrics, c);
+            analysis["checks"] = msa::checks(result.metrics, result.config);
             if (!report.empty()) {
                 msa::atomic_text(report, analysis.dump(2) + '\n', policy);
                 committed.push_back(report);
@@ -634,15 +640,17 @@ int run(const std::vector<std::string> &args) {
             if (!comparison.empty())
                 msa::write_comparison_report(comparison, result, msa::StudySource::ImportedData,
                                              input.filename().u8string() +
-                                                 (sheet ? " / " + *sheet : ""),
+                                                 (imported.sheet_name.empty() ? "" : " / " + imported.sheet_name),
                                              policy);
             std::cout << msa::Json{{"input", input.u8string()},
+                                   {"design", result.config.at("design")},
                                    {"metrics", result.metrics},
                                    {"checks", analysis["checks"]}}
                              .dump(2)
                       << '\n';
             return 0;
         }
+        c = msa::normalize_config(c);
         std::signal(SIGINT, on_signal);
         auto result = msa::generate(c, &cancelled);
         msa::Json receipt;

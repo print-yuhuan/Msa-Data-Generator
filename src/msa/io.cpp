@@ -283,24 +283,25 @@ std::string encode_data(const Result &study, const Json &settings, const std::st
         return xlsx_from_csv(bytes, decimal_places);
     return bytes;
 }
-ImportedData import_sheet(const XlsxWorkbook &workbook, std::size_t index, const Json &config) {
+using StudyParser = ImportedData (*)(const std::string &, const Json &);
+ImportedData parse_with_known_design(const std::string &csv, const Json &config) {
+    return {parse_export_csv(csv, config), {}, config};
+}
+ImportedData import_sheet(const XlsxWorkbook &workbook, std::size_t index, const Json &config,
+                          StudyParser parse) {
     const auto &names = workbook.sheet_names();
     if (index >= names.size())
         throw ConfigError("XLSX 所选工作表编号无效");
     try {
-        return {parse_export_csv(workbook.csv(index), config), names[index]};
+        auto study = parse(workbook.csv(index), config);
+        study.sheet_name = names[index];
+        return study;
     } catch (const std::invalid_argument &e) {
         throw ConfigError("工作表“" + names[index] + "”：" + e.what());
     }
 }
-} // namespace
-Matrix read_data(const std::filesystem::path &path, const Json &config) {
-    const auto type = data_file_type(path);
-    return decode_data(read_file_bytes(path, type == "xlsx" ? xlsx_read_limit : csv_read_limit),
-                       type, config);
-}
-Matrix read_data(const std::filesystem::path &path, const Json &config,
-                 const std::string &sheet_name) {
+ImportedData read_named_sheet(const std::filesystem::path &path, const Json &config,
+                              const std::string &sheet_name, StudyParser parse) {
     if (data_file_type(path) != "xlsx")
         throw ConfigError("只有 XLSX 工作簿可以指定工作表");
     const XlsxWorkbook workbook(read_file_bytes(path, xlsx_read_limit));
@@ -308,20 +309,45 @@ Matrix read_data(const std::filesystem::path &path, const Json &config,
     const auto sheet = std::find(names.begin(), names.end(), sheet_name);
     if (sheet == names.end())
         throw ConfigError("XLSX 找不到工作表“" + sheet_name + "”");
-    return import_sheet(workbook, static_cast<std::size_t>(sheet - names.begin()), config).matrix;
+    return import_sheet(workbook, static_cast<std::size_t>(sheet - names.begin()), config, parse);
 }
-std::optional<ImportedData> read_data(const std::filesystem::path &path, const Json &config,
-                                      const WorksheetSelector &selector) {
+std::optional<ImportedData> read_selected_data(const std::filesystem::path &path, const Json &config,
+                                              const WorksheetSelector &selector, StudyParser parse) {
     if (data_file_type(path) != "xlsx")
-        return ImportedData{parse_export_csv(read_file_bytes(path, csv_read_limit), config), {}};
+        return parse(read_file_bytes(path, csv_read_limit), config);
     const XlsxWorkbook workbook(read_file_bytes(path, xlsx_read_limit));
     const auto &names = workbook.sheet_names();
     if (names.size() == 1 || !selector)
-        return import_sheet(workbook, 0, config);
+        return import_sheet(workbook, 0, config, parse);
     const auto index = selector(names);
     if (!index)
         return std::nullopt;
-    return import_sheet(workbook, *index, config);
+    return import_sheet(workbook, *index, config, parse);
+}
+} // namespace
+ImportedData read_study_data(const std::filesystem::path &path, const Json &config) {
+    return read_selected_data(path, config, {}, import_csv_study).value();
+}
+ImportedData read_study_data(const std::filesystem::path &path, const Json &config,
+                             const std::string &sheet_name) {
+    return read_named_sheet(path, config, sheet_name, import_csv_study);
+}
+std::optional<ImportedData> read_study_data(const std::filesystem::path &path, const Json &config,
+                                           const WorksheetSelector &selector) {
+    return read_selected_data(path, config, selector, import_csv_study);
+}
+Matrix read_data(const std::filesystem::path &path, const Json &config) {
+    const auto type = data_file_type(path);
+    return decode_data(read_file_bytes(path, type == "xlsx" ? xlsx_read_limit : csv_read_limit),
+                       type, config);
+}
+Matrix read_data(const std::filesystem::path &path, const Json &config,
+                 const std::string &sheet_name) {
+    return read_named_sheet(path, config, sheet_name, parse_with_known_design).matrix;
+}
+std::optional<ImportedData> read_data(const std::filesystem::path &path, const Json &config,
+                                      const WorksheetSelector &selector) {
+    return read_selected_data(path, config, selector, parse_with_known_design);
 }
 Json export_data(const Result &result, const std::filesystem::path &path, ExistingFile policy) {
     return export_data(result, path, result.config.value("output", Json::object()), policy);

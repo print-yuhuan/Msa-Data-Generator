@@ -147,11 +147,12 @@ std::string chartFooterSummary() {
 }
 bool loadInsightData(const std::filesystem::path &path) {
     try {
-        msa::Result result;
-        result.config = native_ui::to_config(state.draft, native_ui::ConfigUse::Analysis);
-        auto data = msa::read_data(path, result.config, state.chooseWorksheet);
+        auto data = msa::read_study_data(path,
+            native_ui::to_config(state.draft, native_ui::ConfigUse::DataImport), state.chooseWorksheet);
         if (!data)
             return false;
+        msa::Result result;
+        result.config = std::move(data->config);
         result.matrix = std::move(data->matrix);
         result.metrics = msa::calculate(result.matrix, result.config);
         const auto fullPath = std::filesystem::absolute(path);
@@ -162,11 +163,13 @@ bool loadInsightData(const std::filesystem::path &path) {
         visual.importedSheet = std::move(data->sheet_name);
         visual.preview.attempted = false;
         clearVisualError();
-        state.feedback("测量数据已导入", "已按当前研究设计和分析设置计算图表：" + importedSourceName());
+        state.feedback("测量数据已导入",
+                       importedSourceName() + " · 已识别 " +
+                           visual.imported->config.at("design").at("operators").dump() + " 名操作员");
         return true;
     } catch (const std::exception &e) {
         visualError("import", e.what(),
-                    "请核对研究设计、文件列和测量记录，再重新选择文件。");
+                    "请核对文件列、测量记录及分析设置，再重新选择文件。");
         return false;
     }
 }
@@ -174,22 +177,9 @@ bool reanalyzeInsightData() {
     if (!visual.importedSelected || !visual.imported || state.busy())
         return false;
     try {
-        const auto &original = visual.imported->config.at("design");
-        auto draft = state.draft;
-        draft.operatorNames = original.value("operator_names", decltype(draft.operatorNames){});
-        auto config = native_ui::to_config(draft, native_ui::ConfigUse::Analysis);
-        const auto &requested = config.at("design");
-        if (original.at("operators") != requested.at("operators") ||
-            original.at("replicates") != requested.at("replicates") ||
-            original.at("parts") != requested.at("parts")) {
-            const auto design = [](const Json &d) {
-                return d.at("operators").dump() + " 人 × " + d.at("replicates").dump() +
-                       " 次 × " + d.at("parts").dump() + " 件";
-            };
-            throw msa::ConfigError("导入数据的设计为 " + design(original) + "，当前设置为 " +
-                                   design(requested) + "。请恢复与导入数据相同的研究设计。");
-        }
-        config["design"] = original;
+        auto config = native_ui::to_config(state.draft, native_ui::ConfigUse::DataImport);
+        config["design"] = visual.imported->config.at("design");
+        config = msa::normalize_config(config);
         auto metrics = msa::calculate(visual.imported->matrix, config);
         visual.imported->config = std::move(config);
         visual.imported->metrics = std::move(metrics);
@@ -291,7 +281,9 @@ void insightSourceSummary(Ui &u, const std::string &id, float w) {
             if (visual.importedSelected) {
                 const auto label = visual.importedSheet.empty() ? visual.importedName
                     : visual.importedSheet + " · " + visual.importedName;
-                summary = labelThatFits(label, w, 16) + "\n" + summary;
+                summary = labelThatFits(label, w, 16) + "\n" + method + " · " +
+                          config.at("design").at("operators").dump() + " 人 · " +
+                          std::to_string(count) + " 条记录";
             }
         } catch (const std::exception &) {
             summary = "数据快照的研究信息不完整，请重新生成或导入。";
@@ -1162,7 +1154,7 @@ void chartEmptyState(Ui &u, float w) {
     constexpr float inset = 14, icon = 40, actionWidth = 108;
     const bool inlineAction = showAction && w >= 430;
     const char *description =
-        visual.importedSelected ? "导入数据后，可查看与当前研究设计对应的图表。"
+        visual.importedSelected ? "选择测量数据文件后，可查看该研究的图表。"
         : state.busy()          ? "生成完成后，可在这里查看本次研究的图表。"
         : state.result          ? "按当前研究设置重新生成数据，或导入数据查看已有研究。"
                                 : "在「数据」页生成测量值，或导入数据查看已有研究。";

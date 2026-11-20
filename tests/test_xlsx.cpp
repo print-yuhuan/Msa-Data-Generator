@@ -26,8 +26,10 @@ template <class Fn> void expect_config_error(Fn fn, const std::string &descripti
     }
     throw std::runtime_error("expected an error containing " + description);
 }
-// The first sheet and unused shared-string part contain invalid XML. The third sheet is external.
-std::string selection_workbook(const std::string &relationship_type) {
+// By default the first sheet and unused shared-string part contain invalid XML.
+std::string selection_workbook(const std::string &relationship_type,
+                               const std::string &first_sheet = "<unclosed>",
+                               const std::string &second_sheet = {}) {
     const std::string rels = "http://schemas.openxmlformats.org/package/2006/relationships";
     const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     const std::string ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -50,10 +52,10 @@ std::string selection_workbook(const std::string &relationship_type) {
               "TargetMode=\"External\"/><Relationship Id=\"strings\" Type=\"" +
               rel + "/sharedStrings\" Target=\"strings.xml\"/></Relationships>"},
          {"strings.xml", "<unclosed>"},
-         {"one.xml", "<unclosed>"},
-         {"two.xml", "<worksheet xmlns=\"" + ns +
+         {"one.xml", first_sheet},
+         {"two.xml", second_sheet.empty() ? "<worksheet xmlns=\"" + ns +
                          "\"><sheetData><row r=\"1\"><c "
-                         "r=\"A1\"><v>42</v></c></row></sheetData></worksheet>"}});
+                         "r=\"A1\"><v>42</v></c></row></sheetData></worksheet>" : second_sheet}});
 }
 void test_sheet_selection(const std::filesystem::path &fixtures,
                           const std::filesystem::path &output, const msa::Json &config) {
@@ -110,6 +112,48 @@ void test_sheet_selection(const std::filesystem::path &fixtures,
     expect_config_error([&] { msa::read_data(path, config, "损坏页"); }, "损坏页");
     expect_config_error([&] { msa::XlsxWorkbook empty(selection_workbook("chartsheet")); },
                         "没有可读取");
+
+    const auto table_xml = [](const std::string &csv) {
+        return msa::xlsx::Package(msa::xlsx_from_csv(csv, 2)).part("xl/worksheets/sheet1.xml");
+    };
+    std::string two_people = ",1,2,3,4,5\r\n";
+    for (const auto *name : {"仪器 & 甲", "007"})
+        for (int trial = 0; trial < 2; ++trial)
+            two_people += std::string(name) + ",1,2,3,4,5\r\n";
+    std::string three_people = ",1,2,3,4,5,6\r\n";
+    for (const auto *name : {"复测员乙", "B", "009"})
+        for (int trial = 0; trial < 3; ++trial)
+            three_people += std::string(name) + ",6,5,4,3,2,1\r\n";
+    const auto different_teams = output / "worksheet-teams.xlsx";
+    msa::atomic_text(different_teams, selection_workbook("worksheet", table_xml(two_people),
+                                                         table_xml(three_people)));
+    auto preferences = msa::default_config();
+    preferences["design"]["operators"] = 2;
+    preferences["design"]["operator_names"] = {"保存甲", "保存乙", "保存甲"};
+    const auto before = preferences;
+    const auto automatic = msa::read_study_data(different_teams, preferences);
+    const auto selected = msa::read_study_data(different_teams, preferences, [](const auto &names) {
+        require(names.size() == 2, "external sheet must be excluded");
+        return 1;
+    });
+    const auto named = msa::read_study_data(different_teams, preferences, "数据页");
+    const auto &first_design = automatic.config.at("design");
+    const auto &second_design = named.config.at("design");
+    require(first_design.at("operators") == 2 && first_design.at("replicates") == 2 &&
+                first_design.at("parts") == 5 &&
+                first_design.at("operator_names") == msa::Json({"仪器 & 甲", "007", ""}) &&
+                automatic.matrix.size() == 4, "first worksheet must infer its own team");
+    require(second_design.at("operators") == 3 && second_design.at("replicates") == 3 &&
+                second_design.at("parts") == 6 &&
+                second_design.at("operator_names") == msa::Json({"复测员乙", "B", "009"}) &&
+                named.matrix.size() == 9 && named.matrix.front().front() == 6 && selected &&
+                selected->sheet_name == named.sheet_name && selected->matrix == named.matrix &&
+                selected->config == named.config && before == preferences,
+            "selected worksheet's names, dimensions and values must travel together");
+    require(!msa::read_study_data(different_teams, preferences,
+                                  [](const auto &) { return std::nullopt; }),
+            "cancelled selection should not produce a study");
+    expect_config_error([&] { msa::read_study_data(path, preferences, "损坏页"); }, "损坏页");
 }
 } // namespace
 int main(int argc, char **argv) {

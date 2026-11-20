@@ -17,9 +17,9 @@ function Check([bool]$Condition, [string]$Message) {
 $csv = Join-Path $run '研究&A.csv'
 $created = Join-Path $run 'generated.html'
 $imported = Join-Path $run 'imported.html'
-$parameters = @('--lsl','9','--usl','11','--historical-sd','1','--interaction','include',
-                '--operator-a','赵<&明','--operator-c','王丽')
-$null = Invoke-Study (@('--seed','123','--output',$csv,'--comparison-report',$created) + $parameters)
+$parameters = @('--lsl','9','--usl','11','--historical-sd','1','--interaction','include')
+$null = Invoke-Study (@('--seed','123','--operator-a','赵<&明','--operator-c','王丽',
+                        '--output',$csv,'--comparison-report',$created) + $parameters)
 $xbar = Invoke-Study (@('--input',$csv,'--method','crossed_xbarr','--comparison-report',$imported) + $parameters)
 $anova = Invoke-Study (@('--input',$csv,'--method','crossed_anova') + $parameters)
 $fromFile = Read-Report $imported
@@ -78,8 +78,8 @@ if ($browser) {
 $constant = Join-Path $run 'constant.csv'
 $zeroReport = Join-Path $run 'constant.html'
 $longName = '精密测量实验室质量工程组第一工位白班轮值测量操作员'
-[IO.File]::WriteAllLines($constant, [string[]](@('1,1,1,1,1') * 4))
-$null = Invoke-Study @('--input',$constant,'--operators','2','--operator-a',$longName,'--operator-c','备用姓名','--replicates','2','--parts','5','--comparison-report',$zeroReport)
+[IO.File]::WriteAllLines($constant, [string[]](@(',1,2,3,4,5') + @("$longName,1,1,1,1,1") * 2 + @('B,1,1,1,1,1') * 2))
+$null = Invoke-Study @('--input',$constant,'--operator-a','生成姓名','--operator-c','备用姓名','--comparison-report',$zeroReport)
 $zero = Read-Report $zeroReport
 Check ($zero.Contains('data-value="null">—') -and $zero.Contains('未定义')) '退化研究应清楚表示缺失的指标或容差'
 Check ($zero.Contains("操作员为${longName}、B。") -and -not $zero.Contains('备用姓名')) '两人研究应保留完整长名且只显示前两位操作员'
