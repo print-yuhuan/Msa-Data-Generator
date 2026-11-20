@@ -16,9 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include "platform/clipboard_win.hpp"
-#include "platform/replicate_dialog_win.hpp"
 #include "platform/save_target.hpp"
-#include "platform/worksheet_ids.h"
 namespace platform {
 inline std::filesystem::path executableDirectory() {
     wchar_t n[32768]{};
@@ -185,79 +183,6 @@ inline std::wstring wide(const std::string &s) {
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), int(s.size()), result.data(),
                         count);
     return result;
-}
-inline INT_PTR CALLBACK worksheetDialogProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    switch (message) {
-    case WM_INITDIALOG: {
-        const auto &names = *reinterpret_cast<const std::vector<std::wstring> *>(lparam);
-        const auto list = GetDlgItem(window, MSA_WORKSHEET_LIST);
-        HDC dc = GetDC(list);
-        HGDIOBJ previousFont = dc ? SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(list, WM_GETFONT, 0, 0))) : nullptr;
-        LONG width = 0;
-        bool failed = false;
-        for (const auto &name : names) {
-            if (SendMessageW(list, LB_INSERTSTRING, static_cast<WPARAM>(-1),
-                             reinterpret_cast<LPARAM>(name.c_str())) < 0) {
-                failed = true;
-                break;
-            }
-            SIZE extent{};
-            if (dc && GetTextExtentPoint32W(dc, name.c_str(), static_cast<int>(name.size()), &extent))
-                width = std::max(width, extent.cx);
-        }
-        if (dc) {
-            if (previousFont)
-                SelectObject(dc, previousFont);
-            ReleaseDC(list, dc);
-        }
-        if (failed) {
-            EndDialog(window, -2);
-            return TRUE;
-        }
-        SendMessageW(list, LB_SETHORIZONTALEXTENT, width + 8, 0);
-        SendMessageW(list, LB_SETCURSEL, 0, 0);
-        SetFocus(list);
-        return FALSE;
-    }
-    case WM_COMMAND:
-        if (LOWORD(wparam) == IDOK ||
-            (LOWORD(wparam) == MSA_WORKSHEET_LIST && HIWORD(wparam) == LBN_DBLCLK)) {
-            const auto index = SendDlgItemMessageW(window, MSA_WORKSHEET_LIST, LB_GETCURSEL, 0, 0);
-            if (index != LB_ERR)
-                EndDialog(window, index + 1);
-            return TRUE;
-        }
-        if (LOWORD(wparam) != IDCANCEL)
-            return FALSE;
-        [[fallthrough]];
-    case WM_CLOSE:
-        EndDialog(window, 0);
-        return TRUE;
-    default:
-        return FALSE;
-    }
-}
-inline std::optional<std::size_t> chooseWorksheet(const std::vector<std::string> &names) {
-    std::vector<std::wstring> labels;
-    labels.reserve(names.size());
-    for (const auto &name : names)
-        labels.push_back(wide(name));
-    const auto selection = DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(MSA_WORKSHEET_DIALOG),
-                                            owner(), worksheetDialogProc, reinterpret_cast<LPARAM>(&labels));
-    if (selection == 0)
-        return {};
-    if (selection < 0 || static_cast<std::size_t>(selection) > names.size())
-        throw std::runtime_error("无法显示工作表选择窗口");
-    return static_cast<std::size_t>(selection - 1);
-}
-inline std::optional<int> chooseReplicates() {
-    const auto result = DialogBoxW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(MSA_SIX_ROW_DIALOG),
-                                   owner(), replicate_dialog::procedure);
-    if (result == 0)
-        return std::nullopt;
-    if (result == 2 || result == 3)
-        return static_cast<int>(result);
-    throw std::runtime_error("无法显示研究设计选择窗口");
 }
 inline std::filesystem::path compatibilityConfig() {
     wchar_t p[32768]{};

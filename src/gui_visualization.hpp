@@ -40,6 +40,20 @@ struct VisualState {
     bool busy() const { return exporting.valid(); }
 } visual;
 
+enum class ImportStep { Worksheet, Design };
+struct PendingStudyImport {
+    std::filesystem::path path;
+    Json config;
+    std::unique_ptr<msa::XlsxWorkbook> workbook;
+    std::string csv;
+    std::vector<std::string> sheetNames;
+    int sheetIndex = 0, replicates = 0;
+    ImportStep step = ImportStep::Worksheet;
+    unsigned generation = 0;
+};
+std::optional<PendingStudyImport> pendingImport;
+unsigned importStepGeneration = 0;
+
 msa::charts::Style activeChartStyle() {
     return static_cast<msa::charts::Style>(state.draft.charts.style);
 }
@@ -164,29 +178,91 @@ std::string chartFooterSummary() {
     return count ? format + " · 已选 " + std::to_string(count) + " / 7 张图表"
                  : "请在图表选项中勾选要导出的图表";
 }
-bool loadInsightData(const std::filesystem::path &path) {
+void cancelStudyImport() { pendingImport.reset(); }
+void backStudyImport() {
+    if (!pendingImport || pendingImport->step != ImportStep::Design || !pendingImport->workbook)
+        return;
+    pendingImport->csv.clear();
+    pendingImport->replicates = 0;
+    pendingImport->step = ImportStep::Worksheet;
+    pendingImport->generation = ++importStepGeneration;
+}
+
+// Parsing only the selected sheet keeps unrelated sheets lazy. If the design is ambiguous,
+// retain this exact CSV payload across UI frames, even if the user replaces the source file.
+bool advanceStudyImport() {
+    auto &input = *pendingImport;
     try {
-        auto data = msa::read_study_data(path, native_ui::to_config(state.draft, native_ui::ConfigUse::DataImport),
-                                         state.chooseWorksheet, state.chooseReplicates);
-        if (!data)
+        if (input.workbook && input.step == ImportStep::Worksheet) {
+            input.csv = input.workbook->csv(input.sheetIndex);
+            if (input.sheetNames.size() == 1)
+                input.workbook.reset();
+        }
+        auto data = msa::import_csv_study(input.csv, input.config, [&]() -> std::optional<int> {
+            if (input.replicates == 0)
+                return std::nullopt;
+            return input.replicates;
+        });
+        if (!data) {
+            input.step = ImportStep::Design;
+            input.generation = ++importStepGeneration;
             return false;
+        }
         msa::Result result;
         result.config = std::move(data->config);
         result.matrix = std::move(data->matrix);
         result.metrics = msa::calculate(result.matrix, result.config);
-        const auto fullPath = std::filesystem::absolute(path);
+        auto name = input.path.filename().u8string();
+        auto sheet = input.sheetNames.empty() ? std::string{} : input.sheetNames.at(input.sheetIndex);
         visual.imported = std::move(result);
-        visual.importedPath = fullPath;
+        visual.importedPath = std::move(input.path);
         visual.importedSelected = true;
-        visual.importedName = path.filename().u8string();
-        visual.importedSheet = std::move(data->sheet_name);
+        visual.importedName = std::move(name);
+        visual.importedSheet = std::move(sheet);
         visual.preview.attempted = false;
         clearVisualError();
         state.feedback("测量数据已导入",
                        importedSourceName() + " · 已识别 " +
                            visual.imported->config.at("design").at("operators").dump() + " 名操作员");
+        pendingImport.reset();
         return true;
     } catch (const std::exception &e) {
+        std::string detail = e.what();
+        if (!input.sheetNames.empty() && input.sheetIndex >= 0 &&
+            static_cast<std::size_t>(input.sheetIndex) < input.sheetNames.size())
+            detail = "工作表“" + input.sheetNames[input.sheetIndex] + "”：" + detail;
+        pendingImport.reset();
+        visualError("import", detail, "请核对文件列、测量记录及分析设置，再重新选择文件。");
+        return false;
+    }
+}
+bool confirmStudyImport() {
+    if (!pendingImport || (pendingImport->step == ImportStep::Design &&
+                           pendingImport->replicates != 2 && pendingImport->replicates != 3))
+        return false;
+    return advanceStudyImport();
+}
+bool loadInsightData(const std::filesystem::path &path) {
+    if (pendingImport)
+        return false;
+    try {
+        auto &input = pendingImport.emplace();
+        input.path = std::filesystem::absolute(path);
+        input.config = native_ui::to_config(state.draft, native_ui::ConfigUse::DataImport);
+        if (msa::data_file_type(path) == "xlsx") {
+            input.workbook = std::make_unique<msa::XlsxWorkbook>(
+                msa::read_file_bytes(path, msa::xlsx_read_limit));
+            input.sheetNames = input.workbook->sheet_names();
+            if (input.sheetNames.size() > 1) {
+                input.generation = ++importStepGeneration;
+                return false;
+            }
+        } else {
+            input.csv = msa::read_file_bytes(path, msa::csv_read_limit);
+        }
+        return advanceStudyImport();
+    } catch (const std::exception &e) {
+        pendingImport.reset();
         visualError("import", e.what(),
                     "请核对文件列、测量记录及分析设置，再重新选择文件。");
         return false;
@@ -245,6 +321,8 @@ void exportComparisonReport() {
     }
 }
 void importInsightData() {
+    if (pendingImport)
+        return;
     try {
         const auto directory = msa::resolve_output_directory(native_ui::trim(state.draft.importDirectory));
         const auto name = msa::render_import_basename(state.draft.importFilename,

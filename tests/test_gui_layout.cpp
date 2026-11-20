@@ -2640,98 +2640,71 @@ void runtime_keyboard_navigation() {
     std::cout
         << "runtime keyboard and pointer navigation preserve focus and skip disabled controls\n";
 }
-// Run scripted input on the dialog's own thread while its real modal message loop is active.
-enum class DesignAction { TwoOperators, ThreeOperators, Cancel, Escape, Close };
-std::optional<int> choose_design(DesignAction action) {
-    static std::function<void(HWND)> drive;
-    std::string failure;
-    bool visited = false;
-    drive = [&](HWND dialog) {
-        const auto check = [](bool value, const char *message) {
-            if (!value)
-                throw std::runtime_error(message);
-        };
-        try {
-            check(!visited, "研究设计弹窗未响应确认或取消");
-            visited = true;
-            const auto two = GetDlgItem(dialog, MSA_TWO_OPERATORS);
-            const auto three = GetDlgItem(dialog, MSA_THREE_OPERATORS);
-            const auto ok = GetDlgItem(dialog, IDOK);
-            check(two && three && ok && GetDlgItem(dialog, IDCANCEL), "研究设计弹窗缺少操作控件");
-            const auto checked = [](HWND radio) {
-                return SendMessageW(radio, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            };
-            check(GetFocus() == two && !checked(two) && !checked(three) && !IsWindowEnabled(ok),
-                  "重新打开研究设计弹窗时必须先选择方案");
-            MSG key{};
-            key.hwnd = two;
-            key.message = WM_KEYDOWN;
-            if (action == DesignAction::Close) {
-                key.wParam = VK_TAB;
-                check(IsDialogMessageW(dialog, &key) && GetFocus() == GetDlgItem(dialog, IDCANCEL),
-                      "未选择方案时，Tab 无法前往取消按钮");
-                key.hwnd = GetFocus();
-                check(IsDialogMessageW(dialog, &key) && GetFocus() == two &&
-                          !checked(two) && !checked(three) && !IsWindowEnabled(ok),
-                      "Tab 无法从取消按钮返回卡片，或仅移动焦点就选中了方案");
-                SendMessageW(dialog, WM_CLOSE, 0, 0);
+// Exercise the same DSL tree and input dispatcher as the chart page, without opening a window.
+class ImportPanelDriver {
+  public:
+    ImportPanelDriver() {
+        runtime.initialize();
+        runtime.setKeyEventHandler(gui::appKeyEvent);
+        gui::state.limitScale = gui::state.pixelScale;
+    }
+    ~ImportPanelDriver() {
+        core::detail::inputQueues().erase(nullptr);
+        core::detail::pointerStates().erase(nullptr);
+        runtime.shutdown(false);
+    }
+    void render() {
+        runtime.compose("import-panel", 620, 500, [&](eui::Ui &ui, const eui::Screen &screen) {
+            view = &ui;
+            gui::compose(ui, screen);
+        });
+    }
+    void key(core::InputKey value, bool shift = false) {
+        core::KeyEvent event{value};
+        event.modifiers.shift = shift;
+        core::queueKeyInput(nullptr, event);
+        update();
+    }
+    void press(const std::string &id, float scrollOffset = 0) {
+        const auto &rect = node(id).frame;
+        const float x = rect.x + rect.width / 2, y = rect.y + rect.height / 2 - scrollOffset;
+        for (auto action : {core::PointerAction::Press, core::PointerAction::Release})
+            core::queuePointerButton(nullptr, x, y, core::PointerButton::Left, action, {});
+        update();
+    }
+    void scrollSheetListToEnd() {
+        const auto &list = node("import.panel.scroll");
+        const auto rect = list.frame;
+        core::queuePointerMotion(nullptr, rect.x + rect.width / 2, rect.y + rect.height / 2, {}, {});
+        core::queueScrollInput(nullptr, 0, -32);
+        // The real window recomposes on request. An unconditional compose here would mask
+        // missing virtual rows when the wheel moves just the scroll viewport.
+        for (int frame = 0; frame < 120; ++frame) {
+            runtime.update(nullptr, 1.f / 60, 1, 1);
+            if (runtime.composeRequested())
+                render();
+            const auto &updated = node("import.panel.scroll");
+            if (updated.scrollMaxOffset > 0 && updated.scrollOffset >= updated.scrollMaxOffset - 0.5f)
                 return;
-            }
-            if (action == DesignAction::Escape) {
-                SendMessageW(two, WM_KEYDOWN, VK_SPACE, 0);
-                SendMessageW(two, WM_KEYUP, VK_SPACE, 0);
-            } else
-                SendMessageW(two, BM_CLICK, 0, 0);
-            check(checked(two) && !checked(three) && IsWindowEnabled(ok), "选择二人方案未启用导入");
-            if (action == DesignAction::Cancel) {
-                SendDlgItemMessageW(dialog, IDCANCEL, BM_CLICK, 0, 0);
-                return;
-            }
-            if (action == DesignAction::TwoOperators) {
-                SendMessageW(ok, BM_CLICK, 0, 0);
-                return;
-            }
-            key.wParam = VK_DOWN;
-            check(IsDialogMessageW(dialog, &key) && checked(three) && !checked(two),
-                  "方向键无法切换到三人方案");
-            key.hwnd = three;
-            key.wParam = action == DesignAction::Escape ? VK_ESCAPE : VK_RETURN;
-            check(IsDialogMessageW(dialog, &key) != FALSE, "弹窗未处理 Esc 或 Enter");
-        } catch (const std::exception &e) {
-            failure = e.what();
-            EndDialog(dialog, 0);
         }
-    };
-    const auto timer = SetTimer(nullptr, 0, USER_TIMER_MINIMUM, [](HWND, UINT, UINT_PTR, DWORD) {
-        if (!drive)
-            return;
-        EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) -> BOOL {
-            wchar_t name[16]{};
-            GetClassNameW(window, name, 16);
-            if (std::wstring_view(name) != L"#32770")
-                return TRUE;
-            drive(window);
-            return FALSE;
-        }, 0);
-    });
-    if (!timer) {
-        drive = {};
-        throw std::runtime_error("无法投递研究设计弹窗测试操作");
+        throw std::runtime_error("滚轮未将工作表列表的末行带入视口");
     }
-    std::optional<int> result;
-    try {
-        result = platform::chooseReplicates();
-    } catch (...) {
-        KillTimer(nullptr, timer);
-        drive = {};
-        throw;
+    const core::dsl::Element &node(const std::string &id) const {
+        const auto *found = view->find(id);
+        if (!found)
+            throw std::runtime_error("导入面板缺少控件：" + id);
+        return *found;
     }
-    KillTimer(nullptr, timer);
-    drive = {};
-    if (!failure.empty() || !visited)
-        throw std::runtime_error(failure.empty() ? "未打开研究设计弹窗" : failure);
-    return result;
-}
+    bool focused(const std::string &id) const { return view->isFocused(id); }
+
+  private:
+    void update() {
+        runtime.update(nullptr, 0, 1, 1);
+        render();
+    }
+    core::dsl::Runtime runtime;
+    eui::Ui *view = nullptr;
+};
 
 void chart_interaction(const msa::Result &generated, const std::filesystem::path &multiSheetWorkbook) {
     const auto savedDraft = gui::state.draft;
@@ -3427,31 +3400,47 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                 gui::state.configOffset == 0,
             "图表页未跳转到集中管理目录与文件名的位置");
     gui::state.chooseExportPath = picker;
-    const auto chooser = gui::state.chooseWorksheet;
+    gui::state.page = gui::Page::Charts;
     gui::state.draft.operators = "3";
     gui::state.draft.replicates = "3";
     gui::state.draft.parts = "10";
-    int sheetRequests = 0;
-    bool cancelSheet = false;
-    gui::state.chooseWorksheet = [&](const std::vector<std::string> &names) -> std::optional<std::size_t> {
-        ++sheetRequests;
-        require(names == std::vector<std::string>{"原始记录", "复测 数据"}, "工作表名称或顺序错误");
-        return cancelSheet ? std::nullopt : std::optional<std::size_t>(1);
+    using Key = core::InputKey;
+    ImportPanelDriver panel;
+    const auto step = [](gui::ImportStep expected) {
+        return gui::pendingImport && gui::pendingImport->step == expected;
     };
-    require(gui::loadInsightData(multiSheetWorkbook) && gui::visual.importedSheet == "复测 数据" &&
-                gui::visual.imported->matrix[0][0] == 110.11 && sheetRequests == 1 &&
+    const auto start = [&](const std::filesystem::path &path, gui::ImportStep expected) {
+        require(!gui::pendingImport && !gui::loadInsightData(path) && step(expected),
+                "未打开预期的导入步骤：" + path.filename().u8string());
+        panel.render();
+    };
+    start(multiSheetWorkbook, gui::ImportStep::Worksheet);
+    require(gui::pendingImport->sheetNames == std::vector<std::string>{"原始记录", "复测 数据"} &&
+                panel.focused("import.panel.sheet.0"),
+            "未按工作簿顺序列出可选工作表并聚焦首行");
+    panel.press("pages.hit.0");
+    require(step(gui::ImportStep::Worksheet) && gui::state.page == gui::Page::Charts,
+            "导入面板未拦截底层数据页导航");
+    panel.press("import.panel.sheet.1");
+    require(gui::pendingImport && gui::pendingImport->sheetIndex == 1,
+            "点击工作表行没有选中第二张表");
+    panel.press("import.panel.confirm.bg");
+    require(!gui::pendingImport && gui::visual.importedSheet == "复测 数据" &&
+                gui::visual.imported->matrix[0][0] == 110.11 &&
                 gui::visual.imported->config.at("design").at("operators") == 2 &&
                 gui::state.draft.operators == "3",
-            "未导入选择的第二张工作表");
+            "带操作员信息的工作表未从选表直接完成导入");
     const auto oldMatrix = gui::visual.imported->matrix;
     const auto oldFeedback = gui::state.footerMessage;
     const auto oldChart = gui::visual.selected;
     gui::visual.preview.attempted = true;
-    cancelSheet = true;
-    require(!gui::loadInsightData(multiSheetWorkbook) && sheetRequests == 2 &&
-                gui::visual.imported->matrix == oldMatrix && gui::visual.importedSelected &&
-                gui::visual.importedSheet == "复测 数据" && gui::visual.selected == oldChart &&
-                gui::visual.preview.attempted && gui::state.footerMessage == oldFeedback,
+    start(multiSheetWorkbook, gui::ImportStep::Worksheet);
+    panel.key(Key::Down);
+    panel.key(Key::Escape);
+    require(!gui::pendingImport && gui::visual.imported->matrix == oldMatrix &&
+                gui::visual.importedSelected && gui::visual.importedSheet == "复测 数据" &&
+                gui::visual.selected == oldChart && gui::visual.preview.attempted &&
+                gui::state.footerMessage == oldFeedback,
             "取消工作表选择改变了当前研究、图表或提示");
     gui::state.draft.silentReport = true;
     gui::state.draft.reportDirectory = folder.u8string();
@@ -3466,21 +3455,58 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                                {4, 5, 6, 7, 8}, {5, 6, 7, 8, 9}, {6, 7, 8, 9, 10}};
     msa::atomic_text(sixRows, msa::csv_text(readings, 0));
     const auto sixWorkbook = folder / L"六行宽表.xlsx";
-    msa::atomic_text(sixWorkbook, test_fixture::selection_workbook(
-        "worksheet", "<unclosed>", test_fixture::numeric_sheet(readings)));
-    int workbookRequests = 0;
-    gui::state.chooseWorksheet = [&](const auto &names) {
-        ++workbookRequests;
-        require(names == std::vector<std::string>{"损坏页", "数据页"}, "未显示六行宽表的工作表选择");
-        return 1;
+    std::filesystem::copy_file(multiSheetWorkbook.parent_path() / "xlsx-sheet-navigation.xlsx", sixWorkbook);
+    const std::string lastSheet = "三坐标测量机复测记录精密零件抽样检验结果汇总同批次第14组";
+    const auto startDesign = [&](const std::filesystem::path &path) {
+        if (path == sixWorkbook) {
+            start(path, gui::ImportStep::Worksheet);
+            require(gui::pendingImport->sheetNames.size() == 14 &&
+                        gui::pendingImport->sheetNames.back() == lastSheet &&
+                        gui::pendingImport->sheetIndex == 0 &&
+                        panel.node("import.panel.scroll").scrollMaxOffset > 0,
+                    "窄窗口中长工作表列表应可滚动，再次打开从第一张开始");
+            panel.key(Key::End);
+            require(gui::pendingImport->sheetIndex == 13 && panel.focused("import.panel.sheet.13") &&
+                        panel.node("import.panel.sheet.13.label").text == lastSheet &&
+                        panel.node("import.panel.scroll").scrollOffset > 0,
+                    "End 未将最后一张工作表完整显示并聚焦");
+            panel.key(Key::Enter);
+        } else {
+            start(path, gui::ImportStep::Design);
+        }
+        require(step(gui::ImportStep::Design) && gui::pendingImport->replicates == 0 &&
+                    panel.focused("import.panel.design.0") && panel.node("import.panel.confirm.bg").disabled,
+                "每次导入六行宽表均应从未选方案和禁用的导入按钮开始");
     };
-    const auto originalSelector = gui::state.chooseReplicates;
-    DesignAction action = DesignAction::Close;
-    int designRequests = 0;
-    gui::state.chooseReplicates = [&] {
-        ++designRequests;
-        return choose_design(action);
-    };
+    start(sixWorkbook, gui::ImportStep::Worksheet);
+    const auto originalWorkbook = msa::read_text(sixWorkbook);
+    msa::atomic_text(sixWorkbook, "replacement");
+    panel.scrollSheetListToEnd();
+    panel.press("import.panel.sheet.13", panel.node("import.panel.scroll").scrollOffset);
+    require(gui::pendingImport && gui::pendingImport->sheetIndex == 13 &&
+                panel.focused("import.panel.sheet.13"), "滚轮滚动后不能用鼠标选中原视口外的工作表");
+    panel.key(Key::Enter);
+    panel.key(Key::Space);
+    panel.press("import.panel.back.bg");
+    require(step(gui::ImportStep::Worksheet) && gui::pendingImport->sheetIndex == 13 &&
+                gui::pendingImport->replicates == 0,
+            "上一步未还原工作表列表和所选位置");
+    panel.key(Key::Home);
+    panel.key(Key::Enter);
+    require(step(gui::ImportStep::Design) && gui::pendingImport->replicates == 0 &&
+                panel.node("import.panel.confirm.bg").disabled,
+            "改选工作表后沿用了上一张表的分组或重新读取了已替换的文件");
+    panel.key(Key::Escape);
+    require(!gui::pendingImport && gui::visual.imported->matrix == oldMatrix,
+            "退回改选工作表后取消改变了当前数据");
+    msa::atomic_text(sixWorkbook, originalWorkbook);
+    const auto oneSheet = folder / L"六行单表.xlsx";
+    msa::atomic_text(oneSheet, test_fixture::selection_workbook(
+        "worksheet", "<unclosed>", test_fixture::numeric_sheet(readings), false));
+    startDesign(oneSheet);
+    require(gui::pendingImport->sheetNames == std::vector<std::string>{"数据页"},
+            "六行单表 XLSX 应直接选择研究设计并保留来源工作表名");
+    panel.key(Key::Escape);
     gui::visual.importedSelected = false;
     const auto savedNames = gui::state.draft.operatorNames;
     constexpr int activeChart = 1;
@@ -3496,21 +3522,39 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         return scene && std::any_of(scene->items.begin(), scene->items.end(),
                                     [&](const auto &item) { return item.text == draftTitle; });
     };
-    const auto cancelImport = [&](const auto &path, DesignAction cancel) {
-        action = cancel;
+    enum class CancelVia { Close, Escape, Button };
+    const auto cancelImport = [&](const auto &path, CancelVia cancel) {
         const auto imported = *gui::visual.imported;
         const auto importedPath = gui::visual.importedPath;
         const auto filename = gui::visual.importedName;
         const auto sheet = gui::visual.importedSheet;
         const auto wasImported = gui::visual.importedSelected;
         const auto feedback = gui::state.footerMessage;
-        const auto previousRequests = designRequests;
         const auto *current = gui::insightResult();
         require(current && hasDraftTitle(gui::chartPreview(*current, 720, 448)),
                 "未能建立包含编辑草稿的图表预览");
         const auto displayed = *current;
-        const bool loaded = gui::loadInsightData(path);
-        require(!loaded && designRequests == previousRequests + 1 && gui::visual.errorText.empty(),
+        startDesign(path);
+        if (cancel == CancelVia::Escape) {
+            panel.key(Key::Space);
+            panel.key(Key::Down);
+            panel.key(Key::Escape);
+        } else if (cancel == CancelVia::Close) {
+            panel.key(Key::Enter);
+            require(step(gui::ImportStep::Design) && gui::pendingImport->replicates == 0,
+                    "尚未选择分组时 Enter 意外导入");
+            panel.key(Key::Tab);
+            require(panel.focused("import.panel.cancel.bg"), "未选择分组时 Tab 未移到取消");
+            panel.key(Key::Tab, true);
+            require(panel.focused("import.panel.design.0") && gui::pendingImport->replicates == 0,
+                    "Shift+Tab 未返回分组或仅聚焦就选中");
+            panel.press("import.panel.close.bg");
+        } else {
+            panel.press("import.panel.design.0");
+            panel.press("import.panel.cancel.bg");
+        }
+        require(!gui::pendingImport && panel.focused("charts.dataset.import.bg") &&
+                    gui::visual.errorText.empty(),
                 "未正常取消研究设计选择：" + gui::visual.errorText);
         require(gui::visual.imported && gui::sameChartData(*gui::visual.imported, imported) &&
                     gui::visual.importedPath == importedPath && gui::visual.importedName == filename &&
@@ -3527,32 +3571,47 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                     gui::sameChartData(*preview.snapshot, displayed) && preview.scene &&
                     hasDraftTitle(&*preview.scene), "取消后改变了当前图表、渲染结果或未应用的编辑");
     };
-    cancelImport(sixRows, DesignAction::Close); // 当前显示生成结果，仍保留先前导入的具名工作表。
+    // 从生成结果和导入工作表两种图表来源取消，均须保留原来的显示与编辑草稿。
+    cancelImport(sixRows, CancelVia::Close);
     gui::visual.importedSelected = true;
-    cancelImport(sixWorkbook, DesignAction::Escape);
+    cancelImport(sixWorkbook, CancelVia::Escape);
     for (const auto &path : {sixRows, sixWorkbook}) {
         for (int choice : {3, 2}) {
-            action = choice == 3 ? DesignAction::TwoOperators : DesignAction::ThreeOperators;
-            const int previousRequests = designRequests;
-            const bool loaded = gui::loadInsightData(path);
-            require(loaded && designRequests == previousRequests + 1 &&
-                        gui::visual.imported->matrix == readings &&
-                        gui::visual.imported->config["design"]["replicates"] == choice &&
-                        gui::visual.imported->config["design"]["operators"] == 6 / choice &&
-                        gui::visual.importedPath == path &&
-                        gui::visual.importedSheet == (path == sixRows ? "" : "数据页") &&
-                        gui::state.draft.operators == "3" && gui::state.draft.replicates == "3" &&
-                        gui::state.draft.operatorNames == savedNames,
-                    "重新导入未使用本次研究设计，或修改了默认设置：" + gui::visual.errorText);
+            startDesign(path);
+            const auto scenario = path.filename().u8string() + "，每人 " + std::to_string(choice) + " 次";
+            if (choice == 3) {
+                panel.press("import.panel.design.0");
+                require(gui::pendingImport && gui::pendingImport->replicates == 3 &&
+                            !panel.node("import.panel.confirm.bg").disabled,
+                        scenario + " 鼠标点选方案后未启用导入");
+                panel.press("import.panel.confirm.bg");
+            } else {
+                const auto snapshot = msa::read_text(path);
+                msa::atomic_text(path, "replacement");
+                panel.key(Key::Down);
+                require(gui::pendingImport && gui::pendingImport->replicates == 2,
+                        "方向键未选中三人方案");
+                panel.key(Key::Enter);
+                msa::atomic_text(path, snapshot);
+            }
+            require(!gui::pendingImport && gui::visual.errorText.empty() && gui::visual.importedPath == path,
+                    scenario + " 未完成导入，当前文件为 " + gui::visual.importedName +
+                        (gui::pendingImport ? "，待确认分组 " + std::to_string(gui::pendingImport->replicates) : "") +
+                        " " + gui::visual.errorText);
+            require(gui::visual.imported->matrix == readings &&
+                        gui::visual.importedSheet == (path == sixRows ? "" : lastSheet),
+                    scenario + " 的读数或工作表来源与原始快照不一致");
+            require(gui::visual.imported->config["design"]["replicates"] == choice &&
+                        gui::visual.imported->config["design"]["operators"] == 6 / choice,
+                    scenario + " 的研究设计不符：" + gui::visual.imported->config["design"].dump());
+            require(gui::state.draft.operators == "3" && gui::state.draft.replicates == "3" &&
+                        gui::state.draft.operatorNames == savedNames, scenario + " 修改了默认研究设置");
             if (choice == 3)
-                cancelImport(path, DesignAction::Cancel);
+                cancelImport(path, CancelVia::Button);
         }
     }
-    const auto previousRequests = designRequests;
-    require(workbookRequests == 4 && gui::loadInsightData(csv) && designRequests == previousRequests,
-            "重新导入工作簿应重选工作表，具名研究应跳过研究设计选择");
-    gui::state.chooseWorksheet = chooser;
-    gui::state.chooseReplicates = originalSelector;
+    require(gui::loadInsightData(csv) && !gui::pendingImport,
+            "具名研究应直接完成导入");
     std::cout << "图表草稿/应用/撤销、切图隔离、缓存、错误恢复、选择与布局及真实导出通过："
               << folder.u8string() << '\n';
     gui::visual = gui::VisualState{};

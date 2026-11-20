@@ -136,6 +136,7 @@ void atomic_text(const std::filesystem::path &path, const std::string &bytes,
 bool same_file_path(const std::filesystem::path &a, const std::filesystem::path &b);
 inline constexpr std::size_t csv_read_limit = 4 * 1024 * 1024;
 inline constexpr std::size_t config_read_limit = 64 * 1024 * 1024;
+std::string read_file_bytes(const std::filesystem::path &path, std::size_t max_bytes);
 std::string read_text(const std::filesystem::path &path,
                       std::size_t max_bytes = (std::numeric_limits<std::size_t>::max)());
 void save_config(const Json &cfg, const std::filesystem::path &path = config_path());

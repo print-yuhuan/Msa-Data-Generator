@@ -10,7 +10,9 @@
 #include "msa/project.hpp"
 #include "msa/charts.hpp"
 #include "msa/comparison_report.hpp"
+#include "msa/xlsx.hpp"
 #include "platform/chart_export.hpp"
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <array>
 #include <atomic>
@@ -109,8 +111,6 @@ struct State {
     std::string message, dataExportError, footerMessage;
     std::function<decltype(platform::chooseExportPath)> chooseExportPath = platform::chooseExportPath;
     std::function<decltype(platform::chooseImportData)> chooseImportData = platform::chooseImportData;
-    std::function<decltype(platform::chooseWorksheet)> chooseWorksheet = platform::chooseWorksheet;
-    msa::ReplicateSelector chooseReplicates = platform::chooseReplicates;
     std::function<decltype(platform::chooseDirectory)> chooseDirectory = platform::chooseDirectory;
     float logOffset = 0, logPageOffset = 0, helpOffset = 0, aboutOffset = 0;
     unsigned logSequence = 0;
@@ -4252,8 +4252,9 @@ void helpCharts(Ui &v, float cw) {
                  "在「图表」点击「导入数据」，选择 CSV 文件或 XLSX 工作簿。带标签的宽表按首列识别"
                  "操作员，长表按 Operator 列识别。程序从所选数据识别操作员名称、人数、部件数和"
                  "重复次数。选项页保留原有的默认研究设计。"
-                 "XLSX 只有一张数据工作表时直接读取该表。若有多张，弹窗按工作簿顺序列出数据工作表，"
-                 "也可选择隐藏的数据工作表。选中一张后点击「导入」或按回车。取消会保留原数据和图表。"
+                 "XLSX 只有一张数据工作表时直接读取。有多张时，「选择工作表」面板按工作簿顺序列出"
+                 "数据表，包含隐藏表。可滚动列表或用上下键选表，点「继续」、按回车或双击表名确认。"
+                 "程序只在所选表有六行无姓名读数时继续询问研究设计。"
                  "「选项 → 文件 → 目录与文件名」可设置导入目录和用于预填的「测量数据导入名称」。",
                  c);
         helpItem(v, "help.charts.source.order", "人员顺序与无标签宽表",
@@ -4264,7 +4265,8 @@ void helpCharts(Ui &v, float cw) {
                  "请按实际测量顺序点击卡片。「2 人各测 3 次」把第 1～3 行归给 A、第 4～6 行归给 B。"
                  "「3 人各测 2 次」把第 1～2、3～4、5～6 行分别归给 A、B、C。"
                  "可用空格选择、方向键切换。选中后点击「导入」或按回车确认。"
-                 "点击「取消」、按 Esc 或关闭窗口都会保留当前数据和图表。"
+                 "来自多表工作簿时，可点「上一步」改选工作表。点击「取消」、按 Esc 或关闭面板，"
+                 "都会保留当前数据、图表和编辑。"
                  "下次导入同一文件会重新选择，选项页的研究设置保持原值。",
                  c);
         helpText(v, "help.charts.source.switch",
@@ -4683,7 +4685,33 @@ void footerStatus(Ui &u, float w, const std::string &fallback) {
 }
 // 新页面共享现有主题、状态栏与本地统计结果。
 #include "gui_visualization.hpp"
+#include "gui_import_panel.hpp"
 #include "gui_status.hpp"
+void appKeyEvent(const eui::KeyEvent &key) {
+    if (!key.isDown())
+        return;
+    if (pendingImport) {
+        if (key.action == core::KeyAction::Press && key.key == eui::InputKey::Escape)
+            cancelStudyImport();
+        return;
+    }
+    if (key.key == eui::InputKey::Tab || key.key == eui::InputKey::Escape)
+        menu.id.clear();
+}
+
+// The Windows title bar belongs to the main window. While a choice is open,
+// its close button and Alt+F4 dismiss that choice just like the panel's close button.
+LRESULT CALLBACK importWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                                  UINT_PTR subclassId, DWORD_PTR) {
+    if (message == WM_CLOSE && pendingImport) {
+        cancelStudyImport();
+        app::requestUpdate();
+        return 0;
+    }
+    if (message == WM_NCDESTROY)
+        RemoveWindowSubclass(window, importWindowProc, subclassId);
+    return DefSubclassProc(window, message, wparam, lparam);
+}
 void footer(Ui &u, float w) {
     const bool compact = w < 760;
     if (state.page == Page::Charts && !state.busy()) {
@@ -4816,6 +4844,7 @@ void compose(Ui &u, const eui::Screen &screen) {
         .build();
     u.column("shell")
         .size(screen.width, screen.height)
+        .disabled(pendingImport.has_value())
         .content([&] {
             u.row("header")
                 .size(screen.width, headerHeight)
@@ -4907,7 +4936,20 @@ void compose(Ui &u, const eui::Screen &screen) {
                 .build();
         })
         .build();
-    menuOverlay(u, screen);
+    auto &returnFocus = u.state<std::string>("import.returnFocus");
+    if (pendingImport) {
+        menu.id.clear();
+        if (returnFocus.empty())
+            returnFocus = u.isFocused("chart.recovery.import.bg") ? "chart.recovery.import.bg"
+                                                                 : "charts.dataset.import.bg";
+        importPanel(u, screen);
+    } else {
+        if (!returnFocus.empty()) {
+            u.requestFocus(u.find(returnFocus) ? returnFocus : "charts.dataset.import.bg");
+            returnFocus.clear();
+        }
+        menuOverlay(u, screen);
+    }
 }
 } // namespace gui
 namespace app {
@@ -4956,6 +4998,7 @@ const DslAppConfig &dslAppConfig() {
                 // 首次显示前按实际外框居中，工作区不包含任务栏。
                 RECT workArea{}, windowRect{};
                 const HWND window = platform::owner();
+                SetWindowSubclass(window, gui::importWindowProc, 1, 0);
                 // Windows 10 不支持标题栏颜色属性，调用失败时使用系统配色。
                 if (SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR,
                                                     &gui::headerBackground,
@@ -4990,13 +5033,7 @@ const DslAppConfig &dslAppConfig() {
                 gui::state.stop();
                 CoUninitialize();
             })
-            .onKeyEvent([](const eui::KeyEvent &k) {
-                if (k.isDown() && k.key == eui::InputKey::Tab)
-                    gui::menu.id.clear();
-                if (k.isDown() && k.key == eui::InputKey::Escape) {
-                    gui::menu.id.clear();
-                }
-            });
+            .onKeyEvent(gui::appKeyEvent);
     }();
     return config;
 }

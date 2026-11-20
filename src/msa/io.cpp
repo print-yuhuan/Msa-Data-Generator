@@ -21,7 +21,6 @@
 #endif
 
 namespace msa {
-namespace {
 std::string read_file_bytes(const std::filesystem::path &path, std::size_t max_bytes) {
     std::ifstream in(path, std::ios::binary);
     if (!in)
@@ -42,7 +41,6 @@ std::string read_file_bytes(const std::filesystem::path &path, std::size_t max_b
         throw std::runtime_error("读取失败：" + path.u8string());
     return bytes;
 }
-} // namespace
 std::filesystem::path config_path() {
 #ifdef _WIN32
     wchar_t home[32768]{};

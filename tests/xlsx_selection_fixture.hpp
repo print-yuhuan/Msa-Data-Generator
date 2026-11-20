@@ -6,7 +6,8 @@ namespace test_fixture {
 // By default the first sheet and unused shared-string part contain invalid XML.
 inline std::string selection_workbook(const std::string &relationship_type,
                                       const std::string &first_sheet = "<unclosed>",
-                                      const std::string &second_sheet = {}) {
+                                      const std::string &second_sheet = {},
+                                      bool include_first = true) {
     const std::string rels = "http://schemas.openxmlformats.org/package/2006/relationships";
     const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     const std::string ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -17,7 +18,8 @@ inline std::string selection_workbook(const std::string &relationship_type,
                              rel + "/officeDocument\" Target=\"workbook.xml\"/></Relationships>"},
          {"workbook.xml",
           "<workbook xmlns=\"" + ns + "\" xmlns:r=\"" + rel +
-              "\"><sheets><sheet name=\"损坏页\" sheetId=\"1\" r:id=\"one\"/><sheet "
+              "\"><sheets>" + (include_first ? "<sheet name=\"损坏页\" sheetId=\"1\" r:id=\"one\"/>" : "") +
+              "<sheet "
               "name=\"数据页\" sheetId=\"2\" r:id=\"two\"/><sheet name=\"外部页\" sheetId=\"3\" "
               "r:id=\"external\"/></sheets></workbook>"},
          {"_rels/workbook.xml.rels",
