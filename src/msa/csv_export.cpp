@@ -1,10 +1,8 @@
 #include "core.hpp"
 #include <algorithm>
-#include <charconv>
 #include <mutex>
 #include <numeric>
 #include <random>
-#include <sstream>
 
 namespace msa {
 struct ExportStudyState {
@@ -26,10 +24,10 @@ struct Design {
     }
     void check(const Matrix &matrix) const {
         if (int(matrix.size()) != operators * trials)
-            throw ConfigError("CSV 矩阵行数与人员、测量次数不符");
+            throw ConfigError("测量矩阵行数与人员、测量次数不符");
         for (const auto &row : matrix)
             if (int(row.size()) != parts)
-                throw ConfigError("CSV 矩阵列数与产品件数不符");
+                throw ConfigError("测量矩阵列数与产品件数不符");
     }
 };
 std::uint64_t study_seed(const Result &result, const Json &order) {
@@ -58,26 +56,12 @@ template <class T> void shuffle(std::vector<T> &items, std::mt19937_64 &random) 
         std::swap(items[n - 1], items[std::size_t(value % bound)]);
     }
 }
-std::vector<std::string> cells(const std::string &line) {
-    std::vector<std::string> result;
-    std::size_t begin = 0;
-    for (;;) {
-        const auto end = line.find(',', begin);
-        result.push_back(line.substr(begin, end == std::string::npos ? end : end - begin));
-        if (end == std::string::npos)
-            break;
-        begin = end + 1;
-    }
-    return result;
-}
-int positive_integer(const std::string &cell) {
-    int value = 0;
-    const auto parsed = std::from_chars(cell.data(), cell.data() + cell.size(), value);
-    if (parsed.ec != std::errc{} || parsed.ptr != cell.data() + cell.size() || value <= 0)
-        throw ConfigError("CSV 部件、Trial 或 StdOrder 编号无效");
-    return value;
-}
 } // namespace
+Json effective_run_seed(const Result &result, const Json &output) {
+    if (output.at("format") == "default" || output.at("run_order").at("mode") == "standard")
+        return nullptr;
+    return study_seed(result, output.at("run_order"));
+}
 std::vector<MeasurementRecord> export_records(const Result &result, const Json &raw) {
     const auto cfg = normalize_config(result.config), output = normalize_output(raw);
     const Design d(cfg);
@@ -142,59 +126,5 @@ std::string export_csv_text(const Result &result, const Json &raw) {
         text += fixed(record.measurement, dp) + "\r\n";
     }
     return text;
-}
-Matrix parse_export_csv(const std::string &bytes, const Json &raw) {
-    std::string text = bytes;
-    if (text.compare(0, 3, "\xef\xbb\xbf") == 0)
-        text.erase(0, 3);
-    std::istringstream input(text);
-    std::string line;
-    if (!std::getline(input, line))
-        throw ConfigError("CSV 文件为空");
-    if (!line.empty() && line.back() == '\r')
-        line.pop_back();
-    const bool standard = line == "StdOrder,Operator,Part,Trial,Measurement";
-    if (!standard && line != "Operator,Part,Trial,Measurement") {
-        auto matrix = parse_csv(bytes);
-        const Design d(normalize_config(raw));
-        d.check(matrix);
-        if (!line.empty() && line.front() == ',') {
-            int row = 0;
-            while (std::getline(input, line)) {
-                if (line.empty() || line.front() != char('A' + row / d.trials))
-                    throw ConfigError("宽表 CSV 的人员标记与研究设计不符");
-                ++row;
-            }
-        }
-        return matrix;
-    }
-    const Design d(normalize_config(raw));
-    Matrix matrix(d.operators * d.trials, std::vector<double>(d.parts));
-    std::vector<bool> seen(d.operators * d.trials * d.parts);
-    int count = 0;
-    while (std::getline(input, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-        const auto values = cells(line);
-        const int offset = standard ? 1 : 0;
-        if (int(values.size()) != 4 + offset || values[offset].size() != 1)
-            throw ConfigError("长表 CSV 列数或 Operator 标签无效");
-        const int op = values[offset][0] - 'A' + 1;
-        const int part = positive_integer(values[offset + 1]);
-        const int trial = positive_integer(values[offset + 2]);
-        if (op < 1 || op > d.operators || part > d.parts || trial > d.trials)
-            throw ConfigError("长表 CSV 人员、部件或 Trial 编号超出研究范围");
-        const int index = d.standard(op, part, trial) - 1;
-        if (seen[index])
-            throw ConfigError("长表 CSV 存在重复的人员、部件、Trial 记录");
-        if (standard && positive_integer(values[0]) != index + 1)
-            throw ConfigError("长表 CSV 的 StdOrder 与测量记录不对应");
-        seen[index] = true;
-        ++count;
-        matrix[d.index(op, trial)][part - 1] = parse_number(values[offset + 3]);
-    }
-    if (count != int(seen.size()))
-        throw ConfigError("长表 CSV 测量记录缺失");
-    return matrix;
 }
 } // namespace msa

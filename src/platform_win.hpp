@@ -5,6 +5,7 @@
 // clang-format off: Windows headers require this order.
 #include <windows.h>
 #include <shobjidl.h>
+#include <wrl/client.h>
 // clang-format on
 #define GLFW_INCLUDE_NONE
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -15,6 +16,8 @@
 #include <stdexcept>
 #include <string>
 #include "platform/clipboard_win.hpp"
+#include "platform/save_target.hpp"
+#include "platform/worksheet_ids.h"
 namespace platform {
 inline std::filesystem::path executableDirectory() {
     wchar_t n[32768]{};
@@ -26,61 +29,150 @@ inline HWND owner() {
         return glfwGetWin32Window(w);
     return GetActiveWindow();
 }
-inline std::optional<std::filesystem::path> choose(bool save, bool folder,
-                                                   const wchar_t *initial = L"msa_generator.json") {
-    IFileDialog *d = nullptr;
-    if (FAILED(CoCreateInstance(save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog, nullptr,
-                                CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d))))
-        throw std::runtime_error("无法打开 Windows 文件选择器。");
-    FILEOPENDIALOGOPTIONS o{};
-    d->GetOptions(&o);
-    d->SetOptions(o | FOS_FORCEFILESYSTEM |
-                  (folder ? (FOS_PICKFOLDERS | FOS_PATHMUSTEXIST)
-                   : save ? FOS_OVERWRITEPROMPT
-                          : FOS_FILEMUSTEXIST));
-    d->SetTitle(folder ? L"选择导出目录" : save ? L"另存为 JSON 配置" : L"载入 JSON 配置");
+namespace dialog {
+inline void require(HRESULT result, const char *message) {
+    if (FAILED(result))
+        throw std::runtime_error(message);
+}
+inline std::filesystem::path existingParent(std::filesystem::path folder) {
+    while (!folder.empty()) {
+        std::error_code error;
+        if (std::filesystem::is_directory(folder, error))
+            return folder;
+        const auto parent = folder.parent_path();
+        if (parent == folder)
+            break;
+        folder = parent;
+    }
+    return {};
+}
+inline void startIn(IFileDialog *picker, const std::filesystem::path &directory) {
+    // SetFolder overrides the common dialog's last-used location. Do not create folders when
+    // showing a dialog; missing configured folders can be created later by an actual export.
+    auto folder = existingParent(msa::resolve_output_directory(directory.u8string()));
+    if (folder.empty())
+        folder = existingParent(msa::desktop_directory());
+    if (folder.empty())
+        throw std::runtime_error("无法找到可访问的数据目录，请设置有效的默认目录。");
+    Microsoft::WRL::ComPtr<IShellItem> location;
+    require(
+        SHCreateItemFromParsingName(folder.c_str(), nullptr, IID_PPV_ARGS(location.GetAddressOf())),
+        "无法定位文件选择器的起始目录");
+    require(picker->SetFolder(location.Get()), "无法打开文件选择器的起始目录");
+}
+inline std::optional<std::filesystem::path> show(IFileDialog *picker, HWND window) {
+    const auto shown = picker->Show(window);
+    if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+        return std::nullopt;
+    require(shown, "文件选择未完成");
+    Microsoft::WRL::ComPtr<IShellItem> item;
+    require(picker->GetResult(item.GetAddressOf()), "无法读取所选位置");
+    PWSTR raw = nullptr;
+    require(item->GetDisplayName(SIGDN_FILESYSPATH, &raw), "无法取得所选位置的完整路径");
+    const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> storage(raw, &CoTaskMemFree);
+    return std::filesystem::path(raw);
+}
+inline std::optional<std::filesystem::path> open(const std::filesystem::path &directory,
+                                                 bool folder, const std::string &filename) {
+    Microsoft::WRL::ComPtr<IFileOpenDialog> picker;
+    require(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                             IID_PPV_ARGS(picker.GetAddressOf())),
+            "无法打开 Windows 文件选择器");
+    FILEOPENDIALOGOPTIONS options{};
+    require(picker->GetOptions(&options), "无法读取文件选择选项");
+    options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT;
+    options |= folder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST;
+    require(picker->SetOptions(options), "无法设置文件选择选项");
+    require(picker->SetTitle(folder ? L"选择默认目录" : L"导入数据"), "无法设置文件选择窗口标题");
     if (!folder) {
-        auto initialPath = std::filesystem::path(initial);
-        auto extension = initialPath.extension().wstring();
-        const bool csv =
-            CompareStringOrdinal(extension.c_str(), -1, L".csv", -1, TRUE) == CSTR_EQUAL;
-        if (csv)
-            d->SetTitle(save ? L"保存 CSV" : L"导入 CSV");
-        COMDLG_FILTERSPEC f[]{
-            {csv ? L"测量数据 (*.csv)" : L"配置文件 (*.json)", csv ? L"*.csv" : L"*.json"}};
-        d->SetFileTypes(1, f);
-        d->SetDefaultExtension(csv ? L"csv" : L"json");
-        d->SetFileName(initialPath.filename().c_str());
-        if (initialPath.has_parent_path() && std::filesystem::exists(initialPath.parent_path())) {
-            IShellItem *location = nullptr;
-            if (SUCCEEDED(SHCreateItemFromParsingName(initialPath.parent_path().c_str(), nullptr,
-                                                      IID_PPV_ARGS(&location)))) {
-                d->SetFolder(location);
-                location->Release();
-            }
+        const auto csv = exportFileType(ExportKind::Csv);
+        const auto xlsx = exportFileType(ExportKind::Xlsx);
+        const COMDLG_FILTERSPEC filters[] = {{L"测量数据 (*.csv;*.xlsx)", L"*.csv;*.xlsx"},
+                                              {csv.label, csv.filter}, {xlsx.label, xlsx.filter}};
+        require(picker->SetFileTypes(3, filters), "无法设置测量数据类型筛选");
+        require(picker->SetFileTypeIndex(1), "无法设置默认数据文件筛选");
+        require(picker->SetDefaultExtension(L"csv"), "无法设置测量数据扩展名");
+        if (!filename.empty()) {
+            const auto name = importFilenameSuggestion(directory, filename);
+            require(picker->SetFileName(name.c_str()), "无法设置默认测量数据文件名");
         }
     }
-    HRESULT hr = d->Show(owner());
-    std::optional<std::filesystem::path> p;
-    if (SUCCEEDED(hr)) {
-        IShellItem *i = nullptr;
-        if (SUCCEEDED(d->GetResult(&i))) {
-            PWSTR n = nullptr;
-            if (SUCCEEDED(i->GetDisplayName(SIGDN_FILESYSPATH, &n))) {
-                p = n;
-                CoTaskMemFree(n);
-            }
-            i->Release();
-        }
+    startIn(picker.Get(), directory);
+    return show(picker.Get(), owner());
+}
+} // namespace dialog
+inline std::optional<std::filesystem::path> chooseImportData(const std::filesystem::path &directory,
+                                                             const std::string &filename = {}) {
+    return dialog::open(directory, false, filename);
+}
+inline std::optional<std::filesystem::path>
+chooseDirectory(const std::filesystem::path &directory) {
+    return dialog::open(directory, true, {});
+}
+inline std::optional<SaveTarget> chooseExportPath(const std::filesystem::path &initialPath,
+                                                  ExportKind initialFormat) {
+    using dialog::require;
+    using Microsoft::WRL::ComPtr;
+    const bool report = reportFormat(initialFormat);
+    const bool data = dataFormat(initialFormat);
+    const ExportKind formats[] = {report ? ExportKind::ReportPdf : data ? ExportKind::Csv : initialFormat,
+                                  report ? ExportKind::Html : ExportKind::Xlsx};
+    const UINT count = report || data ? 2 : 1;
+    COMDLG_FILTERSPEC filters[2]{};
+    for (UINT i = 0; i < count; ++i) {
+        const auto type = exportFileType(formats[i]);
+        filters[i] = {type.label, type.filter};
     }
-    d->Release();
-    if (FAILED(hr) && hr != HRESULT_FROM_WIN32(ERROR_CANCELLED))
-        throw std::runtime_error("文件选择未完成，请检查路径后重试。");
-    return p;
+    auto suggested = initialPath;
+    auto selected = initialFormat;
+    for (;;) {
+        ComPtr<IFileSaveDialog> dialog;
+        require(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                 IID_PPV_ARGS(dialog.GetAddressOf())),
+                "无法打开 Windows 另存为对话框");
+        FILEOPENDIALOGOPTIONS options{};
+        require(dialog->GetOptions(&options), "无法读取保存选项");
+        // Confirm the final, normalized path explicitly. A newly created destination then uses
+        // Preserve all the way to the atomic commit, including during asynchronous chart rendering.
+        options = (options & ~FOS_OVERWRITEPROMPT) | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR |
+                  FOS_PATHMUSTEXIST | FOS_STRICTFILETYPES | FOS_DONTADDTORECENT |
+                  FOS_NOTESTFILECREATE;
+        require(dialog->SetOptions(options), "无法设置保存选项");
+        require(dialog->SetTitle(report ? L"方法对比报告另存为" : data ? L"导出数据" : L"图表另存为"),
+                "无法设置保存窗口标题");
+        require(dialog->SetFileTypes(count, filters), "无法设置导出文件类型");
+        require(dialog->SetFileTypeIndex(selected == formats[0] ? 1 : 2),
+                "无法设置默认导出格式");
+        require(dialog->SetDefaultExtension(exportFileType(selected).extension),
+                "无法设置默认扩展名");
+        require(dialog->SetFileName(suggested.filename().c_str()), "无法设置默认文件名");
+        platform::dialog::startIn(dialog.Get(), suggested.parent_path());
+        const auto window = owner();
+        const auto path = platform::dialog::show(dialog.Get(), window);
+        if (!path)
+            return std::nullopt;
+        UINT index = 0;
+        require(dialog->GetFileTypeIndex(&index), "无法读取所选文件类型");
+        if (index < 1 || index > count)
+            throw std::runtime_error("文件选择器返回了未知导出格式");
+        selected = formats[index - 1];
+        suggested = completeExportFilename(*path, selected);
+        if (!std::filesystem::exists(suggested))
+            return SaveTarget{suggested, selected, msa::ExistingFile::Preserve};
+        if (std::filesystem::is_directory(suggested))
+            throw std::runtime_error("导出目标是目录，请指定文件名");
+        const auto question = L"文件已存在，是否替换？\n\n" + suggested.wstring();
+        const auto answer = MessageBoxW(window, question.c_str(), L"确认另存为",
+                                        MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+        if (answer == IDYES)
+            return SaveTarget{suggested, selected, msa::ExistingFile::Replace};
+        if (answer == IDCANCEL)
+            return std::nullopt;
+        if (answer != IDNO)
+            throw std::runtime_error("无法确认替换已有文件");
+    }
 }
-inline void clipboard(const std::wstring &s) {
-    writeClipboard(owner(), s);
-}
+inline void clipboard(const std::wstring &s) { writeClipboard(owner(), s); }
 inline std::wstring wide(const std::string &s) {
     if (s.empty())
         return {};
@@ -92,6 +184,70 @@ inline std::wstring wide(const std::string &s) {
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), int(s.size()), result.data(),
                         count);
     return result;
+}
+inline INT_PTR CALLBACK worksheetDialogProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    switch (message) {
+    case WM_INITDIALOG: {
+        const auto &names = *reinterpret_cast<const std::vector<std::wstring> *>(lparam);
+        const auto list = GetDlgItem(window, MSA_WORKSHEET_LIST);
+        HDC dc = GetDC(list);
+        HGDIOBJ previousFont = dc ? SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(list, WM_GETFONT, 0, 0))) : nullptr;
+        LONG width = 0;
+        bool failed = false;
+        for (const auto &name : names) {
+            if (SendMessageW(list, LB_INSERTSTRING, static_cast<WPARAM>(-1),
+                             reinterpret_cast<LPARAM>(name.c_str())) < 0) {
+                failed = true;
+                break;
+            }
+            SIZE extent{};
+            if (dc && GetTextExtentPoint32W(dc, name.c_str(), static_cast<int>(name.size()), &extent))
+                width = std::max(width, extent.cx);
+        }
+        if (dc) {
+            if (previousFont)
+                SelectObject(dc, previousFont);
+            ReleaseDC(list, dc);
+        }
+        if (failed) {
+            EndDialog(window, -2);
+            return TRUE;
+        }
+        SendMessageW(list, LB_SETHORIZONTALEXTENT, width + 8, 0);
+        SendMessageW(list, LB_SETCURSEL, 0, 0);
+        SetFocus(list);
+        return FALSE;
+    }
+    case WM_COMMAND:
+        if (LOWORD(wparam) == IDOK ||
+            (LOWORD(wparam) == MSA_WORKSHEET_LIST && HIWORD(wparam) == LBN_DBLCLK)) {
+            const auto index = SendDlgItemMessageW(window, MSA_WORKSHEET_LIST, LB_GETCURSEL, 0, 0);
+            if (index != LB_ERR)
+                EndDialog(window, index + 1);
+            return TRUE;
+        }
+        if (LOWORD(wparam) != IDCANCEL)
+            return FALSE;
+        [[fallthrough]];
+    case WM_CLOSE:
+        EndDialog(window, 0);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+inline std::optional<std::size_t> chooseWorksheet(const std::vector<std::string> &names) {
+    std::vector<std::wstring> labels;
+    labels.reserve(names.size());
+    for (const auto &name : names)
+        labels.push_back(wide(name));
+    const auto selection = DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(MSA_WORKSHEET_DIALOG),
+                                            owner(), worksheetDialogProc, reinterpret_cast<LPARAM>(&labels));
+    if (selection == 0)
+        return {};
+    if (selection < 0 || static_cast<std::size_t>(selection) > names.size())
+        throw std::runtime_error("无法显示工作表选择窗口");
+    return static_cast<std::size_t>(selection - 1);
 }
 inline std::filesystem::path compatibilityConfig() {
     wchar_t p[32768]{};

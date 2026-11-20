@@ -1,16 +1,16 @@
 # 文档导航
 
-MSA 数据生成器 v1.0.1 提供本地数据生成、统计分析、图表和 CSV 导出。下载、构建及打包入口见[项目 README](../README.md)。
+MSA 数据生成器 v1.0.2 提供本地数据生成、统计分析、图表和测量数据导出（CSV、XLSX）。下载、构建及打包入口见[项目 README](../README.md)。
 
 ## 使用与配置
 
 | 文档 | 内容 |
 | --- | --- |
 | [使用说明](使用说明.md) | GUI 工作流程、部件取样与分布、指标约束、文件名变量和 CLI 参数 |
-| [结果可视化](结果可视化.md) | 七类图表、CSV 导入、编辑及图片或 PDF 导出 |
-| [配置参考](配置参考.md) | `schema_version=1` 的字段、类型、范围、默认值和依赖关系 |
+| [结果可视化](结果可视化.md) | 七类图表、数据导入（CSV、XLSX）、编辑及图片或 PDF 导出 |
+| [配置参考](配置参考.md) | `schema_version=2` 的字段、类型、范围、默认值和依赖关系 |
 | [配置示例](../examples/README.md) | 默认配置、可生成示例、ANOVA 和随机运行顺序 |
-| [CSV 排版参考](https://github.com/print-yuhuan/Msa-Data-Generator/tree/v1.0.1/tests/fixtures/export_examples) | 源码仓库中的六份参考文件、宽表与长表、编码和校验值 |
+| [CSV 排版参考](https://github.com/print-yuhuan/Msa-Data-Generator/tree/v1.0.2/tests/fixtures/export_examples) | 源码仓库中的六份参考文件、宽表与长表、编码和校验值 |
 | [Minitab 导入与对标](Minitab导入与对标.md) | 导入列映射、Trial/StdOrder、运行顺序和单侧 P/T 对标 |
 
 ## 方法与验证

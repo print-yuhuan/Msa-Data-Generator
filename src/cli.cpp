@@ -1,11 +1,12 @@
 #include "msa/core.hpp"
+#include "msa/comparison_report.hpp"
 #include "msa/license_text.hpp"
 #include "msa/project.hpp"
 #include <algorithm>
-#include <charconv>
 #include <csignal>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #ifdef _WIN32
 #define NOMINMAX
@@ -61,6 +62,8 @@ const Option options[]{
      "生成优先级：center 中心优先（默认）/ indicators 指标优先"},
     {"--require-normality", "/generation/require_normality", ValueType::Boolean,
      "要求近似正态（筛选最终测量值）：true / false（默认）"},
+    {"--residual-model", "/generation/residual_model", ValueType::Text,
+     "模拟误差模式：standard 标准（默认）/ varied 变化残差"},
     {"--part-sampling", "/generation/part_sampling", ValueType::Text,
      "部件取样：default 默认 / even 等距覆盖 / stratified 分层随机 / "
      "center_dense 中心加密 / end_dense 两端加密"},
@@ -89,12 +92,13 @@ const Option options[]{
     {"--ndc", "/targets/ndc", ValueType::Target,
      "可区分类别数 ndc 约束：SPEC，默认 none；数值和允许误差须为整数"},
     {"--output-directory", "/output/directory", ValueType::Text,
-     "输出目录；空字符串或相对路径以默认配置目录为基准"},
-    {"--filename", "/output/filename", ValueType::Text, "CSV 文件名模板，支持 [变量]"},
+     "数据输出目录；留空使用系统桌面，相对目录从桌面计算"},
+    {"--filename", "/output/filename", ValueType::Text, "数据文件名模板，不含扩展名，支持 [变量]"},
+    {"--file-type", "/output/file_type", ValueType::Text, "数据文件类型：csv（默认）/ xlsx"},
     {"--existing-file", "/output/existing_file", ValueType::Text,
      "同名文件处理：number 追加序号（默认）/ overwrite 覆盖"},
     {"--csv-format", "/output/format", ValueType::Text,
-     "CSV 格式：default（默认）/ minitab / spss / jmp19 / origin / matlab"},
+     "数据布局：default（默认）/ minitab / spss / jmp19 / origin / matlab"},
     {"--run-order", "/output/run_order/mode", ValueType::Text,
      "standard 标准顺序（默认）/ all 全部随机化 / within_operator 操作员内随机化"},
     {"--randomize-operators", "/output/run_order/randomize_operators", ValueType::Boolean,
@@ -116,25 +120,29 @@ void help() {
               << R"(
 用法：
   生成并导出：msa_cli.exe [--config PATH | --no-config] [业务参数]
-                         [--output PATH] [--report PATH] [--overwrite]
-  分析已有数据：msa_cli.exe --input CSV [--config PATH | --no-config]
-                           [业务参数] [--report PATH] [--overwrite]
+                         [--output PATH] [--report PATH] [--comparison-report PATH] [--overwrite]
+  分析已有数据：msa_cli.exe --input PATH [--sheet NAME] [--config PATH | --no-config]
+                           [业务参数] [--report PATH] [--comparison-report PATH] [--overwrite]
+  重放生成报告：msa_cli.exe --replay-report PATH --output PATH [--overwrite]
   创建默认配置：msa_cli.exe --init [--config PATH]
 
 基本参数：
   --config PATH   读取指定的 JSON 配置文件；文件必须存在（--init 除外）
   --no-config     不读取配置文件，仅使用内置默认值与命令行参数
-  --output PATH   CSV 文件路径（含文件名）；相对当前工作目录，不展开文件名变量
+  --output PATH   数据文件路径（.csv 或 .xlsx）；相对当前工作目录，不展开文件名变量
   --report PATH   保存包含最终配置、矩阵和统计结果的 JSON 报告
-  --input CSV     仅分析已有宽表或长表，不生成、导出或改写 CSV；不能与 --output 合用
-  --overwrite     允许覆盖 CSV 和报告；优先于 --existing-file，与参数排列顺序无关
+  --comparison-report PATH  保存同一矩阵的 Xbar-R / ANOVA 对照报告，支持 .html 和 .pdf
+  --replay-report PATH  从新版生成报告还原原始数据文件，核对 SHA-256 后写入 --output
+  --input PATH    分析 CSV 或 XLSX 宽表或长表，不能与 --output 合用
+  --sheet NAME    按名称选择 XLSX 工作表；省略时按工作簿顺序读取第一张数据工作表
+  --overwrite     允许覆盖数据文件和报告；优先于 --existing-file，与参数排列顺序无关
   --init          创建缺失的默认配置，保留已有文件；仅可与 --config 合用
   --help, -h      显示帮助，不读取配置文件
   --license       显示内置的项目许可证全文，不读取配置文件
 
 快速开始（在 PowerShell 中可将 msa_cli.exe 写为 .\msa_cli.exe）：
-  msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 --output data.csv
-  msa_cli.exe --no-config --input data.csv --method crossed_anova --report analysis.json
+  msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 --output data.xlsx
+  msa_cli.exe --no-config --input data.xlsx --method crossed_anova --report analysis.json
 
 第一条命令生成默认 3 人 × 3 次 × 10 件研究，第二条分析同一文件。
 默认配置没有规格限和参考尺度；只执行 --init 后还须补齐这些生成条件。
@@ -190,35 +198,38 @@ void help() {
 百分比目标允许误差的单位为百分点；ndc 的目标、区间和允许误差均为整数。
 --require-normality true 对按小数位数舍入后的整批测量值应用 Anderson–Darling 正态性筛选。
 采用独立正态样本的 5% 参考阈值，筛选用于控制模拟样本的分布形状。
---input 仅分析，不要求满足生成条件；操作员人数、重复次数与部件数量仍须与 CSV 一致。
+--input 仅分析，不要求满足生成条件；操作员人数、重复次数与部件数量仍须与输入数据一致。
 
-CSV 与运行顺序：
-  default：带列号和操作员标记的宽表，左上角空白，UTF-8 BOM；按操作员、重复轮次排列。
-  minitab/spss/jmp19/origin/matlab：统一四列 Operator,Part,Trial,Measurement，UTF-8 无 BOM。
-  所有格式使用英文逗号、CRLF、配置的小数位；默认宽表忽略运行顺序选项。
+数据文件与运行顺序：
+  default：带列号和操作员标记的宽表，左上角空白；按操作员、重复轮次排列。
+  minitab/spss/jmp19/origin/matlab：统一四列 Operator,Part,Trial,Measurement。
+  CSV 使用英文逗号、CRLF；宽表含 UTF-8 BOM，长表使用 UTF-8 无 BOM。
+  XLSX 使用数值单元格和指定的小数位。两种文件均支持相同布局，宽表忽略运行顺序选项。
   standard：按 Trial -> Part -> Operator 排列。
   all：打乱全部完整记录，允许跨操作员、部件、Trial 混排。
   within_operator：逐 Trial、逐操作员，每个 Trial+Operator 内独立打乱部件。
   --randomize-operators true：仅 within_operator 生效；每项研究确定一次操作员顺序，各 Trial 沿用。
-  --store-standard-order true：长表首列增加 StdOrder；CSV 行序为实际运行顺序，Trial 永不重编号。
+  --store-standard-order true：长表首列增加 StdOrder；行序为实际运行顺序，Trial 永不重编号。
   StdOrder = ((Trial-1)*部件数量+Part-1)*操作员人数+操作员编号，A=1、B=2、C=3。
   StdOrder 为完整的 1～总记录数排列；Trial 是原始重复测量编号，不是随机化后的行号。
   --seed 控制测量数据生成，--run-seed 独立控制排序；相同数据、运行配置和排序种子可复现排列。
-  运行顺序种子为 null 时，在当前研究内复用自动选择的种子；跨进程复现应固定两个种子。
+  随机化时最终 JSON 报告的 export.effective_run_seed 保存实际排序种子；可跨进程重放。
   CLI 生成运行会重新生成研究；--input 只复算输入数据。GUI 仅修改导出设置时无需重新生成。
 
 路径与保存：
-省略 --output 时，使用最终配置的输出目录、文件名变量及同名策略。
-显式 --output 不使用上述路径、命名和同名策略；替换需 --overwrite。
+省略 --output 时，按 --file-type 或配置添加 .csv / .xlsx 扩展名，使用配置的目录、文件名及同名策略。
+显式 --output 按扩展名选择文件类型，以当前工作目录为基准；替换需 --overwrite。
 --overwrite 始终优先于 --existing-file，不受参数先后顺序影响；报告覆盖也需要 --overwrite。
---output-directory 的空值或相对路径以用户配置目录为基准；--no-config 不改变此规则。
---config、--input、--output、--report 的相对路径均以当前工作目录为基准。
-输入 CSV 上限为 4 MiB，JSON 配置上限为 64 MiB。CSV 和报告须使用独立于本次输入配置的文件路径。
+--output-directory 留空使用系统桌面，相对目录从桌面计算。--no-config 同样使用此规则。
+--config、--input、--output、--report、--comparison-report 指定的相对文件路径从当前工作目录计算。
+输入 CSV 上限为 4 MiB，XLSX 上限为 16 MiB，JSON 配置上限为 64 MiB。数据文件和报告须使用独立于本次输入配置的文件路径。
 --report 包含完整最终配置、实际生成种子、矩阵、指标、尝试次数、耗时和版本。
+生成报告另含数据导出清单 export（含 SHA-256）。重放从保存的矩阵还原，独立于搜索耗时。
+长表支持带双引号的字段、按名称重排列和附加列，必需列为 Operator、Part、Trial、Measurement。
 --input 报告标记 analysis_only=true，不具有数据生成种子；不要求输入数据满足指标约束。
-CSV 和报告不可同路径，输入 CSV 也不能与报告同路径；报告失败时可能已有成功 CSV。
+输入、输出和报告须指向独立文件；报告保存失败时，已成功导出的数据会保留。
 
-文件名变量（仅配置 filename / --filename 展开，显式 --output 按字面使用）：
+名称变量（命令行通过 output.filename 或 --filename 使用。显式 --output 按字面使用）：
   方括号表示变量且区分大小写；括号外原样保留。[[ 和 ]] 输出字面量方括号。
   月份 [MM]，时/分/秒 [H]/[M]/[S]；[MS] 是三位毫秒，[TIMESTAMP] 是 Unix 秒数。
 )";
@@ -284,7 +295,7 @@ CSV 和报告不可同路径，输入 CSV 也不能与报告同路径；报告�
   按配置生成，并导出包含标准运行序号的长表：
   msa_cli.exe --config "examples\示例配置.json" --operators 2 --csv-format minitab --run-order within_operator --randomize-operators true --run-seed 321 --store-standard-order true --report result.json
   不读取配置，固定两个随机种子并自动处理同名文件：
-  msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 --csv-format spss --run-order all --run-seed 321 --filename "MSA_[DATETIME]_[SEED].csv" --existing-file number
+  msa_cli.exe --no-config --lsl 9 --usl 11 --seed 123 --csv-format spss --run-order all --run-seed 321 --file-type xlsx --filename "MSA_[DATETIME]_[SEED]" --existing-file number
   对同一份 3 人 × 3 次 × 10 件数据进行 ANOVA 复算，输出 95% 双侧区间：
   msa_cli.exe --no-config --input data.csv --method crossed_anova --confidence true --confidence-level 95 --confidence-bound both --confidence-method mls --report anova.json
 
@@ -294,14 +305,7 @@ CSV 和报告不可同路径，输入 CSV 也不能与报告同路径；报告�
 msa::Json number_value(const std::string &text, bool integer) {
     if (!integer)
         return msa::parse_number(text);
-    std::int64_t value;
-    const auto *begin = text.data();
-    if (!text.empty() && text.front() == '+')
-        ++begin;
-    const auto parsed = std::from_chars(begin, text.data() + text.size(), value);
-    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
-        throw std::invalid_argument("必须是 int64 范围内的整数");
-    return value;
+    return msa::parse_integer(text);
 }
 msa::Json target_value(const std::string &text, bool ndc) {
     if (text == "none")
@@ -330,8 +334,11 @@ msa::Json target_value(const std::string &text, bool ndc) {
             "约束须为 none、target:值[:误差]、between:下限:上限、at_most:值或 at_least:值");
     return target;
 }
-void validate_option_field(const msa::Json::json_pointer &path, const msa::Json &value) {
+void validate_option_field(const msa::Json::json_pointer &path, const msa::Json &value,
+                           const msa::Json &config = nullptr) {
     auto single = msa::Json::object();
+    if (config.contains("schema_version"))
+        single["schema_version"] = config.at("schema_version");
     single[path] = value;
     msa::normalize_config(single);
 }
@@ -372,20 +379,36 @@ msa::Json option_value(const Option &option, const std::string &text) {
 }
 enum class OutputUse { Configured, Explicit, Analysis };
 bool unused_output_field(OutputUse use, std::string_view path) {
+    if (path.rfind("/input/", 0) == 0 || path.rfind("/output/charts/", 0) == 0 ||
+        path.rfind("/output/silent/", 0) == 0 || path.rfind("/output/comparison_report/", 0) == 0)
+        return true;
     if (use == OutputUse::Analysis)
         return path.rfind("/output/", 0) == 0;
     return use == OutputUse::Explicit &&
            (path == "/output/directory" || path == "/output/filename" ||
-            path == "/output/existing_file");
+            path == "/output/existing_file" || path == "/output/file_type");
 }
 void default_invalid_unused_output_fields(msa::Json &config, OutputUse use) {
-    if (use == OutputUse::Configured)
-        return;
-    constexpr const char *fields[]{
-        "/output/directory",          "/output/filename",    "/output/existing_file",
-        "/output/format",             "/output/encoding",    "/output/run_order/mode",
-        "/output/run_order/seed",     "/output/run_order/randomize_operators",
-        "/output/run_order/store_standard_order"};
+    constexpr const char *fields[]{"/input/directory",
+                                   "/input/filename",
+                                   "/output/directory",
+                                   "/output/filename",
+                                   "/output/file_type",
+                                   "/output/existing_file",
+                                   "/output/format",
+                                   "/output/encoding",
+                                   "/output/run_order/mode",
+                                   "/output/run_order/seed",
+                                   "/output/run_order/randomize_operators",
+                                   "/output/run_order/store_standard_order",
+                                   "/output/silent/csv",
+                                   "/output/silent/charts",
+                                   "/output/silent/comparison_report",
+                                   "/output/charts/directory",
+                                   "/output/charts/filename",
+                                   "/output/comparison_report/format",
+                                   "/output/comparison_report/directory",
+                                   "/output/comparison_report/filename"};
     const auto defaults = msa::default_config();
     for (const auto *field : fields) {
         if (!unused_output_field(use, field))
@@ -395,14 +418,15 @@ void default_invalid_unused_output_fields(msa::Json &config, OutputUse use) {
             continue;
         // Retain valid report metadata. Full normalization still checks object shape and keys.
         try {
-            validate_option_field(path, config.at(path));
+            validate_option_field(path, config.at(path), config);
         } catch (const msa::ConfigError &) {
             config.at(path) = defaults.at(path);
         }
     }
 }
 int run(const std::vector<std::string> &args) {
-    std::filesystem::path config, output, report, input;
+    std::filesystem::path config, output, report, input, comparison, replay;
+    std::optional<std::string> sheet;
     bool init = false, overwrite = false, noConfig = false;
     OutputUse outputUse = OutputUse::Configured;
     std::vector<std::pair<const Option *, std::string>> pending;
@@ -439,7 +463,12 @@ int run(const std::vector<std::string> &args) {
                 overwrite = true;
             else if (a == "--no-config")
                 noConfig = true;
-            else if (a == "--config" || a == "--output" || a == "--report" || a == "--input") {
+            else if (a == "--sheet") {
+                sheet = value();
+                if (sheet->empty())
+                    throw std::invalid_argument("--sheet 需要工作表名称");
+            } else if (a == "--config" || a == "--output" || a == "--report" || a == "--input" ||
+                     a == "--comparison-report" || a == "--replay-report") {
                 auto text = value();
                 if (text.empty())
                     throw std::invalid_argument("参数路径不能为空：" + a);
@@ -450,6 +479,10 @@ int run(const std::vector<std::string> &args) {
                     input = p;
                 else if (a == "--output")
                     output = p;
+                else if (a == "--comparison-report")
+                    comparison = p;
+                else if (a == "--replay-report")
+                    replay = p;
                 else
                     report = p;
             } else {
@@ -462,8 +495,11 @@ int run(const std::vector<std::string> &args) {
                 pending.emplace_back(option, value());
             }
         }
-        outputUse = !input.empty() ? OutputUse::Analysis
-                                   : !output.empty() ? OutputUse::Explicit : OutputUse::Configured;
+        if (sheet && (input.empty() || msa::data_file_type(input) != "xlsx"))
+            throw std::invalid_argument("--sheet 需要通过 --input 指定 XLSX 工作簿");
+        outputUse = !input.empty()    ? OutputUse::Analysis
+                    : !output.empty() ? OutputUse::Explicit
+                                      : OutputUse::Configured;
         for (const auto &[option, text] : pending) {
             try {
                 overrides.emplace_back(msa::Json::json_pointer(option->path),
@@ -475,29 +511,52 @@ int run(const std::vector<std::string> &args) {
         }
         if (noConfig && !config.empty())
             throw std::invalid_argument("--no-config 与 --config 不能同时使用");
-        if (init && (noConfig || !overrides.empty() || !output.empty() || !report.empty() ||
-                     !input.empty() || overwrite))
+        if (init && (noConfig || !pending.empty() || !output.empty() || !report.empty() ||
+                     !input.empty() || !comparison.empty() || !replay.empty() || overwrite))
             throw std::invalid_argument("--init 仅可与 --config 一起使用");
+        if (!replay.empty() &&
+            (output.empty() || !pending.empty() || !config.empty() || !input.empty() ||
+             !report.empty() || !comparison.empty() || noConfig))
+            throw std::invalid_argument("--replay-report 须与 --output 合用，可选 --overwrite");
         if (!init) {
             if (!input.empty() && !output.empty())
-                throw std::invalid_argument("--input仅分析已有CSV，不能与--output合用");
-            if (!input.empty() && !report.empty() && msa::same_file_path(input, report))
-                throw std::invalid_argument("输入CSV与报告路径不能相同");
+                throw std::invalid_argument("--input 仅分析已有数据，不能与 --output 合用");
             if (input.empty() && output.empty() && config.empty() && overrides.empty() && !noConfig)
                 throw std::invalid_argument(
                     "请用 --config 指定配置模板导出，或用 --output 指定输出路径");
-            for (auto p : {output, report})
+            const std::array destinations{output, report, comparison};
+            for (const auto &p : destinations)
                 if (!p.empty() && std::filesystem::exists(p) && !overwrite)
                     throw std::invalid_argument("文件已存在；另选路径或添加 --overwrite：" +
                                                 p.u8string());
-            if (!output.empty() && !report.empty() && msa::same_file_path(output, report))
-                throw std::invalid_argument("CSV 与报告路径不能相同");
+            for (std::size_t i = 0; i < destinations.size(); ++i) {
+                const auto &p = destinations[i];
+                if (p.empty())
+                    continue;
+                for (const auto &source : {input, replay})
+                    if (!source.empty() && msa::same_file_path(p, source))
+                        throw std::invalid_argument("输出路径不能覆盖输入文件：" + p.u8string());
+                for (std::size_t j = 0; j < i; ++j)
+                    if (!destinations[j].empty() && msa::same_file_path(p, destinations[j]))
+                        throw std::invalid_argument("数据与报告须使用各自独立的文件路径");
+            }
         }
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';
         return 2;
     }
+    std::vector<std::filesystem::path> committed;
     try {
+        const auto policy = overwrite ? msa::ExistingFile::Replace : msa::ExistingFile::Preserve;
+        if (!replay.empty()) {
+            const auto manifest = msa::Json::parse(msa::read_text(replay, msa::config_read_limit));
+            msa::replay_data(manifest, output, policy);
+            std::cout << msa::Json{{"output", output.u8string()},
+                                   {"sha256", manifest.at("export").at("sha256")}}
+                             .dump(2)
+                      << '\n';
+            return 0;
+        }
         if (init) {
             if (config.empty())
                 config = msa::config_path();
@@ -511,7 +570,7 @@ int run(const std::vector<std::string> &args) {
             const auto candidate = config.empty() ? msa::config_path() : config;
             if (!config.empty() || std::filesystem::exists(candidate)) {
                 source_config = candidate;
-                for (const auto &destination : {output, report}) {
+                for (const auto &destination : {output, report, comparison}) {
                     if (!destination.empty() && msa::same_file_path(destination, source_config)) {
                         std::cerr << "输出路径不能覆盖本次使用的配置文件\n";
                         return 2;
@@ -526,22 +585,41 @@ int run(const std::vector<std::string> &args) {
         for (const auto &[path, value] : overrides)
             c[path] = value;
         default_invalid_unused_output_fields(c, outputUse);
+        if (outputUse == OutputUse::Explicit)
+            c["output"]["file_type"] = msa::data_file_type(output);
         if (overwrite)
             c["output"]["existing_file"] = "overwrite";
         c = msa::normalize_config(c);
+        for (const auto &destination : {report, comparison}) {
+            if (destination.empty())
+                continue;
+            if (std::filesystem::is_directory(destination))
+                throw std::runtime_error("报告目标是目录：" + destination.u8string());
+            auto parent = std::filesystem::absolute(destination).parent_path();
+            while (!parent.empty() && !std::filesystem::exists(parent) &&
+                   parent != parent.root_path())
+                parent = parent.parent_path();
+            if (!parent.empty() && !std::filesystem::is_directory(parent))
+                throw std::runtime_error("报告父路径不是目录：" + parent.u8string());
+        }
         if (!input.empty()) {
             msa::Result result;
             result.config = c;
-            result.matrix = msa::parse_export_csv(msa::read_text(input, msa::csv_read_limit), c);
+            result.matrix = sheet ? msa::read_data(input, c, *sheet) : msa::read_data(input, c);
             result.metrics = msa::calculate(result.matrix, c);
             auto analysis = result.as_json();
             analysis["analysis_only"] = true;
             analysis["seed"] = nullptr;
             analysis["checks"] = msa::checks(result.metrics, c);
-            if (!report.empty())
-                msa::atomic_text(report, analysis.dump(2) + '\n',
-                                 overwrite ? msa::ExistingFile::Replace
-                                           : msa::ExistingFile::Preserve);
+            if (!report.empty()) {
+                msa::atomic_text(report, analysis.dump(2) + '\n', policy);
+                committed.push_back(report);
+            }
+            if (!comparison.empty())
+                msa::write_comparison_report(comparison, result, msa::StudySource::ImportedData,
+                                             input.filename().u8string() +
+                                                 (sheet ? " / " + *sheet : ""),
+                                             policy);
             std::cout << msa::Json{{"input", input.u8string()},
                                    {"metrics", result.metrics},
                                    {"checks", analysis["checks"]}}
@@ -551,17 +629,26 @@ int run(const std::vector<std::string> &args) {
         }
         std::signal(SIGINT, on_signal);
         auto result = msa::generate(c, &cancelled);
-        const auto policy = overwrite ? msa::ExistingFile::Replace : msa::ExistingFile::Preserve;
+        msa::Json receipt;
+        auto *receipt_output = report.empty() ? nullptr : &receipt;
         if (output.empty()) {
             auto settings = c["output"];
             if (overwrite)
                 settings["existing_file"] = "overwrite";
-            output = msa::export_configured_csv(result, settings, std::chrono::system_clock::now(),
-                                                report, source_config);
+            output = msa::export_configured_data(result, settings, std::chrono::system_clock::now(),
+                                                report, source_config, comparison, receipt_output);
         } else
-            msa::export_csv(result, output, policy);
-        if (!report.empty())
-            msa::atomic_text(report, result.as_json().dump(2) + '\n', policy);
+            msa::export_data(result, output, c.at("output"), policy, receipt_output);
+        committed.push_back(output);
+        if (!report.empty()) {
+            auto generated = result.as_json();
+            generated["export"] = std::move(receipt);
+            msa::atomic_text(report, generated.dump(2) + '\n', policy);
+            committed.push_back(report);
+        }
+        if (!comparison.empty())
+            msa::write_comparison_report(comparison, result, msa::StudySource::Generated,
+                                         output.filename().u8string(), policy);
         std::cout << msa::Json{{"output", output.u8string()},
                                {"seed", result.seed},
                                {"metrics", result.metrics}}
@@ -570,6 +657,8 @@ int run(const std::vector<std::string> &args) {
         return 0;
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';
+        for (const auto &path : committed)
+            std::cerr << "已保存：" << path.u8string() << '\n';
         return 1;
     }
 }

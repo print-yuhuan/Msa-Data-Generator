@@ -123,6 +123,10 @@ $ignoredOutputConfig = Join-Path $runRoot 'ignored-output.json'
 $ignoredOutputData = Get-Content -LiteralPath $namingConfig -Raw -Encoding UTF8 | ConvertFrom-Json
 $ignoredOutputData.output.directory = 42
 $ignoredOutputData.output.existing_file = 'invalid'
+$ignoredOutputData.output | Add-Member -NotePropertyName silent -NotePropertyValue ([pscustomobject]@{charts='invalid'}) -Force
+$ignoredOutputData.output | Add-Member -NotePropertyName comparison_report -NotePropertyValue ([pscustomobject]@{format='invalid'; directory=42; filename='a/b'}) -Force
+$ignoredOutputData.output | Add-Member -NotePropertyName charts -NotePropertyValue ([pscustomobject]@{directory=42; filename='a/b'}) -Force
+$ignoredOutputData | Add-Member -NotePropertyName input -NotePropertyValue ([pscustomobject]@{directory=42; filename='a/b.csv'}) -Force
 $ignoredOutputData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ignoredOutputConfig -Encoding UTF8
 $ignoredOutputHash = (Get-FileHash -LiteralPath $ignoredOutputConfig).Hash
 $explicitOverride = Join-Path $runRoot 'explicit-with-unused-settings.csv'
@@ -195,7 +199,7 @@ Check ($effective.analysis.study_multiplier -eq 5.15 -and $null -eq $effective.s
 Check ($effective.generation.center -eq 12.5 -and $effective.generation.priority -eq 'indicators' -and $effective.generation.scale_mode -eq 'reference_tv_sd' -and $effective.generation.reference_tv_sd -eq 0.2 -and $effective.generation.decimal_places -eq 6 -and $effective.generation.seed -eq -123 -and $effective.generation.max_attempts -eq 50 -and $effective.generation.timeout_seconds -eq 5) 'all generation and search overrides'
 Check ($effective.target_defaults.percentage_tolerance_pp -eq 1 -and $effective.target_defaults.ndc_tolerance -eq 2) 'default target tolerance overrides'
 Check ($effective.targets.EV_pct.mode -eq 'target' -and $effective.targets.EV_pct.value -eq 10 -and $effective.targets.EV_pct.tolerance_pp -eq 1 -and $effective.targets.AV_pct.mode -eq 'between' -and $effective.targets.AV_pct.min -eq 0 -and $effective.targets.AV_pct.max -eq 20 -and $effective.targets.GRR_pct.mode -eq 'at_most' -and $effective.targets.GRR_pct.value -eq 30 -and $null -eq $effective.targets.PT_pct -and $effective.targets.ndc.mode -eq 'at_least' -and $effective.targets.ndc.value -eq 1) 'all five metric overrides replace complete target objects'
-Check ($effective.output.directory -eq $overrideDirectory -and $effective.output.filename -eq '命令行_[OPERATORS]_[SEED].csv' -and $effective.output.existing_file -eq 'number' -and $effective.output.format -eq 'minitab' -and $effective.output.run_order.mode -eq 'within_operator' -and $effective.output.run_order.randomize_operators -and $effective.output.run_order.seed -eq 321 -and $effective.output.run_order.store_standard_order) 'all output and run-order overrides'
+Check ($effective.output.directory -eq $overrideDirectory -and $effective.output.filename -eq '命令行_[OPERATORS]_[SEED]' -and $effective.output.existing_file -eq 'number' -and $effective.output.format -eq 'minitab' -and $effective.output.run_order.mode -eq 'within_operator' -and $effective.output.run_order.randomize_operators -and $effective.output.run_order.seed -eq 321 -and $effective.output.run_order.store_standard_order) 'all output and run-order overrides'
 $overrideCsv=($overridden.stdout | ConvertFrom-Json).output
 Check ([IO.Path]::GetFileName($overrideCsv) -eq '命令行_2_-123.csv' -and @(Import-Csv -LiteralPath $overrideCsv).Count -eq 20) 'overridden filename variables and study dimensions reach actual CSV'
 $again=Run-Cli ($business+@('--config',$overrideConfig,'--csv-format','jmp19')) $true
@@ -273,14 +277,14 @@ foreach($arguments in $invalidArguments){
     Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0 -and -not (Test-Path -LiteralPath $invalidPath)) "invalid CLI options rejected before writing: $($arguments -join ' ')"
     $invalidIndex++
 }
-foreach ($arguments in @(@('--existing-file','invalid'), @('--filename','[UNKNOWN].csv'))) {
+foreach ($arguments in @(@('--existing-file','invalid'), @('--filename','[UNKNOWN].csv'), @('--file-type','txt'))) {
     $badArgs = Run-Cli (@('--no-config')+$arguments) $true
     Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0) "configured CSV export validates active CLI option: $($arguments[0])"
 }
 $helpFlags=@('--operators','--replicates','--trials','--parts','--study-multiplier','--lsl','--usl',
     '--compliance','--center','--priority','--scale-mode','--reference-tv-sd','--decimal-places',
     '--seed','--max-attempts','--timeout-seconds','--percentage-tolerance-pp','--ndc-tolerance',
-    '--ev','--av','--grr','--pt','--ndc','--output-directory','--filename','--existing-file',
+    '--ev','--av','--grr','--pt','--ndc','--output-directory','--filename','--file-type','--existing-file',
     '--csv-format','--run-order','--randomize-operators','--run-seed','--store-standard-order','--no-config')
 Check (@($helpFlags | Where-Object { -not $help.stdout.Contains($_) }).Count -eq 0 -and $help.stdout.Contains('target:VALUE[:ERROR]')) 'help lists every GUI business option, aliases and constraint syntax'
 
@@ -389,5 +393,68 @@ foreach($badOption in @(@('--historical-sd','0'),@('--analysis-tolerance','-1'),
     Check ($invalid.exit-eq2) "invalid extended option $($badOption -join ' ') rejected"
 }
 Check ((Get-FileHash -LiteralPath $config).Hash-eq$before) 'ANOVA and input analysis do not modify user configuration'
+$autoCsv = Join-Path $runRoot 'auto.csv'
+$autoReport = Join-Path $runRoot 'auto.json'
+$replayCsv = Join-Path $runRoot 'replayed.csv'
+$auto = Run-Cli @('--no-config','--lsl','9','--usl','11','--seed','+123','--csv-format','minitab','--run-order','all','--output',$autoCsv,'--report',$autoReport)
+$manifest = Get-Content -LiteralPath $autoReport -Raw -Encoding UTF8 | ConvertFrom-Json
+$hash = (Get-FileHash -LiteralPath $autoCsv).Hash
+Check ($auto.exit -eq 0 -and $manifest.export.sha256 -eq $hash -and $manifest.export.effective_run_seed -gt 0 -and $null -eq $manifest.config.output.run_order.seed) 'auto run seed and exact original CSV hash reported'
+$replayed = Run-Cli @('--replay-report',$autoReport,'--output',$replayCsv) $true
+Check ($replayed.exit -eq 0 -and (Get-FileHash -LiteralPath $replayCsv).Hash -eq $hash) 'separate process replays auto-seeded bytes without profile'
+
+$xlsxDir = Join-Path $runRoot '测量工作簿'
+$xlsxReport = Join-Path $runRoot 'xlsx-generated.json'
+$xlsxArgs = @('--no-config','--lsl','9','--usl','11','--seed','123','--csv-format','minitab',
+    '--run-order','all','--store-standard-order','true','--file-type','xlsx',
+    '--output-directory',$xlsxDir,'--filename','来料_[SEED].csv','--report',$xlsxReport)
+$bookResult = Run-Cli $xlsxArgs $true
+Check ($bookResult.exit -eq 0) 'configured XLSX generation with a legacy CSV filename template'
+$book = ($bookResult.stdout | ConvertFrom-Json).output
+$bookManifest = Get-Content -LiteralPath $xlsxReport -Raw -Encoding UTF8 | ConvertFrom-Json
+Check ([IO.Path]::GetFileName($book) -ceq '来料_123.xlsx' -and $bookManifest.export.file_type -ceq 'xlsx') 'selected file type supplies exactly one extension'
+$archive = [IO.Compression.ZipFile]::OpenRead($book)
+try {
+    Check ($null -ne $archive.GetEntry('[Content_Types].xml') -and $null -ne $archive.GetEntry('xl/workbook.xml')) 'XLSX contains Open XML workbook parts'
+} finally { $archive.Dispose() }
+$bookAnalysis = Join-Path $runRoot 'xlsx-analysis.json'
+$readBook = Run-Cli @('--no-config','--lsl','9','--usl','11','--input',$book,'--report',$bookAnalysis) $true
+Check ($readBook.exit -eq 0) 'import of randomized XLSX long table succeeds'
+$bookReadBack = Get-Content -LiteralPath $bookAnalysis -Raw -Encoding UTF8 | ConvertFrom-Json
+Check (($bookManifest.matrix | ConvertTo-Json -Compress) -ceq ($bookReadBack.matrix | ConvertTo-Json -Compress)) 'XLSX round trip preserves all measurements and identities'
+$multiBook = Join-Path $PSScriptRoot 'fixtures/xlsx-multiple-sheets.xlsx'
+$sheetArgs = @('--no-config','--input',$multiBook,'--operators','2','--replicates','2','--parts','5')
+$firstSheet = Run-Cli $sheetArgs $true
+$otherSheet = Run-Cli ($sheetArgs + @('--sheet','复测 数据')) $true
+Check ($firstSheet.exit -eq 0 -and $otherSheet.exit -eq 0) 'CLI reads first worksheet or an explicitly named hidden worksheet'
+$firstMean = ($firstSheet.stdout | ConvertFrom-Json).metrics.mean
+$otherMean = ($otherSheet.stdout | ConvertFrom-Json).metrics.mean
+Check ([Math]::Abs($otherMean - $firstMean - 100) -lt 1e-9) 'choosing a different worksheet changes the analyzed measurements'
+$missingSheet = Run-Cli ($sheetArgs + @('--sheet','无此表')) $true
+Check ($missingSheet.exit -eq 1 -and $missingSheet.stderr.Contains('无此表')) 'missing worksheet name is reported'
+$oldNamingConfig = Join-Path $runRoot '旧版名称.json'
+$oldAnalysis = Join-Path $runRoot '旧版分析.json'
+'{"schema_version":1,"input":{"filename":"来料[复核]"},"output":{"charts":{"filename":"图表[DATE]"}}}' |
+    Set-Content -LiteralPath $oldNamingConfig -Encoding UTF8
+$readLegacy = Run-Cli @('--config',$oldNamingConfig,'--input',$book,'--report',$oldAnalysis) $true
+Check ($readLegacy.exit -eq 0) 'analysis accepts literal bracket names from older configurations'
+$upgraded = (Get-Content -LiteralPath $oldAnalysis -Raw -Encoding UTF8 | ConvertFrom-Json).config
+Check ($upgraded.schema_version -eq 2 -and $upgraded.input.filename -ceq '来料[[复核]]' -and $upgraded.output.charts.filename -ceq '图表[[DATE]]') 'effective CLI config preserves old literal names after migration'
+foreach ($wrongSheetArgs in @(@('--no-config','--sheet','原始记录'),@('--no-config','--input',$csv,'--sheet','原始记录'))) {
+    $wrongSheet = Run-Cli $wrongSheetArgs $true
+    Check ($wrongSheet.exit -eq 2 -and $wrongSheet.stderr.Contains('--sheet')) 'worksheet selection requires XLSX input'
+}
+$replayedBook = Join-Path $runRoot 'restored.XLSX'
+$bookReplay = Run-Cli @('--replay-report',$xlsxReport,'--output',$replayedBook) $true
+Check ($bookReplay.exit -eq 0 -and (Get-FileHash -LiteralPath $book).Hash -eq (Get-FileHash -LiteralPath $replayedBook).Hash) 'XLSX replay restores identical workbook bytes'
+$manifest.export.sha256 = 'wrong'
+$damaged = Join-Path $runRoot 'damaged.json'
+$manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $damaged -Encoding UTF8
+$rejected = Run-Cli @('--replay-report',$damaged,'--output',$replayCsv,'--overwrite') $true
+Check ($rejected.exit -eq 1 -and $rejected.stderr.Contains('SHA-256') -and (Get-FileHash -LiteralPath $replayCsv).Hash -eq $hash) 'replay verifies digest before replacing the destination'
+foreach ($invalidArgs in @(@('--no-config','--seed','+-123'),@('--no-config','--lsl','+-5'),@('--config',$config,'--output',$replayCsv,'--comparison-report',$replayCsv,'--overwrite'),@('--replay-report',$autoReport,'--output',$autoReport,'--overwrite'))) {
+    $bad = Run-Cli $invalidArgs
+    Check ($bad.exit -eq 2) "rejects invalid sign or overlapping output: $($invalidArgs -join ' ')"
+}
 [ordered]@{passed=$true;version="$ExpectedVersion-native";checks=$checks;run_directory=$runRoot} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'cli-regression.json') -Encoding UTF8
 Write-Output "$($checks.Count) CLI regression checks PASS"

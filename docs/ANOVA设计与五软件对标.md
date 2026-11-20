@@ -9,7 +9,7 @@
 .\build\Release\msa_cli.exe --config examples\示例配置.json --method crossed_anova --input anova.csv --report reanalysis.json
 ```
 
-`--input`只分析既有宽表或长表，不生成、改写或自动导出 CSV；无需满足生成专用的规格/参考尺度前置条件，但设计尺寸须与数据相符。报告包含`analysis_only=true`及`seed=null`，不为输入数据编造生成种子。不能与`--output`合用，输入和报告不能同路径。指标约束只报告复核结果，不阻止分析不满足目标的输入。
+`--input`读取 CSV 或 XLSX 宽表或长表进行分析，保留源文件；无需满足生成专用的规格/参考尺度前置条件，但设计尺寸须与数据相符。报告包含`analysis_only=true`及`seed=null`，不为输入数据编造生成种子。不能与`--output`合用，输入和报告不能同路径。指标约束只报告复核结果，不阻止分析不满足目标的输入。
 
 GUI 结果区提供“ANOVA 详情”；CLI 报告的 `metrics.anova` 提供：
 

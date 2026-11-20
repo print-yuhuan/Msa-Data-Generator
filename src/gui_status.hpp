@@ -37,7 +37,8 @@ inline HeaderStatusPresentation headerStatusPresentation(const State &business =
     if (business.status == Status::Running)
         return headerStatusValue("正在生成", HeaderStatusTone::Working, true);
     if (charts.busy())
-        return headerStatusValue("图表导出中", HeaderStatusTone::Working, true);
+        return headerStatusValue(charts.exportingReport ? "报告导出中" : "图表导出中",
+                                 HeaderStatusTone::Working, true);
 
     // 图表错误及导入数据只描述当前图表页，离开后恢复数据生成状态。
     if (business.page == Page::Charts) {
@@ -47,7 +48,11 @@ inline HeaderStatusPresentation headerStatusPresentation(const State &business =
             if (charts.errorKind == "render")
                 return headerStatusValue("图表渲染异常", HeaderStatusTone::Error);
             if (charts.errorKind == "import")
-                return headerStatusValue("CSV 导入失败", HeaderStatusTone::Error);
+                return headerStatusValue("测量数据导入失败", HeaderStatusTone::Error);
+            if (charts.errorKind == "reanalysis")
+                return headerStatusValue("数据重算失败", HeaderStatusTone::Error);
+            if (charts.errorKind == "report")
+                return headerStatusValue("报告导出失败", HeaderStatusTone::Error);
             if (charts.errorKind == "edit")
                 return headerStatusValue("图表设置待调整", HeaderStatusTone::Warning);
             if (charts.errorKind == "directory")
@@ -57,10 +62,12 @@ inline HeaderStatusPresentation headerStatusPresentation(const State &business =
         if (charts.importedSelected)
             return charts.imported
                        ? headerStatusValue("数据已载入", HeaderStatusTone::Success)
-                       : headerStatusValue("待载入 CSV", HeaderStatusTone::Neutral);
+                       : headerStatusValue("待导入数据", HeaderStatusTone::Neutral);
     }
 
     const bool retained = business.retainedResult();
+    if (!business.dataExportError.empty())
+        return headerStatusValue("测量数据导出失败", HeaderStatusTone::Error, false, retained);
     switch (business.status) {
     case Status::Infeasible:
         return headerStatusValue(retained ? "冲突 · 结果保留" : "约束冲突",
@@ -71,8 +78,6 @@ inline HeaderStatusPresentation headerStatusPresentation(const State &business =
     case Status::Error:
         return headerStatusValue(retained ? "异常 · 结果保留" : "操作异常",
                                  HeaderStatusTone::Error, false, retained);
-    case Status::ExportError:
-        return headerStatusValue("CSV 导出失败", HeaderStatusTone::Error);
     default:
         break;
     }

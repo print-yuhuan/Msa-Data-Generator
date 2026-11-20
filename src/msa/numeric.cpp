@@ -56,12 +56,29 @@ std::string fixed(double value, int dp) {
         throw std::runtime_error("数值格式化失败");
     return {buf.data(), r.ptr};
 }
+namespace {
+const char *number_start(const std::string &text) {
+    const char *start = text.data();
+    if (!text.empty() && text.front() == '+') {
+        if (text.size() == 1 || text[1] == '-' || text[1] == '+')
+            throw ConfigError("数值符号无效：" + text);
+        ++start;
+    }
+    return start;
+}
+} // namespace
+std::int64_t parse_integer(const std::string &text) {
+    std::int64_t value = 0;
+    const auto end = text.data() + text.size();
+    const auto parsed = std::from_chars(number_start(text), end, value);
+    if (parsed.ec != std::errc{} || parsed.ptr != end)
+        throw ConfigError("必须是 int64 范围内的整数：" + text);
+    return value;
+}
 double parse_number(const std::string &text) {
     double v = 0;
-    const char *start = text.data();
-    if (!text.empty() && text[0] == '+')
-        ++start;
-    auto r = std::from_chars(start, text.data() + text.size(), v, std::chars_format::general);
+    auto r = std::from_chars(number_start(text), text.data() + text.size(), v,
+                             std::chars_format::general);
     if (r.ec != std::errc{} || r.ptr != text.data() + text.size() || !std::isfinite(v))
         throw ConfigError("必须填写有限数字：" + text);
     return v;
@@ -268,8 +285,11 @@ bool qualified(const Json &m, const Json &c) {
            (m["below_spec"] == 0 && m["above_spec"] == 0);
 }
 Json Result::as_json() const {
-    return {{"matrix", matrix},  {"metrics", metrics},   {"config", config},
-            {"seed", seed},      {"attempts", attempts}, {"elapsed_seconds", elapsed_seconds},
-            {"version", version}};
+    Json result{{"matrix", matrix},  {"metrics", metrics},   {"config", config},
+                {"seed", seed},      {"attempts", attempts}, {"elapsed_seconds", elapsed_seconds},
+                {"version", version}};
+    if (!search_diagnostics.is_null())
+        result["search"] = search_diagnostics;
+    return result;
 }
 } // namespace msa

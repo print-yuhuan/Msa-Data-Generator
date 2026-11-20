@@ -1,0 +1,3 @@
+#pragma once
+#define MSA_WORKSHEET_DIALOG 201
+#define MSA_WORKSHEET_LIST 1001

@@ -1,7 +1,16 @@
 name: Windows native build and regression
 
 on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*-rc*']
   workflow_dispatch:
+    inputs:
+      desktop_regression:
+        description: Run graphical tests on the Windows OpenGL desktop runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,3 +26,17 @@ jobs:
         run: cmake --build build --config Release --parallel 4
       - name: Native, CLI and release evidence regression
         run: ctest --test-dir build -C Release --output-on-failure
+
+  desktop:
+    needs: windows
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.desktop_regression)
+    runs-on: [self-hosted, Windows, X64, msa-opengl]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure desktop regression
+        run: cmake -S . -B build -A x64 -DMSA_BUILD_RENDER_TESTS=ON
+      - name: Build desktop targets
+        run: cmake --build build --config Release --parallel 4
+      - name: Chart, font, layout and OpenGL regression
+        run: ctest --test-dir build -C Release -L 'gui|charts' --output-on-failure --no-tests=error

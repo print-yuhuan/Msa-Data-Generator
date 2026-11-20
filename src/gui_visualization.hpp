@@ -13,7 +13,7 @@ struct VisualState {
     float offset = 0, editorOffset = 0;
     bool importedSelected = false, editing = false;
     std::optional<msa::Result> imported;
-    std::string importedName, directory, filename = "MSA_Charts";
+    std::string importedName, importedSheet;
     std::array<bool, 7> included{true, true, true, true, true, true, false};
     std::array<msa::charts::Editor, 7> editors, drafts;
     std::array<std::string, 7> lower, upper;
@@ -21,8 +21,10 @@ struct VisualState {
     std::array<std::string, 7> editError;
     std::array<unsigned, 7> editEpoch{};
     std::string errorKind, errorText, recovery;
+    std::filesystem::path importedPath;
     std::filesystem::path lastExportPath;
     int exportingCount = 0, errorChart = -1;
+    bool exportingReport = false;
     VisualPreview preview;
     std::future<std::filesystem::path> exporting;
     VisualState() {
@@ -49,6 +51,13 @@ const msa::Result *insightResult() {
         return visual.imported ? &*visual.imported : nullptr;
     return state.displayedResult() ? &*state.result : nullptr;
 }
+msa::StudySource insightSource() {
+    return visual.importedSelected ? msa::StudySource::ImportedData : msa::StudySource::Generated;
+}
+std::string importedSourceName() {
+    return visual.importedSheet.empty() ? visual.importedName
+                                        : visual.importedName + " · " + visual.importedSheet;
+}
 void clearVisualError() {
     visual.errorKind.clear();
     visual.errorText.clear();
@@ -61,17 +70,52 @@ void visualError(const std::string &kind, const std::string &message, const std:
     visual.errorText = message;
     visual.recovery = recovery;
     visual.errorChart = chart;
-    state.feedback("图表操作未完成，请查看页面提示", message + "。" + recovery, Level::Warning);
+    state.feedback(kind == "report" ? "方法对比报告导出失败" : "图表操作未完成，请查看页面提示",
+                   message + "。" + recovery, kind == "report" ? Level::Error : Level::Warning);
 }
-std::filesystem::path chartOutputDirectory() {
-    auto directory = native_ui::trim(visual.directory).empty()
-                         ? msa::config_path().parent_path()
-                         : std::filesystem::u8path(native_ui::trim(visual.directory));
-    if (directory.has_root_name() && !directory.has_root_directory())
-        throw std::runtime_error("导出目录不能使用 C:folder 形式，请填写完整路径");
-    if (directory.is_relative())
-        directory = msa::config_path().parent_path() / directory;
-    return directory.lexically_normal();
+void protectExportSources(const std::filesystem::path &path) {
+    if ((!visual.importedPath.empty() && msa::same_file_path(path, visual.importedPath)) ||
+        msa::same_file_path(path, msa::config_path()))
+        throw msa::ConfigError("导出路径与输入数据文件或配置文件相同，请另选文件名");
+}
+template <typename Writer>
+std::filesystem::path writeVisualExport(const std::filesystem::path &initialPath,
+                                        const std::optional<platform::SaveTarget> &chosen,
+                                        Writer write) {
+    if (chosen) {
+        write(chosen->path, chosen->policy);
+        return chosen->path;
+    }
+    for (int i = 0; i < 10000; ++i) {
+        auto path = initialPath;
+        if (i)
+            path.replace_filename(initialPath.stem().wstring() + L"_" + std::to_wstring(i) +
+                                 initialPath.extension().wstring());
+        if (std::filesystem::exists(path))
+            continue;
+        try {
+            write(path, msa::ExistingFile::Preserve);
+            return path;
+        } catch (const msa::FileExistsError &) {
+            // 其他导出可能在路径检查后先提交了同名文件。
+        }
+    }
+    throw std::runtime_error("同名文件过多，请修改文件名或目录");
+}
+template <typename Writer>
+void startVisualExport(bool report, int chartCount, Writer write) {
+    visual.exporting = std::async(std::launch::async, [write = std::move(write)] {
+        try {
+            auto path = write();
+            app::requestUpdate();
+            return path;
+        } catch (...) {
+            app::requestUpdate();
+            throw;
+        }
+    });
+    visual.exportingReport = report;
+    visual.exportingCount = chartCount;
 }
 int selectedChartCount() {
     return visual.scope == 0
@@ -89,50 +133,120 @@ std::optional<int> pendingChartExportEdit() {
 }
 std::string chartFooterSummary() {
     if (visual.busy())
-        return "正在导出 " + std::to_string(visual.exportingCount) + " 张图表…";
+        return visual.exportingReport ? "正在导出方法对比报告…"
+                                      : "正在导出 " + std::to_string(visual.exportingCount) + " 张图表…";
     if (!visual.errorText.empty())
-        return "图表操作未完成，请查看页面提示";
+        return visual.errorKind == "report" ? "方法对比报告导出失败" : "图表操作未完成，请查看页面提示";
     if (!insightResult())
-        return "请先生成数据或导入 CSV";
+        return "请先生成数据或导入数据";
     if (pendingChartExportEdit())
         return visual.scope == 0 ? "当前图表有待应用的编辑" : "待导出的组合含未应用的编辑";
     if (visual.scope == 0)
         return std::string(msa::charts::label(msa::charts::all_kinds()[visual.selected]));
     return "已选 " + std::to_string(selectedChartCount()) + " / 7 张图表";
 }
-bool loadInsightCsv(const std::filesystem::path &path) {
+bool loadInsightData(const std::filesystem::path &path) {
     try {
         msa::Result result;
         result.config = native_ui::to_config(state.draft, native_ui::ConfigUse::Analysis);
-        result.matrix =
-            msa::parse_export_csv(msa::read_text(path, msa::csv_read_limit), result.config);
+        auto data = msa::read_data(path, result.config, state.chooseWorksheet);
+        if (!data)
+            return false;
+        result.matrix = std::move(data->matrix);
         result.metrics = msa::calculate(result.matrix, result.config);
+        const auto fullPath = std::filesystem::absolute(path);
         visual.imported = std::move(result);
+        visual.importedPath = fullPath;
         visual.importedSelected = true;
         visual.importedName = path.filename().u8string();
+        visual.importedSheet = std::move(data->sheet_name);
         visual.preview.attempted = false;
         clearVisualError();
-        state.feedback("CSV 已导入", "已按导入时的研究设计和分析设置计算图表。");
+        state.feedback("测量数据已导入", "已按当前研究设计和分析设置计算图表：" + importedSourceName());
         return true;
     } catch (const std::exception &e) {
         visualError("import", e.what(),
-                    "请核对研究设计、CSV 列和测量记录，再重新选择文件。");
+                    "请核对研究设计、文件列和测量记录，再重新选择文件。");
         return false;
     }
 }
-void importInsightCsv() {
+bool reanalyzeInsightData() {
+    if (!visual.importedSelected || !visual.imported || state.busy())
+        return false;
     try {
-        if (const auto path = platform::choose(false, false, L"measurement.csv"))
-            loadInsightCsv(*path);
+        auto config = native_ui::to_config(state.draft, native_ui::ConfigUse::Analysis);
+        const auto &original = visual.imported->config.at("design");
+        const auto &requested = config.at("design");
+        if (original != requested) {
+            const auto design = [](const Json &d) {
+                return d.at("operators").dump() + " 人 × " + d.at("replicates").dump() +
+                       " 次 × " + d.at("parts").dump() + " 件";
+            };
+            throw msa::ConfigError("导入数据的设计为 " + design(original) + "，当前设置为 " +
+                                   design(requested) + "。请恢复与导入数据相同的研究设计。");
+        }
+        auto metrics = msa::calculate(visual.imported->matrix, config);
+        visual.imported->config = std::move(config);
+        visual.imported->metrics = std::move(metrics);
+        visual.preview.attempted = false;
+        clearVisualError();
+        state.feedback("测量数据已按当前设置重算", "已使用导入的原始记录重算 " + importedSourceName());
+        return true;
     } catch (const std::exception &e) {
-        visualError("import", e.what(), "请重新选择 CSV 文件。");
+        visualError("reanalysis", e.what(), "已保留原分析结果。请调整选项后重算。");
+        return false;
+    }
+}
+void exportComparisonReport() {
+    const auto *result = insightResult();
+    if (!result || state.busy() || visual.busy())
+        return;
+    try {
+        const bool pdf = state.draft.reportFormat == 0;
+        const auto directory = msa::resolve_output_directory(native_ui::trim(state.draft.reportDirectory));
+        const auto source = insightSource();
+        const auto extension = pdf ? ".pdf" : ".html";
+        const auto basename = msa::render_study_basename(state.draft.reportFilename,
+            msa::ExportBasenameKind::ComparisonReport, *result, source, std::chrono::system_clock::now(), extension);
+        const auto initial = directory / std::filesystem::u8path(basename + extension);
+        std::optional<platform::SaveTarget> chosen;
+        if (!state.draft.silentReport) {
+            chosen = state.chooseExportPath(initial, pdf ? platform::ExportKind::ReportPdf
+                                                        : platform::ExportKind::Html);
+            if (!chosen)
+                return;
+            protectExportSources(chosen->path);
+        }
+        const std::string name = visual.importedSelected ? importedSourceName() : "";
+        startVisualExport(true, 0, [initial, chosen, snapshot = *result, source, name] {
+            return writeVisualExport(initial, chosen, [&](const auto &path, auto policy) {
+                msa::write_comparison_report(path, snapshot, source, name, policy);
+            });
+        });
+        if (visual.errorKind == "report")
+            clearVisualError();
+        state.hint("正在导出方法对比报告…");
+    } catch (const std::exception &e) {
+        visualError("report", e.what(), "请检查保存位置、文件名和当前数据源后重试。");
+    }
+}
+void importInsightData() {
+    try {
+        const auto directory = msa::resolve_output_directory(native_ui::trim(state.draft.importDirectory));
+        const auto name = msa::render_import_basename(state.draft.importFilename,
+            native_ui::filename_options(state.draft), insightResult(), insightSource(),
+            std::chrono::system_clock::now(), "");
+        if (const auto path = state.chooseImportData(directory, name))
+            loadInsightData(*path);
+    } catch (const std::exception &e) {
+        visualError("import", e.what(), "请重新选择 CSV 或 XLSX 文件。");
     }
 }
 void insightSourceControls(Ui &u, const std::string &id, float w) {
-    constexpr float importWidth = 108;
+    constexpr float importWidth = 124;
     const auto source = [&](float width) {
         segments(
-            u, id + ".source", {"当前结果", "CSV 文件"}, visual.importedSelected ? 1 : 0, width,
+            u, id + ".source", {"当前结果", "已导入数据"}, visual.importedSelected ? 1 : 0, width,
             [](int i) {
                 visual.importedSelected = i == 1;
                 visual.preview.attempted = false;
@@ -145,13 +259,13 @@ void insightSourceControls(Ui &u, const std::string &id, float w) {
             .gap(sectionGap)
             .content([&] {
                 source(w - importWidth - sectionGap);
-                button(u, id + ".import", "导入 CSV", importWidth, importInsightCsv, false,
+                button(u, id + ".import", "导入数据", importWidth, importInsightData, false,
                        state.busy());
             })
             .build();
     else {
         source(w);
-        button(u, id + ".import", "导入 CSV", w, importInsightCsv, false, state.busy());
+        button(u, id + ".import", "导入数据", w, importInsightData, false, state.busy());
     }
 }
 std::string chartLabelThatFits(const std::string &label, float width, float size, int weight = 400) {
@@ -166,7 +280,7 @@ std::string chartLabelThatFits(const std::string &label, float width, float size
     return label.substr(0, length) + "…";
 }
 void insightSourceSummary(Ui &u, const std::string &id, float w) {
-    std::string summary = visual.importedSelected ? "尚未导入 CSV"
+    std::string summary = visual.importedSelected ? "尚未导入数据"
                           : state.busy()          ? "正在生成测量数据…"
                           : state.result          ? "研究参数已修改"
                                                   : "暂无生成结果";
@@ -180,8 +294,11 @@ void insightSourceSummary(Ui &u, const std::string &id, float w) {
             for (const auto &row : result->matrix)
                 count += row.size();
             summary = method + "  ·  " + std::to_string(count) + " 条测量记录";
-            if (visual.importedSelected)
-                summary = chartLabelThatFits(visual.importedName, w, 16) + "\n" + summary;
+            if (visual.importedSelected) {
+                const auto label = visual.importedSheet.empty() ? visual.importedName
+                    : visual.importedSheet + " · " + visual.importedName;
+                summary = chartLabelThatFits(label, w, 16) + "\n" + summary;
+            }
         } catch (const std::exception &) {
             summary = "数据快照的研究信息不完整，请重新生成或导入。";
             color = levelColor(Level::Error);
@@ -428,41 +545,32 @@ void exportVisuals() {
                     *insightResult(), msa::charts::all_kinds()[i], chartEditor(i), 900, 560));
         if (scenes.empty())
             throw std::runtime_error("请至少选择一张组合图表");
-        const auto basename = native_ui::trim(visual.filename);
-        if (basename.empty() || basename == "." || basename == ".." ||
-            basename.find_first_of("<>:\"/\\|?*\r\n") != std::string::npos ||
-            basename.back() == '.' || basename.back() == ' ')
-            throw std::runtime_error("请填写合法的图表文件名（不含扩展名或路径）");
-        const auto directory = chartOutputDirectory();
+        const auto directory = msa::resolve_output_directory(native_ui::trim(state.draft.chartDirectory));
         platform::ChartExportOptions options;
         options.format = static_cast<platform::ChartFormat>(visual.format);
         options.columns = visual.scope == 0 ? 1 : visual.columns + 1;
         options.panel_width = 1200 + visual.resolution * 600;
         options.dpi = 144 + visual.resolution * 72;
         const int count = int(scenes.size());
-        visual.exporting = std::async(
-            std::launch::async, [scenes = std::move(scenes), directory, basename, options] {
-                try {
-                    for (int i = 0; i < 10000; ++i) {
-                        const auto name = basename + (i ? "_" + std::to_string(i) : "") +
-                                          platform::chart_extension(options.format);
-                        const auto path = directory / std::filesystem::u8path(name);
-                        if (std::filesystem::exists(path))
-                            continue;
-                        try {
-                            const auto result = platform::export_charts(scenes, path, options);
-                            app::requestUpdate();
-                            return result;
-                        } catch (const msa::FileExistsError &) {
-                        }
-                    }
-                    throw std::runtime_error("同名文件过多，请修改文件名");
-                } catch (...) {
-                    app::requestUpdate();
-                    throw;
-                }
+        const auto extension = platform::chart_extension(options.format);
+        const auto basename = msa::render_study_basename(state.draft.chartFilename,
+            msa::ExportBasenameKind::Chart, *insightResult(), insightSource(), std::chrono::system_clock::now(), extension);
+        const auto initial = directory / std::filesystem::u8path(basename + extension);
+        std::optional<platform::SaveTarget> chosen;
+        if (!state.draft.silentCharts) {
+            const auto kind = options.format == platform::ChartFormat::Png ? platform::ExportKind::Png
+                            : options.format == platform::ChartFormat::Jpeg ? platform::ExportKind::Jpeg
+                                                                         : platform::ExportKind::ChartPdf;
+            chosen = state.chooseExportPath(initial, kind);
+            if (!chosen)
+                return;
+            protectExportSources(chosen->path);
+        }
+        startVisualExport(false, count, [initial, chosen, scenes = std::move(scenes), options] {
+            return writeVisualExport(initial, chosen, [&](const auto &path, auto policy) {
+                platform::export_charts(scenes, path, options, policy);
             });
-        visual.exportingCount = count;
+        });
         clearVisualError();
         state.hint("正在导出 " + std::to_string(count) + " 张图表…");
     } catch (const std::exception &e) {
@@ -473,14 +581,18 @@ void pollVisuals() {
     if (visual.exporting.valid() &&
         visual.exporting.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
         try {
-            visual.lastExportPath = visual.exporting.get();
-            if (visual.errorKind == "export")
+            const auto path = visual.exporting.get();
+            if (visual.errorKind == (visual.exportingReport ? "report" : "export"))
                 clearVisualError();
-            state.feedback("图表已导出", "图表已保存至 " + visual.lastExportPath.u8string());
+            if (visual.exportingReport)
+                state.feedback("方法对比报告已导出", "报告已保存至 " + path.u8string());
+            else {
+                visual.lastExportPath = path;
+                state.feedback("图表已导出", "图表已保存至 " + visual.lastExportPath.u8string());
+            }
         } catch (const std::exception &e) {
-            visualError(
-                "export", e.what(),
-                "请检查目录权限或修改导出设置后重试。");
+            visualError(visual.exportingReport ? "report" : "export", e.what(),
+                        "请检查保存位置或修改导出设置后重试。");
         }
 }
 void stopVisuals() {
@@ -688,30 +800,21 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
             .build();
     });
 }
-void chooseChartDirectory() {
-    try {
-        if (auto path = platform::choose(false, true)) {
-            visual.directory = path->u8string();
-            if (visual.errorKind == "directory" || visual.errorKind == "export")
-                clearVisualError();
-            state.hint("图表导出目录已更新");
-        }
-    } catch (const std::exception &e) {
-        visualError("directory", e.what(), "请重新选择目录，或填写完整路径。");
-    }
+void openFileOptions() {
+    state.optionsTab = 2;
+    state.configOffset = 0;
+    state.navigate(Page::Options);
 }
-void openChartDirectory(bool last = false) {
+void openLastChartDirectory() {
     try {
-        const auto directory = last && !visual.lastExportPath.empty()
-                                   ? visual.lastExportPath.parent_path()
-                                   : chartOutputDirectory();
+        const auto directory = visual.lastExportPath.parent_path();
         if (!std::filesystem::is_directory(directory))
-            throw std::runtime_error("目录尚未创建。首次导出时会自动创建目录");
+            throw std::runtime_error("上次导出目录已不存在");
         platform::openDirectory(directory);
         if (visual.errorKind == "directory")
             clearVisualError();
     } catch (const std::exception &e) {
-        visualError("directory", e.what(), "请检查路径，或使用「选择目录」更换位置。");
+        visualError("directory", e.what(), "请在「选项 → 文件 → 目录与文件名」检查保存位置。");
     }
 }
 void visualRecovery(Ui &u, float w) {
@@ -743,13 +846,20 @@ void visualRecovery(Ui &u, float w) {
             .gap(12)
             .content([&] {
                 const float bw = (c - 12) / 2;
-                if (kind == "import") {
-                    button(u, "chart.recovery.import", "重新选择 CSV", bw, importInsightCsv, true,
-                           state.busy());
+                if (kind == "import" || kind == "reanalysis") {
+                    if (kind == "reanalysis")
+                        button(u, "chart.recovery.reanalyze", "重新计算", bw, reanalyzeInsightData,
+                               true, state.busy() || !visual.importedSelected);
+                    else
+                        button(u, "chart.recovery.import", "重新选择数据", bw, importInsightData,
+                               true, state.busy());
                     button(u, "chart.recovery.study", "检查研究设置", bw, [] {
                         state.optionsTab = 0;
                         state.navigate(Page::Options);
                     });
+                } else if (kind == "report") {
+                    button(u, "chart.recovery.report", "重新导出报告", bw, exportComparisonReport,
+                           true, visual.busy() || state.busy() || !insightResult());
                 } else if (kind == "edit") {
                     button(
                         u, "chart.recovery.edit", "打开对应编辑器", bw,
@@ -778,7 +888,7 @@ void visualRecovery(Ui &u, float w) {
                 } else {
                     button(u, "chart.recovery.export", "重试导出", bw, exportVisuals, true,
                            visual.busy() || state.busy() || !insightResult());
-                    button(u, "chart.recovery.directory", "选择目录", bw, chooseChartDirectory);
+                    button(u, "chart.recovery.directory", "目录与文件名", bw, openFileOptions);
                 }
             })
             .build();
@@ -916,54 +1026,23 @@ void chartExportSettings(Ui &u, float w) {
                  26, 12, selectedChartCount() ? muted : levelColor(Level::Warning));
         }
         u.rect("chart.destination.rule").size(c, 1).color(line).build();
-        subheading(u, "chart.destination.heading", "保存位置", "", c);
-        const auto filename = [&](float width) {
-            localField(u, "chart.filename", "文件名", visual.filename, width);
-        };
-        const auto directory = [&](float width) {
-            localField(u, "chart.directory", "导出目录", visual.directory, width,
-                       msa::config_path().parent_path().u8string());
-        };
-        if (c >= 760)
-            u.row("chart.destination.fields")
-                .width(c)
-                .gap(12)
-                .content([&] {
-                    filename((c - 12) * .35f);
-                    directory((c - 12) * .65f);
-                })
-                .build();
-        else {
-            filename(c);
-            directory(c);
-        }
-        const auto last = [&](float width) {
-            button(
-                u, "chart.last.folder", "上次导出目录", width, [] { openChartDirectory(true); },
-                false, visual.lastExportPath.empty());
-        };
-        constexpr float actionWidth = 106, lastWidth = 130, gap = 12;
-        const bool inlineActions = c >= actionWidth * 2 + lastWidth + gap * 2;
         u.row("chart.directory.actions")
             .width(c)
-            .gap(gap)
+            .gap(12)
             .content([&] {
-                const float width = inlineActions ? actionWidth : (c - gap) / 2;
-                button(u, "chart.browse", "选择目录", width, chooseChartDirectory);
-                button(u, "chart.open", "打开目录", width, [] { openChartDirectory(); });
-                if (inlineActions)
-                    last(lastWidth);
+                const float width = std::min(156.f, (c - 12) / 2);
+                button(u, "chart.file.options", "目录与文件名", width, openFileOptions);
+                button(u, "chart.last.folder", "上次导出目录", width, openLastChartDirectory,
+                       false, visual.lastExportPath.empty());
             })
             .build();
-        // 成功提示仅使用固定底栏；目录操作始终占位，导出完成不改变正文高度。
-        if (!inlineActions)
-            last(c);
         u.text("chart.output.note")
             .size(c, 44)
-            .text(std::string("扩展名自动添加，同名文件会追加序号。\n") +
+            .text(std::string(state.draft.silentCharts ? "静默保存，同名文件会追加序号。\n"
+                                                       : "另存为时可选择目录和文件名。\n") +
                   (visual.format == 2 ? "PDF 保存为单页图像。"
                    : combination      ? "所选图表保存为一张合成图片。"
-                                      : "目录留空时，图片保存至配置目录。"))
+                                      : "目录留空时，图片保存在 Windows 桌面。"))
             .fontSize(16)
             .lineHeight(22)
             .color(muted)
@@ -1015,6 +1094,19 @@ void chartSourceCard(Ui &u, float w) {
             summary(c);
             insightSourceControls(u, "charts.dataset", c);
         }
+        u.row("charts.dataset.actions")
+            .width(c)
+            .gap(12)
+            .content([&] {
+                const float bw = std::min(188.f, (c - 12) / 2);
+                button(u, "charts.dataset.reanalyze", "按当前设置重算", bw, reanalyzeInsightData,
+                       false, state.busy() || !visual.importedSelected || !visual.imported);
+                button(u, "charts.dataset.report",
+                       visual.busy() && visual.exportingReport ? "报告导出中…" : "导出方法对比报告",
+                       bw, exportComparisonReport,
+                       false, visual.busy() || state.busy() || !insightResult());
+            })
+            .build();
     });
 }
 constexpr float chartToolbarHeight = 44;
@@ -1076,10 +1168,10 @@ void chartEmptyState(Ui &u, float w) {
     constexpr float inset = 14, icon = 40, actionWidth = 108;
     const bool inlineAction = showAction && w >= 430;
     const char *description =
-        visual.importedSelected ? "导入 CSV 文件后，可查看与当前研究设计对应的图表。"
+        visual.importedSelected ? "导入数据后，可查看与当前研究设计对应的图表。"
         : state.busy()          ? "生成完成后，可在这里查看本次研究的图表。"
-        : state.result          ? "按当前研究设置重新生成数据，或导入 CSV 查看已有研究。"
-                                : "在「数据」页生成测量值，或导入 CSV 查看已有研究。";
+        : state.result          ? "按当前研究设置重新生成数据，或导入数据查看已有研究。"
+                                : "在「数据」页生成测量值，或导入数据查看已有研究。";
     const auto action = [&] {
         button(u, "charts.empty.generate", "前往数据", actionWidth,
                [] { state.navigate(Page::Data); });
@@ -1165,7 +1257,10 @@ void chartsPage(Ui &u, float w, float h) {
                 .padding(0, 0, 0, sectionGap)
                 .content([&] {
                     chartSourceCard(v, cw);
-                    if (visual.errorKind == "import")
+                    const bool sourceError = visual.errorKind == "import" ||
+                                             visual.errorKind == "reanalysis" ||
+                                             visual.errorKind == "report";
+                    if (sourceError)
                         visualRecovery(v, cw);
                     const float plotHeight = std::clamp(h - 226.f, 304.f, 528.f);
                     const auto *result = insightResult();
@@ -1213,7 +1308,7 @@ void chartsPage(Ui &u, float w, float h) {
                         if (visual.editing)
                             chartAppearance(v, cw);
                     }
-                    if (visual.errorKind != "import")
+                    if (!sourceError)
                         visualRecovery(v, cw);
                     chartExportSettings(v, cw);
                 })

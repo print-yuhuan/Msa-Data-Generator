@@ -151,10 +151,14 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
         scale_norm(flat, dfi * msi / r);
         Matrix matrix(o * r, std::vector<double>(p));
         std::vector<double> residuals;
+        const bool varied = c["generation"]["residual_model"] == "varied";
         for (int i = 0; i < o; ++i)
             for (int j = 0; j < p; ++j) {
                 const auto residual = profile(r, rng);
-                residuals.insert(residuals.end(), residual.begin(), residual.end());
+                // Each subgroup stays centered. The common normalization below preserves SSE.
+                const double amplitude = varied ? rng.uniform(.4, 1.6) : 1.;
+                for (double value : residual)
+                    residuals.push_back(amplitude * value);
             }
         scale_norm(residuals, dfe * ev * ev);
         for (int i = 0; i < o; ++i)
@@ -186,17 +190,60 @@ normalized(const Json &c, const std::array<double, 6> &ratio, Random &rng, int a
     return std::make_pair(matrix, g);
 }
 double part_mean_span(const Matrix &matrix) {
-    double low = INFINITY, high = -INFINITY;
-    const double origin = matrix.front().front();
+    // Preserve the exact distance between two constant endpoint parts, even when
+    // averaging repeated offsets relative to one common origin would round it down.
+    using PartMean = std::pair<double, double>;
+    const auto difference = [](const PartMean &a, const PartMean &b) {
+        return accurate_sum({a.first - b.first, a.second, -b.second});
+    };
+    PartMean low{}, high{};
     std::vector<double> values(matrix.size());
     for (std::size_t part = 0; part < matrix.front().size(); ++part) {
+        const double origin = matrix.front()[part];
         for (std::size_t row = 0; row < matrix.size(); ++row)
             values[row] = matrix[row][part] - origin;
-        const double mean = accurate_sum(values) / static_cast<double>(values.size());
-        low = std::min(low, mean);
-        high = std::max(high, mean);
+        const PartMean mean{origin, accurate_sum(values) / static_cast<double>(values.size())};
+        if (part == 0 || difference(mean, low) < 0)
+            low = mean;
+        if (part == 0 || difference(mean, high) > 0)
+            high = mean;
     }
-    return high - low;
+    return difference(high, low);
+}
+Matrix place_full_part_span(const Matrix &matrix, double scale, double lo, double hi, int dp) {
+    // To attain the full width in strict mode, every reading at each extreme part
+    // must be on the same limit. Interior parts still carry repeatability and AV.
+    Matrix result = matrix;
+    std::vector<double> means(matrix.front().size()), values(matrix.size());
+    for (std::size_t j = 0; j < means.size(); ++j) {
+        for (std::size_t i = 0; i < matrix.size(); ++i)
+            values[i] = matrix[i][j];
+        means[j] = accurate_sum(values) / static_cast<double>(values.size());
+    }
+    const auto [lowest, highest] = std::minmax_element(means.begin(), means.end());
+    const double span = *highest - *lowest;
+    for (std::size_t j = 0; j < means.size(); ++j) {
+        if (means.begin() + j == lowest || means.begin() + j == highest) {
+            for (auto &row : result)
+                row[j] = means.begin() + j == lowest ? lo : hi;
+            continue;
+        }
+        const double position = span > 0 ? (means[j] - *lowest) / span : .5;
+        const double center = std::clamp(lo + (hi - lo) * position, lo, hi);
+        double amplitude = scale;
+        for (const auto &row : matrix) {
+            const double deviation = row[j] - means[j];
+            if (deviation > 0)
+                amplitude = std::min(amplitude, (hi - center) / deviation);
+            else if (deviation < 0)
+                amplitude = std::min(amplitude, (lo - center) / deviation);
+        }
+        for (std::size_t i = 0; i < result.size(); ++i) {
+            const double value = center + amplitude * (matrix[i][j] - means[j]);
+            result[i][j] = parse_number(fixed(std::clamp(value, lo, hi), dp));
+        }
+    }
+    return result;
 }
 bool uses_reference_scale(const Json &generation, const Json &specification) {
     return generation["scale_mode"] == "reference_tv_sd" ||
@@ -279,7 +326,9 @@ std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &
     if (strict && both && span)
         sh = std::min(sh, (hi - lo) / span);
     double preferred_span_scale = 0;
-    const bool guide_part_span = minimum_part_span > 0 && g["scale_mode"] == "auto";
+    const bool full_part_span = strict && both && g["minimum_part_span_pct"] == 100;
+    const bool guide_part_span =
+        !full_part_span && minimum_part_span > 0 && g["scale_mode"] == "auto";
     if (guide_part_span) {
         const double span_at_unit_scale = part_mean_span(matrix);
         if (span_at_unit_scale > 0) {
@@ -333,6 +382,8 @@ std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &
     }
     if (scale <= 0 || !std::isfinite(scale))
         return {};
+    if (full_part_span)
+        return place_full_part_span(matrix, scale, grid_lo, grid_hi, dp);
     if (automatic_single_center && pt && grr) {
         const double target = std::clamp(preferred(c, "PT_pct", 10), pt->first, pt->second);
         if (target <= 0)
@@ -353,7 +404,7 @@ std::optional<Matrix> scale_place(const Matrix &matrix, double grr, const Json &
             v = parse_number(fixed(center + scale * v, dp));
     return result;
 }
-bool approximately_normal(const Matrix &matrix) {
+double adjusted_normality_statistic(const Matrix &matrix) {
     std::vector<double> values;
     values.reserve(matrix.size() * matrix.front().size());
     const double origin = matrix.front().front();
@@ -371,7 +422,7 @@ bool approximately_normal(const Matrix &matrix) {
     }
     const double normal_scale = std::sqrt(2 * (sum_squares / (count - 1)));
     if (!(normal_scale > 0) || !std::isfinite(normal_scale))
-        return false;
+        return INFINITY;
 
     double tail_sum = 0;
     for (std::size_t i = 0; i < values.size(); ++i) {
@@ -381,11 +432,10 @@ bool approximately_normal(const Matrix &matrix) {
                     (std::log(.5 * std::erfc(-lower)) + std::log(.5 * std::erfc(upper)));
     }
     const double statistic = -count - tail_sum / count;
-    const double adjusted = statistic * (1 + .75 / count + 2.25 / (count * count));
-    // Stephens' fitted-normal Anderson–Darling 5% reference is a shape criterion here:
-    // measurements in a crossed study are grouped by part and operator.
-    return adjusted <= .752;
+    return statistic * (1 + .75 / count + 2.25 / (count * count));
 }
+// Stephens' fitted-normal reference is used as a shape criterion for grouped measurements.
+constexpr double normality_threshold = .752;
 std::pair<double, double> score(const Json &m, const Json &c) {
     double total = 0;
     for (auto k : metric_keys) {
@@ -470,38 +520,75 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
         if (cancel && cancel->load())
             throw CancelledError("已取消，未导出数据。");
     };
-    for (int attempt = 0; attempt < c["generation"]["max_attempts"].get<int>(); ++attempt) {
-        check_cancelled();
-        if (seconds() >= c["generation"]["timeout_seconds"].get<double>())
-            break;
-        // Check before candidate construction so continue cannot skip the budget.
-        if (found >= 0 && attempt - found > 120)
-            break;
-        attempts = attempt + 1;
+    int rejected_construction = 0, rejected_placement = 0, rejected_indicators = 0,
+        rejected_span = 0, rejected_normality = 0, accepted = 0;
+    const auto consider = [&](int attempt) {
         auto n = normalized(construction, ratio, rng, attempt);
-        if (!n)
-            continue;
-        auto matrix = scale_place(n->first, n->second, c, rng, attempt, minimum_part_span);
-        if (!matrix)
-            continue;
-        auto m = calculate(*matrix, screening);
-        if (qualified(m, c) &&
-            (minimum_part_span == 0 || part_mean_span(*matrix) >= minimum_part_span) &&
-            (!require_normality || approximately_normal(*matrix))) {
-            auto sc = score(m, c);
-            if (!best || sc < best_score) {
-                best = Result{std::move(*matrix), std::move(m), c, seed};
-                best_score = sc;
-            }
-            if (found < 0)
-                found = attempt;
+        if (!n) {
+            ++rejected_construction;
+            return;
         }
+        auto matrix = scale_place(n->first, n->second, c, rng, attempt, minimum_part_span);
+        if (!matrix) {
+            ++rejected_placement;
+            return;
+        }
+        auto m = calculate(*matrix, screening);
+        if (!qualified(m, c)) {
+            ++rejected_indicators;
+            return;
+        }
+        if (minimum_part_span > 0 && part_mean_span(*matrix) < minimum_part_span) {
+            ++rejected_span;
+            return;
+        }
+        if (require_normality && !(adjusted_normality_statistic(*matrix) <= normality_threshold)) {
+            ++rejected_normality;
+            return;
+        }
+        ++accepted;
+        auto sc = score(m, c);
+        if (!best || sc < best_score) {
+            best = Result{std::move(*matrix), std::move(m), c, seed};
+            best_score = sc;
+        }
+        if (found < 0)
+            found = attempt;
+    };
+    std::string stop_reason = "max_attempts";
+    const int max_attempts = generation["max_attempts"];
+    const double timeout = generation["timeout_seconds"];
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
+        check_cancelled();
+        if (seconds() >= timeout) {
+            stop_reason = "timeout";
+            break;
+        }
+        if (found >= 0 && attempt - found > 120) {
+            stop_reason = "refinement_limit";
+            break;
+        }
+        attempts = attempt + 1;
+        consider(attempt);
         if (progress && attempt % 100 == 0)
             progress(attempt + 1, seconds(), best.has_value());
+        if (best && best_score.first == 0 && best_score.second == 0) {
+            stop_reason = "optimal_score";
+            break;
+        }
     }
     if (progress)
         progress(attempts, seconds(), best.has_value());
     check_cancelled();
+    Json diagnostics{{"stop_reason", stop_reason},
+                     {"attempts", attempts},
+                     {"seed", seed},
+                     {"accepted", accepted},
+                     {"rejected", {{"construction", rejected_construction},
+                                   {"placement", rejected_placement},
+                                   {"indicators", rejected_indicators},
+                                   {"part_span", rejected_span},
+                                   {"normality", rejected_normality}}}};
     if (!best) {
         const char *hint = require_normality && minimum_part_span > 0
                                ? "尚未找到同时满足规格、指标、最低部件跨度和近似正态要求的数据。请尝试"
@@ -514,14 +601,36 @@ Result generate(const Json &raw, const std::atomic<bool> *cancel, Progress progr
                                  "搜索预算，也可关闭“要求近似正态”。"
                                : "尚未找到满足条件的数据（不代表已证明无解）。请调整指标误差、小数位"
                                  "、规格或搜索限制。";
-        throw SearchError("已尝试 " + std::to_string(attempts) + " 次，" + hint + "种子：" +
-                          std::to_string(seed));
+        const std::string reason = stop_reason == "timeout" ? "达到搜索时间上限" : "达到搜索次数上限";
+        throw SearchError(reason + "，已尝试 " + std::to_string(attempts) + " 次。" +
+                              "淘汰计数：构造 " + std::to_string(rejected_construction) +
+                              "，缩放放置 " + std::to_string(rejected_placement) +
+                              "，规格及指标 " + std::to_string(rejected_indicators) +
+                              "，部件跨度 " + std::to_string(rejected_span) + "，正态筛选 " +
+                              std::to_string(rejected_normality) + "。" + hint + "种子：" +
+                              std::to_string(seed),
+                          diagnostics);
     }
     if (with_optional_reports) {
         best->metrics = calculate(best->matrix, c);
         check_cancelled();
     }
     best->attempts = attempts;
+    const double span = part_mean_span(best->matrix);
+    diagnostics["part_mean_span"] = span;
+    diagnostics["part_mean_span_pct"] = nullptr;
+    if (!specification["lsl"].is_null() && !specification["usl"].is_null()) {
+        const double width = specification["usl"].get<double>() - specification["lsl"].get<double>();
+        const double percentage = 100 * (span / width);
+        if (std::isfinite(percentage))
+            diagnostics["part_mean_span_pct"] = percentage;
+    }
+    const double statistic = adjusted_normality_statistic(best->matrix);
+    diagnostics["anderson_darling"] = {
+        {"adjusted", std::isfinite(statistic) ? Json(statistic) : Json(nullptr)},
+        {"threshold", normality_threshold},
+        {"required", require_normality}};
+    best->search_diagnostics = std::move(diagnostics);
     best->elapsed_seconds = seconds();
     return *best;
 }

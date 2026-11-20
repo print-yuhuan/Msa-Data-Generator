@@ -1,6 +1,5 @@
 #pragma once
 #include "msa/core.hpp"
-#include <charconv>
 #include <cmath>
 
 namespace native_ui {
@@ -44,12 +43,16 @@ struct Draft {
     std::string operators = "3", replicates = "3", parts = "10", lsl, usl, multiplier = "6",
                 reference, minimumPartSpanPct;
     std::string center, decimals = "4", percentError = "0.1", ndcError = "0", seed,
-                        attempts = "5000", timeout = "30", directory, filename = "msa_data.csv";
+                        attempts = "5000", timeout = "30", directory, filename = "msa_data";
     int priority = 0, compliance = 0, scale = 0, existingFile = 0, csvFormat = 0, runMode = 0;
     int partSampling = 0;
-    bool requireNormality = false;
+    bool requireNormality = false, variedResiduals = false;
     bool randomOperators = false, storeStandardOrder = false;
     std::string runSeed;
+    bool silentCsv = false, silentCharts = false, silentReport = false;
+    int dataFileType = 0, reportFormat = 0;
+    std::string importDirectory, importFilename, chartDirectory, chartFilename = msa::default_chart_basename;
+    std::string reportDirectory, reportFilename = msa::default_report_basename;
     int analysisMethod = 0, interactionMode = 0;
     std::string interactionAlpha = "0.05";
     std::string analysisTolerance, historicalSd, historicalMean;
@@ -66,16 +69,8 @@ inline msa::Json numeric(const std::string &input, const std::string &label, boo
     if (s.empty() && nullable)
         return nullptr;
     try {
-        if (integer) {
-            std::int64_t n;
-            auto begin = s.data();
-            if (!s.empty() && s[0] == '+')
-                ++begin;
-            auto r = std::from_chars(begin, s.data() + s.size(), n);
-            if (r.ec != std::errc{} || r.ptr != s.data() + s.size())
-                throw msa::ConfigError("整数无效");
-            return n;
-        }
+        if (integer)
+            return msa::parse_integer(s);
         return msa::parse_number(s);
     } catch (const std::exception &) {
         throw msa::ConfigError(label + (integer ? "必须是整数" : "必须是有限数字"));
@@ -95,10 +90,35 @@ inline msa::Json number_when_enabled(const std::string &input, const std::string
     }
     return fallback;
 }
-inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
+// Naming an import is possible before the file is opened or a complete study is configured.
+// Read only the individual parameters available to filename variables.
+inline msa::Json filename_options(const Draft &d) {
+    const auto parameter = [](const std::string &text, bool integer, double low, double high) -> msa::Json {
+        try {
+            auto value = numeric(text, "", integer, true);
+            if (value.is_number() && value.get<double>() >= low && value.get<double>() <= high)
+                return value;
+        } catch (const msa::ConfigError &) {
+            // An unfinished parameter has no value to suggest in the import dialog.
+        }
+        return nullptr;
+    };
+    return {{"design", {{"operators", parameter(d.operators, true, 2, 3)},
+                        {"replicates", parameter(d.replicates, true, 2, 3)},
+                        {"parts", parameter(d.parts, true, 5, 10)}}},
+            {"specification", {{"lsl", parameter(d.lsl, false, -1e12, 1e12)},
+                               {"usl", parameter(d.usl, false, -1e12, 1e12)}}},
+            {"generation", {{"center", parameter(d.center, false, -1e12, 1e12)},
+                            {"decimal_places", parameter(d.decimals, true, 0, 10)},
+                            {"seed", parameter(d.seed, true, -INFINITY, INFINITY)}}},
+            {"analysis", {{"study_multiplier", parameter(d.multiplier, false, 1e-6, 100)}}}};
+}
+inline msa::Json data_output_fields(const Draft &d, bool saveInactiveSeed) {
+    if (d.dataFileType < 0 || d.dataFileType > 1)
+        throw msa::ConfigError("数据文件类型选择无效");
     if (d.csvFormat < 0 || d.csvFormat >= int(csv_formats.size()) || d.runMode < 0 ||
         d.runMode >= int(run_order_modes.size()))
-        throw msa::ConfigError("CSV 格式或运行顺序选择无效");
+        throw msa::ConfigError("数据布局或运行顺序选择无效");
     msa::Json seed = nullptr;
     if (d.csvFormat != 0 && d.runMode != 0) {
         seed = numeric(d.runSeed, "运行顺序随机数种子", true, true);
@@ -112,15 +132,30 @@ inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
             seed = nullptr;
         }
     }
-    return msa::normalize_output({{"directory", trim(d.directory)},
-                                  {"filename", trim(d.filename)},
-                                  {"existing_file", d.existingFile ? "overwrite" : "number"},
-                                  {"format", csv_formats[d.csvFormat]},
-                                  {"run_order",
-                                   {{"mode", run_order_modes[d.runMode]},
-                                    {"randomize_operators", d.randomOperators},
-                                    {"seed", seed},
-                                    {"store_standard_order", d.storeStandardOrder}}}});
+    return {{"directory", trim(d.directory)},
+            {"filename", trim(d.filename)},
+            {"file_type", d.dataFileType == 1 ? "xlsx" : "csv"},
+            {"existing_file", d.existingFile ? "overwrite" : "number"},
+            {"format", csv_formats[d.csvFormat]},
+            {"silent", {{"csv", d.silentCsv}, {"charts", d.silentCharts},
+                        {"comparison_report", d.silentReport}}},
+            {"run_order", {{"mode", run_order_modes[d.runMode]},
+                           {"randomize_operators", d.randomOperators},
+                           {"seed", seed}, {"store_standard_order", d.storeStandardOrder}}}};
+}
+inline msa::Json data_output_config(const Draft &d) {
+    return msa::normalize_output(data_output_fields(d, false));
+}
+inline msa::Json csv_output_config(const Draft &d) { return data_output_config(d); }
+inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
+    if (d.reportFormat < 0 || d.reportFormat > 1)
+        throw msa::ConfigError("对照报告格式选择无效");
+    auto output = data_output_fields(d, saveInactiveSeed);
+    output["charts"] = {{"directory", trim(d.chartDirectory)}, {"filename", d.chartFilename}};
+    output["comparison_report"] = {{"format", d.reportFormat == 1 ? "html" : "pdf"},
+                                   {"directory", trim(d.reportDirectory)},
+                                   {"filename", d.reportFilename}};
+    return msa::normalize_output(output);
 }
 enum class ConfigUse { Full, Generation, Analysis };
 inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
@@ -168,6 +203,7 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
     c["generation"] = {{"center", numeric(d.center, "中心", false, true)},
                        {"priority", d.priority ? "indicators" : "center"},
                        {"require_normality", d.requireNormality},
+                       {"residual_model", anova && d.variedResiduals ? "varied" : "standard"},
                        {"part_sampling", part_sampling_modes[d.partSampling]},
                        {"minimum_part_span_pct",
                         numeric(d.minimumPartSpanPct, "最低部件跨度", false, true)},
@@ -180,8 +216,11 @@ inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
                        {"timeout_seconds", numeric(d.timeout, "搜索时限")}};
     c["target_defaults"] = {{"percentage_tolerance_pp", numeric(d.percentError, "默认百分比误差")},
                             {"ndc_tolerance", numeric(d.ndcError, "默认 ndc 误差", true)}};
-    if (use == ConfigUse::Full)
+    if (use == ConfigUse::Full) {
         c["output"] = output_config(d, true);
+        c["input"]["directory"] = trim(d.importDirectory);
+        c["input"]["filename"] = d.importFilename;
+    }
     const char *modes[]{"", "target", "between", "at_most", "at_least"};
     for (int i = 0; i < 5; ++i) {
         const auto &t = d.targets[i];
@@ -235,6 +274,7 @@ inline Draft from_config(const msa::Json &raw) {
     d.timeout = text(g["timeout_seconds"]);
     d.priority = g["priority"] == "indicators";
     d.requireNormality = g["require_normality"].get<bool>();
+    d.variedResiduals = g["residual_model"] == "varied";
     for (int i = 0; i < int(part_sampling_modes.size()); ++i)
         if (g["part_sampling"] == part_sampling_modes[i])
             d.partSampling = i;
@@ -243,7 +283,20 @@ inline Draft from_config(const msa::Json &raw) {
     d.percentError = text(c["target_defaults"]["percentage_tolerance_pp"]);
     d.ndcError = text(c["target_defaults"]["ndc_tolerance"]);
     d.directory = c["output"]["directory"];
+    d.importDirectory = c["input"]["directory"];
+    d.importFilename = c["input"]["filename"];
+    d.chartDirectory = c["output"]["charts"]["directory"];
+    d.chartFilename = c["output"]["charts"]["filename"];
     d.filename = c["output"]["filename"];
+    d.dataFileType = c["output"]["file_type"] == "xlsx";
+    const auto &silent = c["output"]["silent"];
+    d.silentCsv = silent["csv"];
+    d.silentCharts = silent["charts"];
+    d.silentReport = silent["comparison_report"];
+    const auto &report = c["output"]["comparison_report"];
+    d.reportFormat = report["format"] == "html";
+    d.reportDirectory = report["directory"];
+    d.reportFilename = report["filename"];
     d.existingFile = c["output"]["existing_file"] == "overwrite";
     for (int i = 0; i < int(csv_formats.size()); ++i)
         if (c["output"]["format"] == csv_formats[i])

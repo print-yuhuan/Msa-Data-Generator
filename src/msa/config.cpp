@@ -10,7 +10,8 @@ Json default_config() {
     Json targets = Json::object();
     for (auto key : metric_keys)
         targets[key] = nullptr;
-    return {{"schema_version", 1},
+    return {{"schema_version", 2},
+            {"input", {{"directory", ""}, {"filename", ""}}},
             {"design", {{"operators", 3}, {"replicates", 3}, {"parts", 10}}},
             {"analysis",
              {{"method", "crossed_xbarr"},
@@ -31,6 +32,7 @@ Json default_config() {
               {"priority", "center"},
               {"require_normality", false},
               {"part_sampling", "default"},
+              {"residual_model", "standard"},
               {"scale_mode", "auto"},
               {"reference_tv_sd", nullptr},
               {"minimum_part_span_pct", nullptr},
@@ -42,10 +44,15 @@ Json default_config() {
             {"targets", targets},
             {"output",
              {{"directory", ""},
-              {"filename", "msa_data.csv"},
+              {"filename", "msa_data"},
+              {"file_type", "csv"},
               {"encoding", "utf-8-sig"},
               {"existing_file", "number"},
               {"format", "default"},
+              {"silent", {{"csv", false}, {"charts", false}, {"comparison_report", false}}},
+              {"charts", {{"directory", ""}, {"filename", default_chart_basename}}},
+              {"comparison_report", {{"format", "pdf"}, {"directory", ""},
+                                     {"filename", default_report_basename}}},
               {"run_order",
                {{"mode", "standard"},
                 {"randomize_operators", false},
@@ -86,8 +93,26 @@ bool one_of(const Json &value, std::initializer_list<const char *> values) {
 } // namespace
 Json normalize_config(const Json &raw) {
     auto c = merge(default_config(), raw);
-    if (!c["schema_version"].is_number_integer() || c["schema_version"] != 1)
+    if (!c["schema_version"].is_number_integer() ||
+        (c["schema_version"] != 1 && c["schema_version"] != 2))
         throw ConfigError("不支持的配置版本");
+    if (c["schema_version"] == 1) {
+        // Only measurement export used template syntax in version 1. Preserve
+        // literal brackets in the other names, including text that resembles a token.
+        for (Json *field : {&c["input"]["filename"], &c["output"]["charts"]["filename"],
+                            &c["output"]["comparison_report"]["filename"]}) {
+            if (!field->is_string())
+                continue;
+            std::string escaped;
+            for (char ch : field->get_ref<const std::string &>()) {
+                if (ch == '[' || ch == ']')
+                    escaped += ch;
+                escaped += ch;
+            }
+            *field = std::move(escaped);
+        }
+        c["schema_version"] = 2;
+    }
     auto &d = c["design"], &a = c["analysis"], &s = c["specification"], &g = c["generation"],
          &t = c["target_defaults"], &out = c["output"];
     number(d["operators"], "人员数", 2, 3, true);
@@ -132,6 +157,8 @@ Json normalize_config(const Json &raw) {
         throw ConfigError("要求近似正态必须为布尔值");
     if (!one_of(g["part_sampling"], {"default", "even", "stratified", "center_dense", "end_dense"}))
         throw ConfigError("部件取样方案无效");
+    if (!one_of(g["residual_model"], {"standard", "varied"}))
+        throw ConfigError("ANOVA 子组残差模式须为 standard 或 varied");
     number(g["center"], "数据中心", -1e12, 1e12, false, true);
     number(g["reference_tv_sd"], "参考 TV_SD", 1e-12, 1e12, false, true);
     number(g["minimum_part_span_pct"], "最低部件跨度（规格宽度的百分比）", 0, 100, false, true);
@@ -177,15 +204,47 @@ Json normalize_config(const Json &raw) {
         if (target.contains(tol))
             number(target[tol], std::string(k) + "允许误差", 0, 1000000, nd);
     }
-    if (!out["directory"].is_string())
-        throw ConfigError("输出目录必须是字符串");
-    if (!out["filename"].is_string())
-        throw ConfigError("输出文件名须为 .csv 文件名");
-    validate_filename_template(out["filename"].get<std::string>());
+    const auto check_directory = [](const Json &directory, const char *label) {
+        if (!directory.is_string() ||
+            directory.get_ref<const std::string &>().find('\0') != std::string::npos)
+            throw ConfigError(std::string(label) + "须为有效的路径字符串");
+    };
+    check_directory(c["input"]["directory"], "测量数据导入目录");
+    check_directory(out["directory"], "测量数据导出目录");
+    check_directory(out["charts"]["directory"], "图表导出目录");
+    check_directory(out["comparison_report"]["directory"], "方法对比报告导出目录");
+    const auto normalize_name = [](Json &name, const char *label, const auto &normalize) {
+        if (!name.is_string())
+            throw ConfigError(std::string(label) + "须为字符串");
+        try {
+            name = normalize(name.get_ref<const std::string &>());
+        } catch (const ConfigError &e) {
+            throw ConfigError(std::string(label) + "：" + e.what());
+        }
+    };
+    normalize_name(c["input"]["filename"], "测量数据导入名称", normalize_import_filename);
+    normalize_name(out["charts"]["filename"], "图表导出名称", [](const auto &name) {
+        return normalize_export_basename(name, ExportBasenameKind::Chart, ".png");
+    });
+    normalize_name(out["comparison_report"]["filename"], "方法对比报告导出名称", [&](const auto &name) {
+        const auto extension = out["comparison_report"]["format"] == "html" ? ".html" : ".pdf";
+        return normalize_export_basename(name, ExportBasenameKind::ComparisonReport, extension);
+    });
+    for (const char *key : {"csv", "charts", "comparison_report"})
+        if (!out["silent"][key].is_boolean())
+            throw ConfigError(std::string("静默导出开关须为布尔值：output.silent.") + key);
+    const auto &report = out["comparison_report"];
+    if (!one_of(report["format"], {"html", "pdf"}))
+        throw ConfigError("对照报告格式须为 html 或 pdf");
+    if (!one_of(out["file_type"], {"csv", "xlsx"}))
+        throw ConfigError("数据文件类型须为 csv 或 xlsx");
+    normalize_name(out["filename"], "测量数据导出名称", [&](const auto &name) {
+        return normalize_filename_template(name, out["file_type"].get_ref<const std::string &>());
+    });
     if (!one_of(out["existing_file"], {"number", "overwrite"}))
         throw ConfigError("同名文件策略须为 number/overwrite");
     if (!one_of(out["format"], {"default", "minitab", "spss", "jmp19", "origin", "matlab"}))
-        throw ConfigError("CSV 导出格式无效");
+        throw ConfigError("数据行列布局无效");
     if (!one_of(out["encoding"], {"utf-8-sig", "utf-8"}))
         throw ConfigError("CSV 仅支持 UTF-8 编码");
     out["encoding"] = out["format"] == "default" ? "utf-8-sig" : "utf-8";
@@ -280,6 +339,8 @@ Json validate_request(const Json &raw) {
         if (!g["minimum_part_span_pct"].is_null()) {
             const double required_span = (usl - lsl) * (g["minimum_part_span_pct"].get<double>() / 100);
             const double grid_span = grid_high - grid_low;
+            if (g["minimum_part_span_pct"] == 100 && (grid_low != lsl || grid_high != usl))
+                throw InfeasibleError("严格模式下 100% 部件跨度要求两个规格限都可以按输出精度表示。");
             // Leave headroom for decimal conversion and subtraction at the bounds.
             const double slack = 8 * std::numeric_limits<double>::epsilon() *
                                  std::max(std::abs(lsl), std::abs(usl));

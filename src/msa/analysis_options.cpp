@@ -213,6 +213,12 @@ void apply_analysis_options(Json &m, const Json &cfg) {
             intervals["TV"] = {
                 {"lower", a["confidence"]["bound"] == "upper" ? Json(nullptr) : Json(variance)},
                 {"upper", a["confidence"]["bound"] == "lower" ? Json(nullptr) : Json(variance)}};
+            confidence["interval_source"] = {{"PV", "historical_tv_minus_grr_variance"},
+                                             {"TV", "fixed_historical_variance"}};
+            if (confidence.contains("effective_df")) {
+                confidence["effective_df"]["PV"] = nullptr;
+                confidence["effective_df"]["TV"] = nullptr;
+            }
         }
         for (const auto &entry : intervals.items()) {
             for (const auto *bound : {"lower", "upper"}) {

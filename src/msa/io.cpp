@@ -1,14 +1,18 @@
 #include "core.hpp"
+#include "xlsx.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <locale>
 #include <sstream>
+#include <string_view>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
+#include <shlobj.h>
 #else
 #include <cerrno>
 #include <cstdlib>
@@ -52,16 +56,68 @@ std::filesystem::path config_path() {
     return std::filesystem::path(home) / "MSA数据生成器" / "msa_generator.json";
 #endif
 }
-std::filesystem::path configured_csv_path(const Json &cfg) {
-    const auto c = normalize_config(cfg);
-    auto directory = std::filesystem::u8path(c["output"]["directory"].get<std::string>());
+std::filesystem::path desktop_directory() {
+#ifdef _WIN32
+    PWSTR raw = nullptr;
+    const auto result = SHGetKnownFolderPath(FOLDERID_Desktop, KF_FLAG_DONT_VERIFY, nullptr, &raw);
+    const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> storage(raw, &CoTaskMemFree);
+    if (FAILED(result) || !raw || !*raw)
+        throw ConfigError("无法确定系统桌面位置，请设置完整的数据目录。");
+    return std::filesystem::path(raw);
+#else
+    const char *home_env = std::getenv("HOME");
+    if (!home_env || !std::filesystem::path(home_env).is_absolute())
+        throw ConfigError("无法确定用户桌面，请设置 HOME 或完整的数据目录。");
+    const std::filesystem::path home(home_env);
+    const char *xdg = std::getenv("XDG_CONFIG_HOME");
+    const auto settings = xdg && std::filesystem::path(xdg).is_absolute()
+                              ? std::filesystem::path(xdg) : home / ".config";
+    std::ifstream dirs(settings / "user-dirs.dirs");
+    std::string line;
+    constexpr std::string_view key = "XDG_DESKTOP_DIR=";
+    while (std::getline(dirs, line)) {
+        if (line.compare(0, key.size(), key) != 0)
+            continue;
+        // The XDG file stores absolute paths or a quoted $HOME-relative path.
+        // Interpret the value locally; shell expressions are never evaluated.
+        std::istringstream field(line.substr(key.size()));
+        std::string value;
+        if (!(field >> std::quoted(value)) || value.empty())
+            break;
+        if (value == "$HOME" || value == "${HOME}")
+            return home;
+        for (const std::string_view prefix : {"$HOME/", "${HOME}/"})
+            if (value.compare(0, prefix.size(), prefix) == 0)
+                return (home / value.substr(prefix.size())).lexically_normal();
+        if (std::filesystem::path(value).is_absolute())
+            return std::filesystem::path(value).lexically_normal();
+        break;
+    }
+    return home / "Desktop";
+#endif
+}
+std::filesystem::path resolve_output_directory(const std::string &setting) {
+    auto directory = std::filesystem::u8path(setting);
     if (directory.has_root_name() && !directory.has_root_directory())
         throw ConfigError("输出目录请使用完整路径或普通相对路径，不能使用盘符相对路径。");
-    if (directory.empty() || directory.is_relative())
-        directory = config_path().parent_path() / directory;
-    return (directory / std::filesystem::u8path(c["output"]["filename"].get<std::string>()))
+#ifdef _WIN32
+    if (!directory.has_root_name() && directory.has_root_directory())
+        throw ConfigError("目录以路径分隔符开头时须包含盘符或完整网络共享路径。");
+#endif
+    if (directory.empty())
+        return desktop_directory();
+    if (directory.is_relative())
+        directory = desktop_directory() / directory;
+    return directory.lexically_normal();
+}
+std::filesystem::path configured_data_path(const Json &cfg) {
+    const auto c = normalize_config(cfg);
+    return (resolve_output_directory(c["output"]["directory"].get<std::string>()) /
+            std::filesystem::u8path(c["output"]["filename"].get<std::string>() + "." +
+                                    c["output"]["file_type"].get<std::string>()))
         .lexically_normal();
 }
+std::filesystem::path configured_csv_path(const Json &cfg) { return configured_data_path(cfg); }
 void atomic_text(const std::filesystem::path &path, const std::string &bytes, ExistingFile policy) {
     auto dir = path.parent_path();
     if (dir.empty())
@@ -205,115 +261,140 @@ std::string csv_text(const Matrix &matrix, int dp) {
     }
     return s;
 }
-Matrix parse_csv(const std::string &bytes) {
-    std::string s = bytes;
-    if (s.compare(0, 3, "\xef\xbb\xbf") == 0)
-        s.erase(0, 3);
-    Matrix matrix;
-    std::istringstream in(s);
-    in.imbue(std::locale::classic());
-    std::string line;
-    const bool labeled = !s.empty() && s.front() == ',';
-    std::size_t columns = 0;
-    std::vector<std::size_t> operatorRows;
-    if (labeled) {
-        std::getline(in, line);
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-        columns = std::count(line.begin(), line.end(), ',');
-        std::string expected;
-        for (std::size_t part = 1; part <= columns; ++part)
-            expected += ',' + std::to_string(part);
-        if (line != expected)
-            throw ConfigError("宽表 CSV 列号必须从 1 开始连续排列");
-    }
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-        if (labeled) {
-            if (line.size() < 2 || line[1] != ',' || line[0] < 'A' || line[0] > 'Z')
-                throw ConfigError("宽表 CSV 缺少有效人员标记");
-            const auto op = std::size_t(line[0] - 'A');
-            if (op == operatorRows.size())
-                operatorRows.push_back(0);
-            else if (operatorRows.empty() || op != operatorRows.size() - 1)
-                throw ConfigError("宽表 CSV 人员必须从 A 开始分组连续排列");
-            ++operatorRows.back();
-            line.erase(0, 2);
-        }
-        std::vector<double> row;
-        std::string cell;
-        bool quoted = false, closed = false;
-        auto flush = [&] {
-            auto lo = cell.find_first_not_of(" \t\r\n"), hi = cell.find_last_not_of(" \t\r\n");
-            if (lo == cell.npos)
-                throw ConfigError("CSV 包含空数值");
-            row.push_back(parse_number(cell.substr(lo, hi - lo + 1)));
-            cell.clear();
-            closed = false;
-        };
-        for (std::size_t i = 0; i < line.size(); ++i) {
-            char c = line[i];
-            if (quoted) {
-                if (c == '"') {
-                    if (i + 1 < line.size() && line[i + 1] == '"') {
-                        cell += '"';
-                        ++i;
-                    } else {
-                        quoted = false;
-                        closed = true;
-                    }
-                } else
-                    cell += c;
-            } else if (c == ',') {
-                flush();
-            } else if (c == '"' && cell.empty() && !closed)
-                quoted = true;
-            else {
-                if (closed && c != ' ' && c != '\t')
-                    throw ConfigError("CSV 引号格式无效");
-                cell += c;
-            }
-        }
-        if (quoted)
-            throw ConfigError("CSV 引号未闭合");
-        flush();
-        if (labeled && row.size() != columns)
-            throw ConfigError("宽表 CSV 数据列数与列号不符");
-        matrix.push_back(std::move(row));
-    }
-    if (labeled && (operatorRows.empty() ||
-                    !std::all_of(operatorRows.begin(), operatorRows.end(),
-                                 [&](std::size_t rows) { return rows == operatorRows.front(); })))
-        throw ConfigError("宽表 CSV 人员测量次数不一致或缺少数据");
-    return matrix;
-}
 Matrix read_csv(const std::filesystem::path &path) {
     return parse_csv(read_text(path, csv_read_limit));
 }
-Json export_csv(const Result &result, const std::filesystem::path &path, ExistingFile policy) {
-    return export_csv(result, path, result.config.value("output", Json::object()), policy);
+std::string data_file_type(const std::filesystem::path &path) {
+    auto extension = path.extension().u8string();
+    for (char &ch : extension)
+        if (ch >= 'A' && ch <= 'Z')
+            ch = static_cast<char>(ch + ('a' - 'A'));
+    return extension == ".xlsx" ? "xlsx" : "csv";
 }
-Json export_csv(const Result &result, const std::filesystem::path &path, const Json &output,
-                ExistingFile policy) {
+namespace {
+Matrix decode_data(const std::string &bytes, const std::string &type, const Json &config) {
+    return type == "xlsx" ? parse_export_csv(csv_from_xlsx(bytes), config)
+                          : parse_export_csv(bytes, config);
+}
+std::string encode_data(const Result &study, const Json &settings, const std::string &type,
+                        int decimal_places) {
+    auto bytes = export_csv_text(study, settings);
+    if (type == "xlsx")
+        return xlsx_from_csv(bytes, decimal_places);
+    return bytes;
+}
+ImportedData import_sheet(const XlsxWorkbook &workbook, std::size_t index, const Json &config) {
+    const auto &names = workbook.sheet_names();
+    if (index >= names.size())
+        throw ConfigError("XLSX 所选工作表编号无效");
+    try {
+        return {parse_export_csv(workbook.csv(index), config), names[index]};
+    } catch (const std::invalid_argument &e) {
+        throw ConfigError("工作表“" + names[index] + "”：" + e.what());
+    }
+}
+} // namespace
+Matrix read_data(const std::filesystem::path &path, const Json &config) {
+    const auto type = data_file_type(path);
+    return decode_data(read_file_bytes(path, type == "xlsx" ? xlsx_read_limit : csv_read_limit),
+                       type, config);
+}
+Matrix read_data(const std::filesystem::path &path, const Json &config,
+                 const std::string &sheet_name) {
+    if (data_file_type(path) != "xlsx")
+        throw ConfigError("只有 XLSX 工作簿可以指定工作表");
+    const XlsxWorkbook workbook(read_file_bytes(path, xlsx_read_limit));
+    const auto &names = workbook.sheet_names();
+    const auto sheet = std::find(names.begin(), names.end(), sheet_name);
+    if (sheet == names.end())
+        throw ConfigError("XLSX 找不到工作表“" + sheet_name + "”");
+    return import_sheet(workbook, static_cast<std::size_t>(sheet - names.begin()), config).matrix;
+}
+std::optional<ImportedData> read_data(const std::filesystem::path &path, const Json &config,
+                                      const WorksheetSelector &selector) {
+    if (data_file_type(path) != "xlsx")
+        return ImportedData{parse_export_csv(read_file_bytes(path, csv_read_limit), config), {}};
+    const XlsxWorkbook workbook(read_file_bytes(path, xlsx_read_limit));
+    const auto &names = workbook.sheet_names();
+    if (names.size() == 1 || !selector)
+        return import_sheet(workbook, 0, config);
+    const auto index = selector(names);
+    if (!index)
+        return std::nullopt;
+    return import_sheet(workbook, *index, config);
+}
+Json export_data(const Result &result, const std::filesystem::path &path, ExistingFile policy) {
+    return export_data(result, path, result.config.value("output", Json::object()), policy);
+}
+Json export_data(const Result &result, const std::filesystem::path &path, const Json &output,
+                 ExistingFile policy, Json *receipt) {
     // Immutable generation configuration is the sole authority for all checks.
     auto cfg = validate_request(result.config);
     if (!qualified(calculate(result.matrix, cfg), cfg))
         throw std::invalid_argument("内存数据复验失败，未写入文件。");
     const auto rounded = parse_csv(csv_text(result.matrix, cfg["generation"]["decimal_places"]));
     if (!qualified(calculate(rounded, cfg), cfg))
-        throw std::invalid_argument("CSV 精度复验失败，未写入文件。");
-    const auto content = export_csv_text(result, output);
-    if (parse_export_csv(content, cfg) != rounded)
-        throw std::invalid_argument("CSV 记录对应关系复验失败，未写入文件。");
+        throw std::invalid_argument("导出精度复验失败，未写入文件。");
+    const auto type = data_file_type(path);
+    const auto content = encode_data(result, output, type, cfg["generation"]["decimal_places"]);
+    if (decode_data(content, type, cfg) != rounded)
+        throw std::invalid_argument("导出记录对应关系复验失败，未写入文件。");
     atomic_text(path, content, policy);
     // Verify raw bytes, including the format-specific BOM and row order.
     const auto saved = read_file_bytes(path, content.size());
     if (saved != content)
-        throw std::invalid_argument("保存后的 CSV 内容或运行顺序与预期不符，请勿使用该文件。");
-    auto actual = calculate(parse_export_csv(saved, cfg), cfg);
+        throw std::invalid_argument("保存后的数据文件内容或运行顺序与预期不符，请勿使用该文件。");
+    auto actual = calculate(decode_data(saved, type, cfg), cfg);
     if (!qualified(actual, cfg))
-        throw std::invalid_argument("保存后的 CSV 复验失败，请勿使用该文件。");
+        throw std::invalid_argument("保存后的数据文件复验失败，请勿使用该文件。");
+    if (receipt) {
+        const auto settings = normalize_output(output);
+        *receipt = {{"schema_version", 1},
+                    {"file_type", type},
+                    {"data_path", path.u8string()},
+                    {"format", settings.at("format")},
+                    {"run_order", settings.at("run_order")},
+                    {"effective_run_seed", effective_run_seed(result, settings)},
+                    {"sha256", sha256(saved)}};
+        if (type == "csv")
+            (*receipt)["csv_path"] = path.u8string();
+    }
     return actual;
+}
+Json export_csv(const Result &result, const std::filesystem::path &path, ExistingFile policy) {
+    return export_data(result, path, policy);
+}
+Json export_csv(const Result &result, const std::filesystem::path &path, const Json &output,
+                ExistingFile policy, Json *receipt) {
+    return export_data(result, path, output, policy, receipt);
+}
+void replay_data(const Json &report, const std::filesystem::path &path, ExistingFile policy) {
+    if (!report.is_object() || !report.contains("export") || report.value("analysis_only", false))
+        throw ConfigError("重放需要含 export 清单的生成报告。请用 --report 保存新版生成报告。");
+    const auto &receipt = report.at("export");
+    if (!receipt.is_object() || receipt.at("schema_version") != 1)
+        throw ConfigError("不支持此数据文件导出清单版本");
+    const auto type = receipt.value("file_type", std::string("csv"));
+    if (type != data_file_type(path))
+        throw ConfigError("重放目标类型与报告中的原始数据文件类型不一致");
+    Result study;
+    study.config = normalize_config(report.at("config"));
+    study.matrix = report.at("matrix").get<Matrix>();
+    auto settings = study.config.at("output");
+    settings["format"] = receipt.at("format");
+    settings["run_order"] = receipt.at("run_order");
+    const auto &seed = receipt.at("effective_run_seed");
+    const bool shuffled =
+        settings.at("format") != "default" && settings.at("run_order").at("mode") != "standard";
+    if (shuffled == seed.is_null())
+        throw ConfigError("导出清单中的实际排序种子与运行顺序不一致");
+    settings["run_order"]["seed"] = seed;
+    const auto bytes = encode_data(study, settings, type, study.config["generation"]["decimal_places"]);
+    if (sha256(bytes) != receipt.at("sha256"))
+        throw ConfigError("重建数据文件的 SHA-256 与报告不一致，未写入文件");
+    atomic_text(path, bytes, policy);
+}
+void replay_csv(const Json &report, const std::filesystem::path &path, ExistingFile policy) {
+    replay_data(report, path, policy);
 }
 } // namespace msa

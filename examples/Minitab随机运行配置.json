@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "design": {
     "operators": 3,
     "replicates": 3,
@@ -55,7 +55,8 @@
   },
   "output": {
     "directory": "",
-    "filename": "MSA_[DATETIME]_[SEED].csv",
+    "filename": "MSA_[DATETIME]_[SEED]",
+    "file_type": "csv",
     "encoding": "utf-8",
     "existing_file": "number",
     "format": "minitab",

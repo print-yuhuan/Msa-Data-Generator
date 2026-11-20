@@ -6,6 +6,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <tuple>
 
 // There is no window loop to wake in this layout-only executable.
 namespace app {
@@ -235,7 +236,7 @@ void options_grouping(const eui::Ui &ui, int tab) {
         {"design.card", "generation.rules.card", "generation.card", "advanced.card"},
         {"analysis.card", "analysis.evaluation.card", "analysis.process.card",
          "analysis.statistics.card"},
-        {"output.card", "runorder.card", "output.files.card"},
+        {"output.files.card", "export.preferences.card", "output.card", "runorder.card"},
     }};
     for (int category = 0; category < 3; ++category)
         for (const auto *id : groups[category])
@@ -289,7 +290,24 @@ void options_grouping(const eui::Ui &ui, int tab) {
         aligned("analysis.misclassification.control", "analysis.confidence.control");
     } else {
         group("output.card", {"csvformat", "runorder.standard.hit"});
-        group("output.files.card", {"directory.hit", "filename.hit", "collision"});
+        group("output.files.card", {"import.directory.hit", "import.filename.hit", "directory.hit",
+                                    "filename.hit", "collision", "chart.directory.hit",
+                                    "chart.filename.hit", "report.directory.hit", "report.filename.hit",
+                                    "import.directory.browse.bg", "directory.browse.bg",
+                                    "chart.directory.browse.bg", "report.directory.browse.bg"});
+        group("export.preferences.card", {"silent.csv.hit", "silent.charts.hit", "silent.report.hit",
+                                          "report.format", "data.filetype"});
+        aligned("data.filetype.label", "report.format.label");
+        aligned("data.filetype", "report.format");
+        for (const auto id : {"silent.csv.label", "silent.charts.label", "silent.report.label",
+                              "report.format.label", "data.filetype.label", "report.directory.label", "import.directory.label",
+                              "import.filename.label", "directory.label", "filename.label",
+                              "chart.directory.label", "chart.filename.label", "report.filename.label"}) {
+            const auto &label = node(id);
+            if (core::TextPrimitive::measureTextWidth(label.text, label.fontFamily, label.fontSize,
+                                                      label.fontWeight) > label.frame.width)
+                throw std::runtime_error("导出选项标签显示不全：" + label.text);
+        }
         group("runorder.card", {"runorder.mode.0.hit", "runorder.mode.1.hit",
                                 "runorder.mode.2.hit", "runorder.operators.hit",
                                 "runorder.seed.hit"});
@@ -755,6 +773,19 @@ void regrouped_settings_state(const msa::Result &generated) {
         if (gui::state.draft.*member != 1 || !staleResult())
             throw std::runtime_error(std::string("生成规则变更未正确保留并标记旧结果：") + id);
     }
+    {
+        reset(0);
+        gui::state.draft.analysisMethod = 1;
+        gui::state.draft.variedResiduals = false;
+        eui::Ui ui;
+        ui.begin("teaching-residuals");
+        gui::optionsPage(ui, 588, 500);
+        ui.end();
+        ui.layout(588, 500);
+        click(ui, "residual.varied.hit");
+        if (!gui::state.draft.variedResiduals || !staleResult())
+            throw std::runtime_error("ANOVA 子组波动开关未修改生成配置");
+    }
     for (const bool initial : {false, true}) {
         reset(0);
         gui::state.draft.requireNormality = initial;
@@ -834,7 +865,76 @@ void regrouped_settings_state(const msa::Result &generated) {
     gui::optionsPage(output, 1232, 500);
     output.end();
     output.layout(1232, 500);
+    for (const auto &[id, label] : std::array<std::pair<const char *, const char *>, 7>{{
+             {"import.filename.label", "测量数据导入名称"}, {"filename.label", "测量数据导出名称"},
+             {"chart.filename.label", "图表导出名称"}, {"report.filename.label", "方法对比报告导出名称"},
+             {"directory.label", "测量数据导出目录"}, {"chart.directory.label", "图表导出目录"},
+             {"report.directory.label", "方法对比报告导出目录"}}}) {
+        if (!output.find(id) || output.find(id)->text != label)
+            throw std::runtime_error(std::string("选项页名称或目录标签不符：") + label);
+    }
+    if (gui::state.draft.silentCsv || gui::state.draft.silentCharts || gui::state.draft.silentReport ||
+        gui::state.draft.dataFileType != 0 || gui::state.draft.reportFormat != 0)
+        throw std::runtime_error("首次使用应全部询问保存位置，测量数据默认 CSV，报告默认 PDF");
+    for (const auto &[fieldId, member, entered, expected] :
+         std::array<std::tuple<const char *, std::string native_ui::Draft::*, const char *, const char *>, 4>{{
+             {"filename", &native_ui::Draft::filename, "测量_[YYYY].xlsx", "测量_[YYYY]"},
+             {"import.filename", &native_ui::Draft::importFilename, "测量.v2.CSV", "测量.v2"},
+             {"chart.filename", &native_ui::Draft::chartFilename, "控制图.jpeg", "控制图"},
+             {"report.filename", &native_ui::Draft::reportFilename, "报告.pdf", "报告"}}}) {
+        input(output, fieldId, entered);
+        output.find(std::string(fieldId) + ".hit")->onFocusChanged(false);
+        if (gui::state.draft.*member != expected)
+            throw std::runtime_error(std::string("文件名输入结束后未显示基本名：") + fieldId);
+    }
     click(output, "runorder.standard.hit");
+    click(output, "silent.csv.hit");
+    click(output, "silent.charts.hit");
+    click(output, "silent.report.hit");
+    click(output, "report.format.hit.1");
+    click(output, "data.filetype.hit.1");
+    input(output, "report.directory", "results");
+    input(output, "import.directory", "输入");
+    input(output, "import.filename", "来料复核");
+    input(output, "chart.directory", "plots");
+    input(output, "chart.filename", "测量图");
+    input(output, "report.filename", "方法比对");
+    const auto chooser = gui::state.chooseDirectory;
+    for (const auto &field :
+         std::array<std::pair<const char *, std::string native_ui::Draft::*>, 4>{{
+             {"import.directory", &native_ui::Draft::importDirectory},
+             {"directory", &native_ui::Draft::directory},
+             {"chart.directory", &native_ui::Draft::chartDirectory},
+             {"report.directory", &native_ui::Draft::reportDirectory}}}) {
+        const auto current = gui::state.draft.*field.second;
+        bool opened = false;
+        gui::state.chooseDirectory = [&](const auto &initial) -> std::optional<std::filesystem::path> {
+            opened = initial == msa::resolve_output_directory(current);
+            return std::nullopt;
+        };
+        click(output, std::string(field.first) + ".browse.bg");
+        if (!opened || gui::state.draft.*field.second != current)
+            throw std::runtime_error("目录选择器未从设定目录打开，或取消后改变了设置");
+    }
+    gui::state.chooseDirectory = chooser;
+    if (!gui::state.draft.silentCsv || !gui::state.draft.silentCharts ||
+        !gui::state.draft.silentReport || gui::state.draft.reportFormat != 1 ||
+        gui::state.draft.dataFileType != 1 ||
+        gui::state.draft.reportDirectory != "results")
+        throw std::runtime_error("导出方式、报告格式或目录未响应界面设置");
+    const auto preferencesPath = std::filesystem::temp_directory_path() /
+                                 ("msa-ui-export-preferences-" +
+                                  std::to_string(gui::Clock::now().time_since_epoch().count()) + ".json");
+    msa::save_config(native_ui::to_config(gui::state.draft), preferencesPath);
+    const auto restored = native_ui::from_config(msa::load_config(preferencesPath));
+    std::filesystem::remove(preferencesPath);
+    if (!restored.silentCsv || !restored.silentCharts || !restored.silentReport ||
+        restored.dataFileType != 1 ||
+        restored.reportFormat != 1 || restored.reportDirectory != "results" ||
+        restored.chartDirectory != "plots" || restored.chartFilename != "测量图" ||
+        restored.importDirectory != "输入" || restored.importFilename != "来料复核" ||
+        restored.reportFilename != "方法比对")
+        throw std::runtime_error("刚保存的导出偏好重载后发生变化");
     if (!gui::state.draft.storeStandardOrder || !gui::state.validResult() ||
         gui::state.revision != revision || !gui::state.configDirty || !gui::state.result ||
         gui::state.result->matrix != generated.matrix)
@@ -893,6 +993,19 @@ void setting_dependencies() {
         configured["analysis"]["confidence"]["level"] != 92 ||
         configured["generation"]["reference_tv_sd"] != .2)
         throw std::runtime_error("合法停用选项未保留");
+    {
+        auto teaching = draft;
+        teaching.analysisMethod = 1;
+        teaching.confidenceEnabled = false;
+        teaching.variedResiduals = true;
+        const auto saved = native_ui::to_config(teaching);
+        if (saved["generation"]["residual_model"] != "varied" ||
+            !native_ui::from_config(saved).variedResiduals)
+            throw std::runtime_error("ANOVA 教学场景未随 GUI 配置保存和还原");
+        teaching.analysisMethod = 0;
+        if (native_ui::to_config(teaching)["generation"]["residual_model"] != "standard")
+            throw std::runtime_error("Xbar-R 误用 ANOVA 教学场景");
+    }
 
     configured["targets"]["GRR_pct"] = {{"mode", "between"}, {"min", 10}, {"max", 20}};
     draft = native_ui::from_config(configured);
@@ -1197,7 +1310,7 @@ void state_recovery(const msa::Result &generated) {
     state.resultRevision = state.revision;
     for (const auto status :
          {gui::Status::Cancelled, gui::Status::SearchFailed, gui::Status::Infeasible,
-          gui::Status::Error, gui::Status::ExportError}) {
+          gui::Status::Error}) {
         state.status = status;
         if (!state.displayedResult() || !state.validResult() ||
             state.result->matrix != generated.matrix)
@@ -1235,6 +1348,17 @@ void state_recovery(const msa::Result &generated) {
     state.draft.randomOperators = true;
     state.draft.storeStandardOrder = true;
     state.draft.runSeed = "713";
+    state.draft.dataFileType = 1;
+    state.draft.silentCsv = true;
+    state.draft.silentCharts = true;
+    state.draft.silentReport = true;
+    state.draft.reportFormat = 1;
+    state.draft.reportDirectory = "reports";
+    state.draft.importDirectory = "inputs";
+    state.draft.importFilename = "input.csv";
+    state.draft.chartDirectory = "charts";
+    state.draft.chartFilename = "chart-name";
+    state.draft.reportFilename = "report-name";
     state.draft.analysisMethod = 1;
     state.draft.interactionMode = 2;
     state.draft.interactionAlpha = "0.1";
@@ -1248,6 +1372,17 @@ void state_recovery(const msa::Result &generated) {
         state.draft.randomOperators != preferences.randomOperators ||
         state.draft.storeStandardOrder != preferences.storeStandardOrder ||
         state.draft.runSeed != preferences.runSeed ||
+        state.draft.dataFileType != preferences.dataFileType ||
+        state.draft.silentCsv != preferences.silentCsv ||
+        state.draft.silentCharts != preferences.silentCharts ||
+        state.draft.silentReport != preferences.silentReport ||
+        state.draft.reportFormat != preferences.reportFormat ||
+        state.draft.reportDirectory != preferences.reportDirectory ||
+        state.draft.importDirectory != preferences.importDirectory ||
+        state.draft.importFilename != preferences.importFilename ||
+        state.draft.chartDirectory != preferences.chartDirectory ||
+        state.draft.chartFilename != preferences.chartFilename ||
+        state.draft.reportFilename != preferences.reportFilename ||
         state.draft.analysisMethod != preferences.analysisMethod ||
         state.draft.interactionMode != preferences.interactionMode ||
         state.draft.interactionAlpha != preferences.interactionAlpha || state.validResult())
@@ -1283,7 +1418,7 @@ void header_status_presentation(const msa::Result &generated) {
         std::array<Tone, 3> tones;
     };
     // 无结果、当前结果和陈旧结果分别验证，避免失败被已有数据覆盖为绿色成功。
-    const std::array<Case, 9> cases{{
+    const std::array<Case, 8> cases{{
         {Status::Ready, {"待生成数据", "数据已生成", "待重新生成"},
          {Tone::Neutral, Tone::Success, Tone::Warning}},
         {Status::Running, {"正在生成", "正在生成", "正在生成"},
@@ -1300,8 +1435,6 @@ void header_status_presentation(const msa::Result &generated) {
          {Tone::Warning, Tone::Warning, Tone::Warning}},
         {Status::SearchFailed, {"未找到可行数据", "未找到 · 结果保留", "未找到可行数据"},
          {Tone::Warning, Tone::Warning, Tone::Warning}},
-        {Status::ExportError, {"CSV 导出失败", "CSV 导出失败", "CSV 导出失败"},
-         {Tone::Error, Tone::Error, Tone::Error}},
     }};
     gui::State business;
     gui::VisualState charts;
@@ -1341,9 +1474,13 @@ void header_status_presentation(const msa::Result &generated) {
             "取消后发生的通用操作异常被旧取消状态覆盖");
     business.status = Status::Success;
     business.message.clear();
+    business.dataExportError = "拒绝访问";
+    require(gui::headerStatusPresentation(business, charts).label == "测量数据导出失败",
+            "上次生成成功掩盖了 CSV 导出错误");
+    business.dataExportError.clear();
     business.page = gui::Page::Charts;
     charts.importedSelected = true;
-    require(gui::headerStatusPresentation(business, charts).label == "待载入 CSV",
+    require(gui::headerStatusPresentation(business, charts).label == "待导入数据",
             "未选取导入数据时仍显示生成结果成功");
     presentations.push_back(gui::headerStatusPresentation(business, charts));
     charts.imported = generated;
@@ -1351,7 +1488,7 @@ void header_status_presentation(const msa::Result &generated) {
             "独立导入数据来源未正确显示");
     presentations.push_back(gui::headerStatusPresentation(business, charts));
     const std::array<std::pair<const char *, const char *>, 6> chartErrors{{
-        {"export", "图表导出失败"}, {"render", "图表渲染异常"}, {"import", "CSV 导入失败"},
+        {"export", "图表导出失败"}, {"render", "图表渲染异常"}, {"import", "测量数据导入失败"},
         {"edit", "图表设置待调整"}, {"directory", "导出目录待检查"}, {"other", "图表操作异常"},
     }};
     for (const auto &[kind, label] : chartErrors) {
@@ -2371,7 +2508,7 @@ void runtime_keyboard_navigation() {
     std::cout
         << "runtime keyboard and pointer navigation preserve focus and skip disabled controls\n";
 }
-void chart_interaction(const msa::Result &generated) {
+void chart_interaction(const msa::Result &generated, const std::filesystem::path &multiSheetWorkbook) {
     const auto savedDraft = gui::state.draft;
     const auto savedPage = gui::state.page;
     const auto revision = gui::state.revision;
@@ -2579,7 +2716,7 @@ void chart_interaction(const msa::Result &generated) {
     };
     const auto outputAnchors = [&] {
         std::array<eui::Rect, 3> frames;
-        const std::array<const char *, 3> ids{"chart.selection.empty", "chart.filename.field",
+        const std::array<const char *, 3> ids{"chart.selection.empty", "chart.file.options.bg",
                                               "chart.output.note"};
         for (std::size_t i = 0; i < ids.size(); ++i) {
             const auto *node = outputUi.find(ids[i]);
@@ -2661,7 +2798,8 @@ void chart_interaction(const msa::Result &generated) {
             page.layout(width, 636);
             controls_fit(page, width, "图表页");
             require(page.find("charts.preview.card") && page.find("chart.selection.count") &&
-                        page.find("chart.open.bg"),
+                        page.find("chart.file.options.bg") && !page.find("chart.directory.hit") &&
+                        !page.find("chart.filename.hit"),
                     "图表页缺少预览、选择计数或目录操作");
             const auto *editorScroll = page.find("chart.editor.scroll");
             if (editing && width >= 1100) {
@@ -2683,31 +2821,152 @@ void chart_interaction(const msa::Result &generated) {
     const auto csv = folder / "study.csv";
     std::filesystem::create_directories(folder);
     msa::atomic_text(csv, msa::export_csv_text(generated, generated.config.at("output")));
+    const auto xlsx = folder / "study.xlsx";
+    require(platform::importFilenameSuggestion(folder, "study") == "study.csv" &&
+                platform::importFilenameSuggestion(folder, "").empty(),
+            "仅有 CSV 或未设置导入名时预填错误");
+    auto workbookOutput = generated.config.at("output");
+    workbookOutput["file_type"] = "xlsx";
+    msa::export_data(generated, xlsx, workbookOutput, msa::ExistingFile::Preserve);
+    require(platform::importFilenameSuggestion(folder, "study") == "study",
+            "同一基本名有 CSV 与 XLSX 时预填不应锁定任一扩展名");
+    std::filesystem::copy_file(xlsx, folder / L"独立工作簿.xlsx");
+    require(platform::importFilenameSuggestion(folder, "独立工作簿") == L"独立工作簿.xlsx",
+            "只有 XLSX 时预填了非工作簿名称");
     gui::state.draft.filename = "[unclosed.csv";
     gui::state.draft.attempts = "未填写";
     gui::state.draft.targets[0] = {1, "待定", ""};
-    require(gui::loadInsightCsv(csv) && gui::visual.importedSelected &&
+    const auto importPicker = gui::state.chooseImportData;
+    gui::state.draft.importDirectory.clear();
+    gui::state.draft.importFilename.clear();
+    bool requested = false;
+    gui::state.chooseImportData = [&](const auto &initial, const auto &filename)
+        -> std::optional<std::filesystem::path> {
+        requested = initial == msa::desktop_directory() && filename.empty();
+        return std::nullopt;
+    };
+    gui::importInsightData();
+    require(requested, "默认导入应从系统桌面打开并留空文件名");
+    gui::state.draft.importDirectory = "自定义导入位置";
+    gui::state.draft.importFilename = "来料_[人员数量]_[[复核]]";
+    requested = false;
+    gui::state.chooseImportData = [&](const auto &initial, const auto &filename)
+        -> std::optional<std::filesystem::path> {
+        requested = initial == msa::desktop_directory() / L"自定义导入位置" &&
+                    filename == "来料_" + gui::state.draft.operators + "_[复核]";
+        return csv;
+    };
+    gui::importInsightData();
+    gui::state.chooseImportData = importPicker;
+    require(requested && gui::state.draft.importDirectory == "自定义导入位置" &&
+                gui::state.draft.importFilename == "来料_[人员数量]_[[复核]]" && gui::visual.importedSelected &&
                 gui::visual.imported->matrix == generated.matrix &&
                 gui::visual.imported->config["analysis"] == generated.config["analysis"] &&
                 gui::visual.imported->config["targets"]["EV_pct"].is_null(),
             "无关的生成或导出草稿影响了 CSV 导入与分析");
+    require(gui::loadInsightData(xlsx) && gui::visual.importedName == "study.xlsx" &&
+                gui::visual.imported->matrix == generated.matrix &&
+                gui::visual.imported->metrics == msa::calculate(generated.matrix, gui::visual.imported->config),
+            "从 XLSX 导入的测量记录或分析结果与原矩阵不一致");
+    require(gui::loadInsightData(csv), "切回 CSV 数据源失败");
     const auto importedConfig = gui::visual.imported->config;
     gui::state.draft.analysisMethod = gui::state.draft.analysisMethod ? 0 : 1;
     require(gui::insightResult()->config == importedConfig, "选项变化悄悄改变了已导入快照");
+    auto heldCsv = folder / "源文件暂时移开.csv";
+    std::filesystem::rename(csv, heldCsv);
+    eui::Ui sourceUi;
+    sourceUi.begin("reanalyze-import");
+    gui::chartSourceCard(sourceUi, 588);
+    sourceUi.end();
+    sourceUi.layout(588, 500);
+    require(sourceUi.find("charts.dataset.report.bg") &&
+                !sourceUi.find("charts.dataset.report.bg")->disabled,
+            "当前数据源缺少可用的方法报告入口");
+    click(sourceUi, "charts.dataset.reanalyze.bg");
+    require(gui::visual.imported->matrix == generated.matrix &&
+                gui::visual.imported->config["analysis"]["method"] != importedConfig["analysis"]["method"] &&
+                gui::visual.imported->metrics == msa::calculate(generated.matrix,
+                                                                gui::visual.imported->config),
+            "重算没有在内存中的原矩阵应用当前分析方法");
+    const auto recalculated = *gui::visual.imported;
+    gui::state.draft.parts = gui::state.draft.parts == "5" ? "6" : "5";
+    require(!gui::reanalyzeInsightData() && gui::visual.imported->config == recalculated.config &&
+                gui::visual.imported->metrics == recalculated.metrics &&
+                gui::visual.errorKind == "reanalysis",
+            "不匹配的设计破坏了原快照");
+    std::filesystem::rename(heldCsv, csv);
+    const auto finishExport = [&] {
+        const auto deadline = gui::Clock::now() + std::chrono::seconds(60);
+        while (gui::visual.busy() && gui::Clock::now() < deadline) {
+            gui::pollVisuals();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        require(!gui::visual.busy(), "异步导出超过测试时限");
+    };
+    using Kind = platform::ExportKind;
+    using Selection = std::optional<platform::SaveTarget>;
+    gui::state.draft.reportDirectory = folder.u8string();
+    gui::state.draft.reportFormat = 0;
+    gui::state.draft.reportFilename = "方法对比_[SEED]";
+    int pickerCalls = 0;
+    auto picker = gui::state.chooseExportPath;
+    Selection next;
+    gui::state.chooseExportPath = [&](const auto &initial, Kind format) {
+        ++pickerCalls;
+        const std::string seed = gui::visual.importedSelected ? "NA" : std::to_string(generated.seed);
+        require(initial == folder / std::filesystem::u8path("方法对比_" + seed + ".pdf") && format == Kind::ReportPdf,
+                "另存为未预填默认报告格式和目录");
+        return next;
+    };
+    gui::exportComparisonReport();
+    require(pickerCalls == 1 && !gui::visual.busy(), "取消报告另存为启动了导出");
+    auto verifyReport = [&](bool imported) {
+        gui::visual.importedSelected = imported;
+        const auto report = folder / (imported ? "imported.html" : "generated.htm");
+        next = platform::SaveTarget{report, Kind::Html, msa::ExistingFile::Preserve};
+        gui::exportComparisonReport();
+        require(gui::visual.busy() && gui::visual.exportingReport &&
+                    gui::headerStatusPresentation().label == "报告导出中",
+                "报告未在后台使用独立状态");
+        gui::visual.importedSelected = !imported;
+        finishExport();
+        const auto html = msa::read_text(report);
+        require(html.find(imported ? "数据导入" : "模拟生成") != html.npos &&
+                    html.find("Xbar-R") != html.npos && html.find("ANOVA") != html.npos,
+                "方法报告未采用选中数据源");
+    };
+    verifyReport(false);
+    verifyReport(true);
+    gui::visual.importedSelected = false;
+    gui::state.draft.silentReport = true;
+    gui::state.draft.reportFormat = 1;
+    for (int i = 0; i < 2; ++i) {
+        gui::exportComparisonReport();
+        finishExport();
+    }
+    require(pickerCalls == 3 && gui::visual.lastExportPath.empty() &&
+                std::filesystem::exists(folder / std::filesystem::u8path("方法对比_" + std::to_string(generated.seed) + ".html")) &&
+                std::filesystem::exists(folder / std::filesystem::u8path("方法对比_" + std::to_string(generated.seed) + "_1.html")),
+            "静默报告弹窗、覆盖同名文件或修改了图表成功路径");
+    gui::state.chooseExportPath = picker;
+    gui::visual.importedSelected = true;
     gui::state.draft = native_ui::from_config(generated.config);
+    require(gui::reanalyzeInsightData() && gui::visual.imported->config == importedConfig,
+            "原研究设计恢复后不能重新分析");
     const auto badCsv = folder / "invalid.csv";
     msa::atomic_text(badCsv, "not,a,measurement\r\n");
-    require(!gui::loadInsightCsv(badCsv) && gui::visual.imported->matrix == generated.matrix &&
+    require(!gui::loadInsightData(badCsv) && gui::visual.imported->matrix == generated.matrix &&
                 gui::visual.imported->config == importedConfig && gui::visual.errorKind == "import",
-            "CSV 导入失败丢失旧数据或缺少恢复状态");
+            "测量数据导入失败丢失旧数据或缺少恢复状态");
     gui::clearVisualError();
     gui::visual.importedSelected = false;
     gui::visual.scope = 0;
     gui::visual.selected = 0;
     gui::visual.format = 0;
     gui::visual.resolution = 0;
-    gui::visual.directory = folder.u8string();
-    gui::visual.filename = "图表交互回归";
+    gui::state.draft.chartDirectory = folder.u8string();
+    gui::state.draft.chartFilename = "图表_[PARTS]件";
+    gui::state.draft.silentCharts = true;
     const auto exportFrames = [&](bool folderEnabled) {
         eui::Ui ui;
         ui.begin("chart-export-stable-layout");
@@ -2736,14 +2995,6 @@ void chart_interaction(const msa::Result &generated) {
                     "导出前、进行中或完成后的输出卡布局发生变化");
     };
     const auto beforeExportFrames = exportFrames(false);
-    const auto finishExport = [&] {
-        const auto deadline = gui::Clock::now() + std::chrono::seconds(20);
-        while (gui::visual.busy() && gui::Clock::now() < deadline) {
-            gui::pollVisuals();
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        require(!gui::visual.busy(), "异步导出超过测试时限");
-    };
     gui::exportVisuals();
     require(gui::visual.busy(), "有效设置没有启动真实导出");
     sameExportFrames(beforeExportFrames, exportFrames(false));
@@ -2757,12 +3008,12 @@ void chart_interaction(const msa::Result &generated) {
     gui::exportVisuals();
     finishExport();
     const auto second = gui::visual.lastExportPath;
-    require(first != second && second.stem().u8string() == "图表交互回归_1" &&
+    require(first != second && second.stem().u8string() == "图表_" + generated.config["design"]["parts"].dump() + "件_1" &&
                 msa::read_text(first) == originalBytes,
             "同名导出没有追加序号或覆盖了原文件");
     const auto blocked = folder / "occupied-file";
     msa::atomic_text(blocked, "preserve");
-    gui::visual.directory = blocked.u8string();
+    gui::state.draft.chartDirectory = blocked.u8string();
     gui::exportVisuals();
     finishExport();
     require(gui::visual.errorKind == "export" && gui::visual.lastExportPath == second &&
@@ -2770,7 +3021,7 @@ void chart_interaction(const msa::Result &generated) {
                 msa::read_text(blocked) == "preserve",
             "导出失败未保留数据、已有文件或上次成功路径");
     sameExportFrames(beforeExportFrames, exportFrames(true));
-    gui::visual.directory = folder.u8string();
+    gui::state.draft.chartDirectory = folder.u8string();
     gui::exportVisuals();
     finishExport();
     require(gui::visual.errorText.empty() && gui::visual.lastExportPath != second &&
@@ -2792,17 +3043,87 @@ void chart_interaction(const msa::Result &generated) {
     gui::visual.editDirty[2] = gui::visual.editDirty[3] = false;
     gui::clearVisualError();
     gui::visual.format = 2;
-    gui::visual.filename = "两图组合快照";
+    gui::state.draft.chartFilename = "两图组合快照";
     gui::exportVisuals();
     require(gui::visual.busy() && gui::visual.exportingCount == 2, "组合没有捕获两张已选图表");
     gui::visual.included.fill(false);
     gui::visual.format = 0;
-    gui::visual.filename = "下一次导出";
+    gui::state.draft.chartFilename = "下一次导出";
     finishExport();
     require(gui::visual.errorText.empty() &&
                 gui::visual.lastExportPath.filename().u8string() == "两图组合快照.pdf" &&
                 msa::read_text(gui::visual.lastExportPath).rfind("%PDF-", 0) == 0,
             "导出中的编辑改变了本次组合或格式快照");
+    gui::visual.scope = 0;
+    gui::visual.selected = 0;
+    gui::state.draft.silentCharts = false;
+    const auto prior = gui::visual.lastExportPath;
+    gui::state.draft.chartFilename = "图表备份_[SEED]";
+    const std::array<Kind, 3> chartFormats{Kind::Png, Kind::Jpeg, Kind::ChartPdf};
+    const std::array<std::string, 3> extensions{".png", ".jpeg", ".pdf"};
+    const std::array<std::string, 3> signatures{"\x89PNG", "\xFF\xD8", "%PDF-"};
+    for (int i = 0; i < 3; ++i) {
+        gui::visual.format = i;
+        const auto target = folder / ("chosen-chart" + extensions[i]);
+        bool cancelled = true;
+        gui::state.chooseExportPath = [&](const auto &initial, Kind format) -> Selection {
+            require(initial.parent_path() == folder && format == chartFormats[i] &&
+                        initial.stem().u8string() == "图表备份_" + std::to_string(generated.seed),
+                    "图表另存为默认目录或格式错误");
+            if (cancelled)
+                return std::nullopt;
+            return platform::SaveTarget{target, format, msa::ExistingFile::Replace};
+        };
+        gui::exportVisuals();
+        require(!gui::visual.busy() && !std::filesystem::exists(target),
+                "取消图表另存为启动了导出");
+        cancelled = false;
+        msa::atomic_text(target, "before");
+        gui::exportVisuals();
+        finishExport();
+        require(gui::visual.lastExportPath == target &&
+                    msa::read_text(target).rfind(signatures[i], 0) == 0,
+                "图表另存为忽略选定名称、格式或覆盖决定");
+    }
+    require(std::filesystem::exists(prior), "另存为覆盖了上次图表");
+    click(outputUi, "chart.file.options.bg");
+    require(gui::state.page == gui::Page::Options && gui::state.optionsTab == 2 &&
+                gui::state.configOffset == 0,
+            "图表页未跳转到集中管理目录与文件名的位置");
+    gui::state.chooseExportPath = picker;
+    const auto chooser = gui::state.chooseWorksheet;
+    gui::state.draft.operators = "2";
+    gui::state.draft.replicates = "2";
+    gui::state.draft.parts = "5";
+    int sheetRequests = 0;
+    bool cancelSheet = false;
+    gui::state.chooseWorksheet = [&](const std::vector<std::string> &names) -> std::optional<std::size_t> {
+        ++sheetRequests;
+        require(names == std::vector<std::string>{"原始记录", "复测 数据"}, "工作表名称或顺序错误");
+        return cancelSheet ? std::nullopt : std::optional<std::size_t>(1);
+    };
+    require(gui::loadInsightData(multiSheetWorkbook) && gui::visual.importedSheet == "复测 数据" &&
+                gui::visual.imported->matrix[0][0] == 110.11 && sheetRequests == 1,
+            "未导入选择的第二张工作表");
+    const auto oldMatrix = gui::visual.imported->matrix;
+    const auto oldFeedback = gui::state.footerMessage;
+    const auto oldChart = gui::visual.selected;
+    gui::visual.preview.attempted = true;
+    cancelSheet = true;
+    require(!gui::loadInsightData(multiSheetWorkbook) && sheetRequests == 2 &&
+                gui::visual.imported->matrix == oldMatrix && gui::visual.importedSelected &&
+                gui::visual.importedSheet == "复测 数据" && gui::visual.selected == oldChart &&
+                gui::visual.preview.attempted && gui::state.footerMessage == oldFeedback,
+            "取消工作表选择改变了当前研究、图表或提示");
+    gui::state.draft.silentReport = true;
+    gui::state.draft.reportDirectory = folder.u8string();
+    gui::state.draft.reportFilename = "工作表报告_[PARTS]_[SEED]";
+    gui::state.draft.reportFormat = 1;
+    gui::exportComparisonReport();
+    finishExport();
+    const auto worksheetReport = msa::read_text(folder / L"工作表报告_5_NA.html");
+    require(worksheetReport.find("复测 数据") != worksheetReport.npos, "方法对比报告遗漏工作表来源");
+    gui::state.chooseWorksheet = chooser;
     std::cout << "图表草稿/应用/撤销、切图隔离、缓存、错误恢复、选择与布局及真实导出通过："
               << folder.u8string() << '\n';
     gui::visual = gui::VisualState{};
@@ -2813,7 +3134,7 @@ void chart_interaction(const msa::Result &generated) {
 } // namespace
 
 int wmain(int argc, wchar_t **argv) {
-    if (argc != 3)
+    if (argc != 4)
         return 2;
     try {
         const auto font = std::filesystem::path(argv[1]).u8string();
@@ -2844,7 +3165,7 @@ int wmain(int argc, wchar_t **argv) {
         scrolled_menu_anchors();
         help_destinations();
         logs_and_about_layout();
-        chart_interaction(generated);
+        chart_interaction(generated, std::filesystem::path(argv[3]));
         for (float w : {1232.f, 1100.f, 1020.f, 588.f})
             for (float h : {500.f, 700.f}) {
                 gui::state.generateOffset = 0;
@@ -2914,7 +3235,8 @@ int wmain(int argc, wchar_t **argv) {
         outputUi.end();
         outputUi.layout(620, 1200);
         eui::TextInputEvent filenameEvent, directoryEvent;
-        filenameEvent.text = "研究_[人员数量]_[SEED].csv";
+        gui::state.draft.silentCsv = true;
+        filenameEvent.text = "研究_[人员数量]_[SEED]";
         directoryEvent.text = folder.u8string();
         outputUi.find("filename.hit")->onTextInput(filenameEvent);
         outputUi.find("directory.hit")->onTextInput(directoryEvent);
@@ -2931,6 +3253,39 @@ int wmain(int argc, wchar_t **argv) {
                                     std::to_string(generated.seed) + ".csv");
         if (!gui::state.validResult() || msa::read_csv(exported) != generated.matrix)
             throw std::runtime_error("GUI export ignored current output settings or changed data");
+        const auto chosenCsv = folder / "explicit.csv";
+        gui::state.draft.silentCsv = false;
+        bool cancelCsv = true;
+        const auto picker = gui::state.chooseExportPath;
+        gui::state.chooseExportPath = [&](const auto &initial, auto kind)
+            -> std::optional<platform::SaveTarget> {
+            if (initial != exported || kind != platform::ExportKind::Csv)
+                throw std::runtime_error("CSV 另存为未使用配置目录和展开的文件名模板");
+            if (cancelCsv)
+                return std::nullopt;
+            return platform::SaveTarget{chosenCsv, kind, msa::ExistingFile::Replace};
+        };
+        gui::exportData();
+        if (std::filesystem::exists(chosenCsv) || !gui::state.dataExportError.empty())
+            throw std::runtime_error("取消 CSV 另存为产生了文件或错误");
+        cancelCsv = false;
+        msa::atomic_text(chosenCsv, "before");
+        gui::exportData();
+        if (msa::read_csv(chosenCsv) != generated.matrix || !gui::state.dataExportError.empty())
+            throw std::runtime_error("CSV 另存为未执行指定目的地和覆盖选择");
+        const auto chosenXlsx = folder / L"交叉选择.v2.xlsx";
+        gui::state.chooseExportPath = [&](const auto &initial, auto kind)
+            -> std::optional<platform::SaveTarget> {
+            if (initial != exported || kind != platform::ExportKind::Csv)
+                throw std::runtime_error("数据导出对话框未采用配置中的默认类型");
+            return platform::SaveTarget{chosenXlsx, platform::ExportKind::Xlsx, msa::ExistingFile::Preserve};
+        };
+        gui::exportData();
+        if (msa::read_data(chosenXlsx, generated.config) != generated.matrix ||
+            gui::state.draft.dataFileType != 0 || !gui::state.dataExportError.empty())
+            throw std::runtime_error("另存为选择 XLSX 后没有生成正确工作簿，或临时选择改变了默认类型");
+        gui::state.draft.silentCsv = true;
+        gui::state.chooseExportPath = picker;
         outputUi.find("runorder.mode.1.hit")->onClick();
         if (gui::state.draft.runMode != 0 || !outputUi.find("runorder.seed.control")->disabled)
             throw std::runtime_error("wide-format run-order controls remain active");
@@ -2969,6 +3324,14 @@ int wmain(int argc, wchar_t **argv) {
         if (longBytes.rfind("StdOrder,Operator,Part,Trial,Measurement\r\n", 0) != 0 ||
             msa::parse_export_csv(longBytes, generated.config) != generated.matrix)
             throw std::runtime_error("GUI export ignored selected format/run-order fields");
+        withinUi.find("data.filetype.hit.1")->onClick();
+        gui::exportData();
+        auto workbookPath = exported;
+        workbookPath.replace_extension(".xlsx");
+        if (msa::read_data(workbookPath, generated.config) != generated.matrix ||
+            !gui::state.validResult() || gui::state.revision != revision)
+            throw std::runtime_error("静默导出 XLSX 长表未按模板还原原始研究");
+        withinUi.find("data.filetype.hit.0")->onClick();
         withinUi.find("csvformat")->onPress({}, {});
         gui::menu.select(0);
         gui::menu.id.clear();
@@ -2985,13 +3348,23 @@ int wmain(int argc, wchar_t **argv) {
             !native_ui::to_config(standardDraft)["output"]["run_order"]["seed"].is_null() ||
             standardDraft.runSeed != "未填写")
             throw std::runtime_error("标准顺序读取或改写了禁用种子的草稿");
+        for (auto status : {gui::Status::Cancelled, gui::Status::SearchFailed}) {
+            gui::state.status = status;
+            gui::state.message = status == gui::Status::SearchFailed ? "已耗尽搜索次数" : "";
+            const auto diagnostic = gui::state.message;
+            gui::exportData();
+            if (!gui::state.retainedResult() || gui::state.status != status ||
+                gui::state.message != diagnostic || gui::state.footerMessage != "测量数据已导出")
+                throw std::runtime_error("导出保留的结果覆盖了最后一轮生成状态");
+        }
         gui::state.draft.filename = "[bad].csv";
         gui::exportData();
-        if (gui::state.status != gui::Status::ExportError || !gui::state.result)
+        if (gui::state.dataExportError.empty() || !gui::state.retainedResult())
             throw std::runtime_error("invalid output template discarded the generated result");
         gui::state.draft.filename = "repaired.csv";
         gui::state.outputChanged();
-        if (!gui::state.validResult() || gui::state.revision != revision)
+        if (!gui::state.dataExportError.empty() || !gui::state.retainedResult() ||
+            gui::state.revision != revision)
             throw std::runtime_error("repairing an output error requires regeneration");
         gui::state.changed();
         if (gui::state.validResult())

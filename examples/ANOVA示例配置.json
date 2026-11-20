@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "design": {
     "operators": 3,
     "replicates": 3,
@@ -55,7 +55,8 @@
   },
   "output": {
     "directory": "",
-    "filename": "msa_data.csv",
+    "filename": "msa_data",
+    "file_type": "csv",
     "encoding": "utf-8-sig",
     "existing_file": "number",
     "format": "default",

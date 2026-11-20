@@ -1,9 +1,9 @@
 <div align="center">
   <h1>MSA 数据生成器</h1>
   <p>生成交叉量具 R&amp;R 模拟数据，复核统计指标，导出测量记录。</p>
-  <p><strong>Windows x64</strong> · v1.0.1 · <a href="LICENSE">MIT 许可证</a></p>
+  <p><strong>Windows x64</strong> · v1.0.2 · <a href="LICENSE">MIT 许可证</a></p>
   <p>
-    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.1/MSA_Data_Generator_v1.0.1_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
+    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.2/MSA_Data_Generator_v1.0.2_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
     · <a href="#快速开始">快速开始</a>
     · <a href="docs/README.md">文档中心</a>
   </p>
@@ -21,7 +21,7 @@
 1. 下载 [Windows x64 便携包][windows-zip]，解压后双击 `msa_generator.exe`。
 2. 在**数据**页点击**载入示例**，再点击**生成数据**。
 3. 在右侧查看**指标复核**、**数据预览**和**分析详情**，或切换到**图表**页。
-4. 在**选项 → 导出**选择格式与运行顺序，然后返回数据页点击**导出 CSV**。
+4. 在**选项 → 文件**选择格式与运行顺序，然后返回数据页点击**导出数据**。
 
 桌面程序内嵌中文字体和图标，可免安装运行，图形环境需支持 **OpenGL 3.3 Core**。压缩包还包含 CLI、示例配置、回归验证工具和许可证。[发布页][release] · [SHA-256 校验文件][checksum]
 
@@ -36,9 +36,16 @@
 | 统计复核 | 支持 **Xbar-R（均值极差法）** 与 **ANOVA（方差分析法）**。可设置 EV/TV、AV/TV、GRR/TV、P/T、ndc 的目标值、区间或上下限。 |
 | 分析选项 | 支持研究变异倍数、独立分析容差和历史过程参数。ANOVA 另支持交互项设置、误分类概率和方差分量置信限。 |
 | 图表 | 提供七类 MSA 图表，支持操作员分面、控制限、坐标与外观编辑，可导出 PNG、JPEG 或 PDF。 |
-| CSV 导出 | 提供默认宽表及 Minitab、SPSS、JMP、Origin、MATLAB 五种长表预设。可设置运行顺序、独立排序种子、`StdOrder` 和文件名模板。 |
+| 数据文件 | 可导入和导出 CSV 或 Excel 工作簿（XLSX）。提供默认宽表及 Minitab、SPSS、JMP、Origin、MATLAB 五种长表预设。可设置运行顺序、独立排序种子、`StdOrder` 和文件名模板。 |
 
 数据生成、统计分析、图表绘制和文件导出均在本机完成。桌面程序和 CLI 共用统计内核与配置规则。统计口径及外部软件的参数差异见 [Minitab 导入与对标](docs/Minitab导入与对标.md)和 [ANOVA 对标记录](docs/ANOVA设计与五软件对标.md)。
+
+## v1.0.2 更新
+
+- **数据导入与导出** · 支持 CSV 和 XLSX。桌面程序会直接导入单工作表，有多张数据工作表时可选择其中一张。命令行可用 `--sheet` 指定表名。
+- **文件设置** · 数据导入、数据导出、图表导出和报告导出可分别设置目录和名称，默认目录为当前用户的系统桌面。四项名称均支持变量。数据默认导出 CSV，报告默认导出 PDF，三类导出各有独立的静默开关，默认均关闭。[名称变量](docs/使用说明.md#名称变量)
+- **方法对比** · 图表页可按当前设置重新分析导入数据，并将同一组测量值的 Xbar-R 和 ANOVA 指标及控制图导出为 PDF 或 HTML。[图表与对比报告](docs/结果可视化.md)
+- **模拟与复现** · ANOVA 可生成子组间重复测量幅度不同的教学数据。CLI 可用生成时保存的 JSON 报告还原 CSV 或 XLSX，并核对文件的 SHA-256。[命令示例](docs/使用说明.md#比较研究与还原导出)
 
 ## v1.0.1 更新
 
@@ -56,7 +63,7 @@
   --output ".\data.csv" --report ".\result.json"
 ```
 
-`--seed` 控制测量值，`--run-seed` 控制 CSV 行序。CLI 也支持分析已有 CSV。运行 `.\msa_cli.exe --help` 查看选项，完整用法见 [CLI 使用说明](docs/使用说明.md#cli)和 [配置参考](docs/配置参考.md)。
+`--seed` 控制测量值，`--run-seed` 控制数据行序。CLI 也支持分析已有 CSV 或 XLSX。运行 `.\msa_cli.exe --help` 查看选项，完整用法见 [CLI 使用说明](docs/使用说明.md#cli)和 [配置参考](docs/配置参考.md)。
 
 ## 文档导航
 
@@ -79,12 +86,14 @@ ctest --test-dir build -C Release --output-on-failure
 
 可执行文件位于 `build/Release/`。图形回归需要可用的桌面 OpenGL 环境。运行 `.\scripts\package.ps1 -BuildDirectory build`，可在 `dist/` 生成 Windows x64 便携包和 SHA-256 校验文件。[验证说明](docs/验证报告.md)
 
+单独在非 Windows 平台构建核心和 CLI 时，使用 `-DMSA_BUILD_GUI=OFF` 并安装系统的 OpenSSL Crypto、libarchive 与 libxml2 开发库。Windows 使用系统提供的 BCrypt 计算文件摘要。
+
 ## 许可证
 
 © 2026 **print-yuhuan**。项目原创内容采用 [MIT 许可证](LICENSE)。第三方代码、字体及资源适用各自许可证。[作者与项目来源](NOTICE) · [第三方许可声明](THIRD_PARTY_NOTICES.md)
 
 欢迎提交可复现的问题。反馈时可附上软件版本、研究设置、操作步骤和预期结果。[GitHub Issues](https://github.com/print-yuhuan/Msa-Data-Generator/issues)
 
-[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.1
-[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.1/MSA_Data_Generator_v1.0.1_Windows_x64.zip
-[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.1/MSA_Data_Generator_v1.0.1_Windows_x64.zip.sha256
+[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.2
+[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.2/MSA_Data_Generator_v1.0.2_Windows_x64.zip
+[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.2/MSA_Data_Generator_v1.0.2_Windows_x64.zip.sha256

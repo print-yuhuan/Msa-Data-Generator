@@ -4,7 +4,7 @@
 
 ## 推荐导入流程
 
-1. 在“选项 → 导出 → CSV 格式”的“导出格式”选择“Minitab”，按需设置运行顺序、种子与 StdOrder。已有生成结果时可直接导出。
+1. 在“选项 → 文件 → 数据布局”的“导出布局”选择“Minitab”，按需设置运行顺序、种子与 StdOrder。已有生成结果时可直接导出。
 2. 在 Minitab 打开 CSV，使用英文逗号分隔、首行列名；Operator 为人员字母，其他列为数字。所有长表统一 UTF-8 无 BOM、CRLF，保持配置的小数位。
 3. 进入“统计 → 质量工具 → 量具研究 → 交叉量具 R&R”（英文界面为 Stat → Quality Tools → Gage Study → Gage R&R Study (Crossed)）。
 4. 按列名选择：部件=Part，操作员=Operator，测量数据=Measurement。**分析方法与本程序一致，选择 Xbar 和 R 或 ANOVA**。

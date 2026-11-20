@@ -15,6 +15,7 @@
 #include <thread>
 #ifdef _WIN32
 #include "platform/clipboard_win.hpp"
+#include <shlobj.h>
 #endif
 
 using namespace msa;
@@ -155,6 +156,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             c["generation"].erase("require_normality");
             const auto original = generate(c);
             require(qualified(original.metrics, c));
+            require(original.search_diagnostics["anderson_darling"]["adjusted"].get<double>() > 1);
             c["generation"]["require_normality"] = false;
             require(generate(c).matrix == original.matrix, "legacy seed sequence changed");
             // The first rounded candidate has adjusted A² above 1 for both seeds.
@@ -163,6 +165,8 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             c["generation"]["max_attempts"] = 5000;
             const auto filtered = generate(c);
             require(filtered.matrix != original.matrix && qualified(filtered.metrics, c));
+            const auto &ad = filtered.search_diagnostics["anderson_darling"];
+            require(ad["required"] == true && ad["adjusted"].get<double>() <= ad["threshold"].get<double>());
             require(generate(c).matrix == filtered.matrix, "normality screening is not reproducible");
         }
     });
@@ -222,6 +226,60 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         c["targets"]["GRR_pct"]["value"] = 10.15;
         c["targets"]["ndc"] = nullptr;
         require(qualified(generate(c).metrics, c));
+    });
+    test("strict_full_part_span_has_variable_interior_parts", [] {
+        for (const char *method : {"crossed_xbarr", "crossed_anova"}) {
+            auto c = example();
+            clear_targets(c);
+            c["analysis"]["method"] = method;
+            c["generation"]["minimum_part_span_pct"] = 100;
+            c["generation"]["decimal_places"] = 8;
+            c["targets"]["EV_pct"] = {{"mode", "at_least"}, {"value", 1}};
+            const auto result = generate(c);
+            bool anchored_low = false, anchored_high = false;
+            for (std::size_t j = 0; j < result.matrix.front().size(); ++j) {
+                const auto at_limit = [&](double limit) {
+                    return std::all_of(result.matrix.begin(), result.matrix.end(),
+                                       [&](const auto &row) { return row[j] == limit; });
+                };
+                anchored_low |= at_limit(9);
+                anchored_high |= at_limit(11);
+            }
+            require(anchored_low && anchored_high && qualified(result.metrics, c));
+            require(result.search_diagnostics["part_mean_span_pct"] == 100);
+            require(result.metrics["EV_pct"].get<double>() >= 1);
+            require(generate(c).matrix == result.matrix);
+        }
+    });
+    test("anova_subgroup_residual_model_preserves_targets_and_legacy_default", [] {
+        for (int r : {2, 3}) {
+            auto c = example(3, r, 10);
+            c["analysis"]["method"] = "crossed_anova";
+            clear_targets(c);
+            c["targets"]["EV_pct"] = {{"mode", "between"}, {"min", 5}, {"max", 10}};
+            c["generation"]["decimal_places"] = 8;
+            c["generation"].erase("residual_model");
+            const auto legacy = generate(c);
+            c["generation"]["residual_model"] = "standard";
+            require(generate(c).matrix == legacy.matrix);
+            c["generation"]["residual_model"] = "varied";
+            const auto varied = generate(c);
+            require(qualified(varied.metrics, c) && varied.matrix == generate(c).matrix);
+            std::vector<double> ranges;
+            for (int op = 0; op < 3; ++op)
+                for (int j = 0; j < 10; ++j) {
+                    double low = varied.matrix[op * r][j], high = low;
+                    for (int trial = 1; trial < r; ++trial) {
+                        low = std::min(low, varied.matrix[op * r + trial][j]);
+                        high = std::max(high, varied.matrix[op * r + trial][j]);
+                    }
+                    ranges.push_back(high - low);
+                }
+            auto [low, high] = std::minmax_element(ranges.begin(), ranges.end());
+            require(*high > 2 * *low, "varied ANOVA subgroups still have nearly equal ranges");
+            c["generation"]["residual_model"] = "invalid";
+            throws<ConfigError>([&] { normalize_config(c); });
+        }
     });
     test("proven_conflicts_distinct_from_search_exhaustion", [] {
         for (auto change : std::vector<Json>{
@@ -586,24 +644,71 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         // Cancel when the final progress report is about to publish a valid result.
         easy = example();
         clear_targets(easy);
-        easy["generation"]["max_attempts"] = 2;
+        easy["generation"]["max_attempts"] = 1;
         cancelled = false;
+        bool first_update = true;
         throws<CancelledError>([&] {
             generate(easy, &cancelled, [&](int n, double, bool found) {
-                if (n == 2) {
+                if (!first_update) {
+                    require(n == 1);
                     require(found);
                     cancelled = true;
                 }
+                first_update = false;
             });
         });
     });
+    test("search_reports_all_rejections_and_optimal_stop", [] {
+        auto c = example();
+        clear_targets(c);
+        const auto easy = generate(c);
+        require(easy.attempts == 1 && easy.search_diagnostics["stop_reason"] == "optimal_score");
+        require(easy.search_diagnostics["accepted"] == 1);
+        require(easy.as_json()["search"] == easy.search_diagnostics);
+        c["generation"]["minimum_part_span_pct"] = 99;
+        c["targets"]["EV_pct"] = {{"mode", "at_least"}, {"value", 90}};
+        c["generation"]["max_attempts"] = 201;
+        std::vector<int> progress;
+        try {
+            generate(c, nullptr, [&](int n, double, bool) { progress.push_back(n); });
+            throw std::runtime_error("expected placement budget exhaustion");
+        } catch (const SearchError &e) {
+            const auto &d = e.diagnostics;
+            require(d["stop_reason"] == "max_attempts" && d["attempts"] == 201);
+            require(d["accepted"] == 0 && d["rejected"]["placement"] == 201);
+            require(std::find(progress.begin(), progress.end(), 101) != progress.end());
+        }
+        c["generation"]["timeout_seconds"] = .01;
+        try {
+            generate(c, nullptr, [](int n, double, bool) {
+                if (n == 1)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+            });
+            throw std::runtime_error("expected time budget exhaustion");
+        } catch (const SearchError &e) {
+            require(e.diagnostics["stop_reason"] == "timeout");
+        }
+    });
     test("silent_export_paths_and_existing_file_replacement", [&] {
         auto cfg = example();
-        require(configured_csv_path(cfg) ==
-                (config_path().parent_path() / "msa_data.csv").lexically_normal());
+        const auto desktop = desktop_directory();
+        require(desktop.is_absolute() && resolve_output_directory("") == desktop);
+#ifdef _WIN32
+        PWSTR raw = nullptr;
+        const auto hr = SHGetKnownFolderPath(FOLDERID_Desktop, KF_FLAG_DONT_VERIFY, nullptr, &raw);
+        const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> system_folder(raw, &CoTaskMemFree);
+        require(SUCCEEDED(hr) && raw && desktop == std::filesystem::path(raw),
+                "默认数据目录须采用 Windows 实际桌面位置");
+        throws<ConfigError>([] { resolve_output_directory("C:relative"); });
+        throws<ConfigError>([] { resolve_output_directory("\\relative"); });
+#endif
+        require(config_path().parent_path().filename() == std::filesystem::u8path("MSA数据生成器") &&
+                    config_path().filename() == "msa_generator.json",
+                "配置文件沿用原位置");
+        require(configured_csv_path(cfg) == desktop / "msa_data.csv");
         cfg["output"]["directory"] = "relative/subdir";
         cfg["output"]["filename"] = "中文 数据.csv";
-        require(configured_csv_path(cfg) == (config_path().parent_path() / "relative/subdir" /
+        require(configured_csv_path(cfg) == (desktop / "relative/subdir" /
                                              std::filesystem::u8path("中文 数据.csv"))
                                                 .lexically_normal());
         cfg["output"]["directory"] =
@@ -667,9 +772,14 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         }
         for (const std::string bad :
              {"[HH].csv", "[mm].csv", "[unknown].csv", "[].csv", "[YYYY.csv", "[A[B]].csv",
-              "a].csv", "../a.csv", "CON.csv", "LPT1.data.csv", "COM¹.csv", "x\t.csv", "a.txt"})
+              "a].csv", "../a.csv", "CON.csv", "LPT1.data.csv", "COM¹.csv", "x\t.csv", ".xlsx"})
             throws<ConfigError>([&] { validate_filename_template(bad); });
         throws<ConfigError>([&] { validate_filename_template(std::string(252, 'a') + ".csv"); });
+        const auto fullCsvBase = std::string(251, 'a');
+        require(normalize_import_filename(fullCsvBase + ".csv") == fullCsvBase);
+        require(normalize_output({{"filename", fullCsvBase + ".csv"}})["filename"] == fullCsvBase);
+        throws<ConfigError>([&] { normalize_output({{"filename", fullCsvBase}, {"file_type", "xlsx"}}); });
+        require(normalize_output({{"filename", std::string(250, 'a')}, {"file_type", "xlsx"}})["file_type"] == "xlsx");
         throws<ConfigError>(
             [&] { render_filename(std::string(248, 'a') + "[VERSION].csv", result, when); });
         auto invalid = cfg;
@@ -679,6 +789,79 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         auto draft = native_ui::from_config(cfg);
         draft.existingFile = 1;
         require(native_ui::from_config(native_ui::to_config(draft)).existingFile == 1);
+    });
+    test("filename_templates_follow_operation_time_study_source_and_draft", [] {
+        const auto when = std::chrono::system_clock::from_time_t(1700000000) +
+                          std::chrono::milliseconds(37);
+        auto result = generate(example());
+        const auto measured = calculate(result.matrix, result.config);
+        const auto grr = fixed(measured["GRR_pct"].get<double>(), 2);
+        result.metrics["GRR_pct"] = -2; // The selected matrix is authoritative.
+        const auto generated = StudySource::Generated, imported = StudySource::ImportedData;
+        const auto chart = ExportBasenameKind::Chart, report = ExportBasenameKind::ComparisonReport;
+        const std::string pattern = "[[检]]_[时间戳]_[MS]_[随机种子]_[GRR实际值]";
+        const std::string prefix = "[检]_1700000000_037_";
+        for (auto kind : {ExportBasenameKind::Data, chart, report}) {
+            const char *ext = kind == chart ? ".png" : kind == report ? ".html" : ".xlsx";
+            require(render_study_basename(pattern, kind, result, generated, when, ext) ==
+                    prefix + std::to_string(result.seed) + "_" + grr);
+            require(render_study_basename(pattern, kind, result, imported, when, ext) ==
+                    prefix + "NA_" + grr);
+        }
+        native_ui::Draft draft;
+        draft.operators = "2";
+        draft.seed = "9223372036854775807";
+        draft.center = "13.5";
+        draft.lsl = "-";
+        draft.confidenceLevel = "编辑中";
+        draft.filename = "[未完成";
+        const auto options = native_ui::filename_options(draft);
+        const std::string prefill = "[人员数量]_[SEED]_[CENTER]_[LSL]_[GRR_PCT]";
+        require(render_import_basename(prefill, options, nullptr, generated, when) ==
+                "2_9223372036854775807_13.5_NA_NA");
+        require(render_import_basename(prefill, options, &result, generated, when) ==
+                "2_" + std::to_string(result.seed) + "_13.5_NA_" + grr);
+        require(render_import_basename(prefill, options, &result, imported, when) ==
+                "2_NA_13.5_NA_" + grr);
+        require(render_import_basename("", options, nullptr, generated, when).empty());
+        require(render_import_basename("[CENTER]_[SEED]_[NDC]", Json::object(), nullptr, imported, when) ==
+                "NA_NA_NA");
+        require(render_import_basename("[CENTER]", Json::object(), &result, imported, when) ==
+                render_study_basename("[CENTER]", chart, result, imported, when, ".png"));
+        for (const char *bad : {"[UNKNOWN]", "[DATE", "x]", "NUL", "a/b"}) {
+            throws<ConfigError>([&] { render_import_basename(bad, options, nullptr, generated, when); });
+            throws<ConfigError>([&] { render_study_basename(bad, chart, result, generated, when, ".jpg"); });
+            throws<ConfigError>([&] { render_study_basename(bad, report, result, imported, when, ".pdf"); });
+        }
+        const auto long_template = std::string(241, 'x') + "[时间戳]";
+        require(render_study_basename(long_template, chart, result, generated, when, ".png").size() == 251);
+        throws<ConfigError>([&] { render_study_basename(long_template, report, result, imported, when, ".html"); });
+    });
+    test("v1_literal_names_migrate_once_without_changing_measurement_templates", [] {
+        Json legacy = {{"schema_version", 1},
+                       {"input", {{"filename", "[DATE]_测量.csv"}}},
+                       {"output", {{"filename", "结果_[SEED].CSV"},
+                                   {"charts", {{"filename", "图[批次]_[DATE]_[["}}},
+                                   {"comparison_report", {{"filename", "记录]_[SEED].pdf"}}}}}};
+        const auto cfg = normalize_config(legacy);
+        require(cfg.at("schema_version") == 2 && normalize_config(cfg) == cfg);
+        require(cfg["output"]["filename"] == "结果_[SEED]" &&
+                cfg["input"]["filename"] == "[[DATE]]_测量");
+        const auto study = generate(example());
+        const auto when = std::chrono::system_clock::now();
+        require(render_import_basename(cfg["input"]["filename"], cfg, nullptr, StudySource::Generated, when) ==
+                "[DATE]_测量");
+        require(render_study_basename(cfg["output"]["charts"]["filename"], ExportBasenameKind::Chart,
+                                     study, StudySource::Generated, when, ".png") == "图[批次]_[DATE]_[[");
+        require(render_study_basename(cfg["output"]["comparison_report"]["filename"],
+                                     ExportBasenameKind::ComparisonReport, study,
+                                     StudySource::ImportedData, when, ".pdf") == "记录]_[SEED]");
+        require(render_filename(cfg["output"]["filename"], study, when) ==
+                "结果_" + std::to_string(study.seed));
+        for (auto version : {0, 3})
+            throws<ConfigError>([&] { normalize_config({{"schema_version", version}}); });
+        legacy["schema_version"] = 2;
+        throws<ConfigError>([&] { normalize_config(legacy); });
     });
     test("configured_export_numbering_overwrite_unicode_and_parallel_safety", [&] {
         auto result = generate(example());
@@ -721,7 +904,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         for (auto &job : jobs)
             job.join();
         require(failures == 0 && paths.size() == 8 && read_text(first) == original);
-        require(result.config["output"]["filename"] == "msa_data.csv");
+        require(result.config["output"]["filename"] == "msa_data");
     });
     test("long_filename_component_atomic_export_and_numbering", [&] {
         auto folder = std::filesystem::absolute(dir) /

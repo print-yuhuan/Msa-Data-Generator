@@ -1,5 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "input": {
+    "directory": "",
+    "filename": ""
+  },
   "design": {
     "operators": 3,
     "replicates": 3,
@@ -40,10 +44,25 @@
   },
   "output": {
     "directory": "",
-    "filename": "msa_data.csv",
+    "filename": "msa_data",
+    "file_type": "csv",
     "encoding": "utf-8-sig",
     "existing_file": "number",
     "format": "default",
+    "silent": {
+      "csv": false,
+      "charts": false,
+      "comparison_report": false
+    },
+    "comparison_report": {
+      "format": "pdf",
+      "directory": "",
+      "filename": "MSA_Comparison"
+    },
+    "charts": {
+      "directory": "",
+      "filename": "MSA_Charts"
+    },
     "run_order": {
       "mode": "standard",
       "randomize_operators": false,

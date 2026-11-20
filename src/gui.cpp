@@ -9,6 +9,7 @@
 #include "msa/task.hpp"
 #include "msa/project.hpp"
 #include "msa/charts.hpp"
+#include "msa/comparison_report.hpp"
 #include "platform/chart_export.hpp"
 #include <dwmapi.h>
 #include <array>
@@ -55,8 +56,7 @@ enum class Status {
     Cancelled,
     Error,
     Infeasible,
-    SearchFailed,
-    ExportError
+    SearchFailed
 };
 enum class Page { Data, Charts, Logs, Options, Help, About };
 enum class Level { Info, Warning, Error };
@@ -73,6 +73,21 @@ struct LogEntry {
     std::string message;
 };
 constexpr std::size_t logLimit = 100;
+std::string searchSummary(const Json &diagnostics) {
+    if (diagnostics.empty())
+        return {};
+    const std::string reason = diagnostics.at("stop_reason");
+    const auto &rejected = diagnostics.at("rejected");
+    const std::string label = reason == "optimal_score"    ? "已达到最优评分"
+                              : reason == "refinement_limit" ? "已完成候选比较"
+                              : reason == "timeout"       ? "到达时间上限"
+                                                           : "到达次数上限";
+    return label + "。共尝试 " + diagnostics.at("attempts").dump() + " 次，合格 " +
+           diagnostics.at("accepted").dump() + " 次。淘汰次数：构造 " +
+           rejected.at("construction").dump() + "，缩放放置 " + rejected.at("placement").dump() +
+           "，规格及指标 " + rejected.at("indicators").dump() + "，部件跨度 " +
+           rejected.at("part_span").dump() + "，正态筛选 " + rejected.at("normality").dump() + "。";
+}
 struct State {
     Draft draft;
     Status status = Status::Ready;
@@ -90,7 +105,11 @@ struct State {
     float generateOffset = 0, resultOffset = 0, configOffset = 0, pixelScale = 1;
     float previousWidth = 0, previousHeight = 0, limitScale = 0;
     unsigned systemDpi = 96;
-    std::string message, footerMessage;
+    std::string message, dataExportError, footerMessage;
+    std::function<decltype(platform::chooseExportPath)> chooseExportPath = platform::chooseExportPath;
+    std::function<decltype(platform::chooseImportData)> chooseImportData = platform::chooseImportData;
+    std::function<decltype(platform::chooseWorksheet)> chooseWorksheet = platform::chooseWorksheet;
+    std::function<decltype(platform::chooseDirectory)> chooseDirectory = platform::chooseDirectory;
     float logOffset = 0, logPageOffset = 0, helpOffset = 0, aboutOffset = 0;
     unsigned logSequence = 0;
     std::vector<LogEntry> logs;
@@ -165,6 +184,7 @@ struct State {
         const bool invalidate = displayedResult();
         footerMessage.clear();
         message.clear();
+        dataExportError.clear();
         configDirty = true;
         if (!busy())
             status = Status::Ready;
@@ -178,10 +198,7 @@ struct State {
     void outputChanged() {
         footerMessage.clear();
         configDirty = true;
-        if (status == Status::ExportError) {
-            message.clear();
-            status = result && resultRevision == revision ? Status::Success : Status::Ready;
-        }
+        dataExportError.clear();
     }
     void sample() {
         const int method = draft.analysisMethod, interaction = draft.interactionMode;
@@ -197,6 +214,17 @@ struct State {
         draft.randomOperators = previous.randomOperators;
         draft.storeStandardOrder = previous.storeStandardOrder;
         draft.runSeed = previous.runSeed;
+        draft.dataFileType = previous.dataFileType;
+        draft.silentCsv = previous.silentCsv;
+        draft.silentCharts = previous.silentCharts;
+        draft.silentReport = previous.silentReport;
+        draft.reportFormat = previous.reportFormat;
+        draft.reportDirectory = previous.reportDirectory;
+        draft.importDirectory = previous.importDirectory;
+        draft.importFilename = previous.importFilename;
+        draft.chartDirectory = previous.chartDirectory;
+        draft.chartFilename = previous.chartFilename;
+        draft.reportFilename = previous.reportFilename;
         draft.analysisMethod = method;
         draft.interactionMode = interaction;
         draft.interactionAlpha = alpha;
@@ -233,6 +261,7 @@ struct State {
         if (worker.joinable())
             worker.join();
         message.clear();
+        dataExportError.clear();
         footerMessage.clear();
         try {
             const auto snapshot = msa::validate_request(
@@ -303,6 +332,8 @@ struct State {
             result = std::move(v.result);
             status = Status::Success;
             resultRevision = revision;
+            if (!result->search_diagnostics.empty())
+                log(searchSummary(result->search_diagnostics));
             feedback("数据已生成", "已找到满足生成约束的数据。尝试 " +
                                        std::to_string(result->attempts) + " 次，种子 " +
                                        std::to_string(result->seed) + "。可导出数据复验。");
@@ -1048,10 +1079,11 @@ void section(Ui &u, const std::string &id, const std::string &title, float w,
 }
 // Errors stay beside the form until resolved.
 void notice(Ui &u, float w) {
-    if (state.message.empty())
+    const bool exportFailed = !state.dataExportError.empty();
+    if (!exportFailed && state.message.empty())
         return;
     const bool softFailure =
-        state.status == Status::Infeasible || state.status == Status::SearchFailed;
+        !exportFailed && (state.status == Status::Infeasible || state.status == Status::SearchFailed);
     const auto level = softFailure ? Level::Warning : Level::Error;
     const bool stacked = w < 680;
     const bool offerOptions = state.page != Page::Options;
@@ -1065,14 +1097,14 @@ void notice(Ui &u, float w) {
             .gap(4)
             .content([&] {
                 text(u, "notice.title",
-                     state.status == Status::Infeasible     ? "约束冲突"
+                     exportFailed                           ? "测量数据导出失败"
+                     : state.status == Status::Infeasible   ? "约束冲突"
                      : state.status == Status::SearchFailed ? "未找到满足约束的数据"
-                     : state.status == Status::ExportError  ? "CSV 导出失败"
                                                             : "操作失败",
                      messageWidth, 24, 15, levelColor(level));
                 u.text("notice.text")
                     .width(messageWidth)
-                    .text(state.message)
+                    .text(exportFailed ? state.dataExportError : state.message)
                     .fontSize(18)
                     .lineHeight(24)
                     .color(ink)
@@ -1862,6 +1894,18 @@ void results(Ui &u, float w, bool summary = true, float contentHeight = 0) {
                         detailTable(u, "anova.components.table", c,
                                     {"变异来源", "方差分量", "标准差 SD", "%贡献"}, rows);
                     }
+                    if (!state.result->search_diagnostics.empty()) {
+                        text(u, "search.summary.title", "生成搜索记录", c, 28, 14);
+                        u.text("search.summary")
+                            .width(c)
+                            .text(searchSummary(state.result->search_diagnostics))
+                            .fontSize(16)
+                            .lineHeight(24)
+                            .wrap()
+                            .maxWidth(c)
+                            .color(muted)
+                            .build();
+                    }
                 }
             }
         };
@@ -1923,26 +1967,44 @@ void saveSettings() {
         auto cfg = native_ui::to_config(state.draft);
         const auto path = msa::config_path();
         msa::save_config(cfg, path);
+        state.draft.importFilename = cfg.at("input").at("filename");
+        const auto &output = cfg.at("output");
+        state.draft.filename = output.at("filename");
+        state.draft.chartFilename = output.at("charts").at("filename");
+        state.draft.reportFilename = output.at("comparison_report").at("filename");
         state.configDirty = false;
         state.message.clear();
         state.feedback("配置已保存", "配置已保存：" + path.u8string());
     });
 }
+void protectExportSources(const std::filesystem::path &path);
 void exportData() {
     if (!state.validResult())
         return;
     try {
         const auto snapshot = *state.result;
-        const auto output =
-            msa::export_configured_csv(snapshot, native_ui::output_config(state.draft),
-                                       std::chrono::system_clock::now(), {}, msa::config_path());
-        state.status = Status::Success;
-        state.message.clear();
-        state.feedback("CSV 已导出", "CSV 已导出并复验：" + output.u8string());
+        auto settings = native_ui::data_output_config(state.draft);
+        const auto now = std::chrono::system_clock::now();
+        std::filesystem::path output;
+        if (state.draft.silentCsv) {
+            if (settings.at("existing_file") == "overwrite")
+                protectExportSources(msa::configured_data_path(snapshot, settings, now));
+            output = msa::export_configured_data(snapshot, settings, now, {}, msa::config_path());
+        } else {
+            const auto target = state.chooseExportPath(msa::configured_data_path(snapshot, settings, now),
+                state.draft.dataFileType == 1 ? platform::ExportKind::Xlsx : platform::ExportKind::Csv);
+            if (!target)
+                return;
+            protectExportSources(target->path);
+            settings["file_type"] = target->format == platform::ExportKind::Xlsx ? "xlsx" : "csv";
+            msa::export_data(snapshot, target->path, settings, target->policy);
+            output = target->path;
+        }
+        state.dataExportError.clear();
+        state.feedback("测量数据已导出", "测量数据已导出并复验：" + output.u8string());
     } catch (const std::exception &e) {
-        state.status = Status::ExportError;
-        state.message = std::string("导出失败：") + e.what();
-        state.feedback("CSV 导出失败", state.message, Level::Error);
+        state.dataExportError = std::string("导出失败：") + e.what();
+        state.feedback("测量数据导出失败", state.dataExportError, Level::Error);
     }
 }
 void paragraph(Ui &, const std::string &, const std::string &, float, const char *, float);
@@ -2159,6 +2221,18 @@ void generationRules(Ui &u, float w) {
                 paragraph(u, "part.sampling.note", samplingNotes[selected], c, muted, 17.5f);
             })
             .build();
+        if (state.draft.analysisMethod == 1) {
+            toggle(u, "residual.varied", "教学场景：子组波动不等", state.draft.variedResiduals, c,
+                   [](bool value) {
+                       if (!state.busy() && state.draft.variedResiduals != value) {
+                           state.draft.variedResiduals = value;
+                           state.changed();
+                       }
+                   });
+            paragraph(u, "residual.note",
+                      "改变操作员与部件组合内的重复测量波动，可在极差控制图中比较各子组。",
+                      c, muted, 17.5f);
+        }
     });
 }
 void evaluationSettings(Ui &u, float w) {
@@ -2269,7 +2343,7 @@ void generationSettings(Ui &u, float w) {
             })
             .build();
         paragraph(u, "generation.note",
-                  "小数位数用于生成测量值和导出 CSV。按相同参数生成时，固定种子可复现数据。",
+                  "小数位数用于生成测量值和导出数据。按相同参数生成时，固定种子可复现数据。",
                   c, muted, 17.5f);
     });
 }
@@ -2509,13 +2583,13 @@ void searchSettings(Ui &u, float w, float elapsed = reveal(state.advancedChanged
     });
 }
 void exportSettings(Ui &u, float w) {
-    section(u, "output", "CSV 格式", w, [&](float c) {
+    section(u, "output", "数据布局", w, [&](float c) {
         const bool wideFormat = state.draft.csvFormat == 0;
         u.column("csvformat.field")
             .width(c)
             .gap(5)
             .content([&] {
-                text(u, "csvformat.label", "导出格式", c, 21, 13);
+                text(u, "csvformat.label", "导出布局", c, 21, 13);
                 combo(u, "csvformat", {"默认（宽表）", "Minitab", "SPSS", "JMP 19", "Origin", "MATLAB"},
                       state.draft.csvFormat, c, [](int i) {
                           if (state.busy() || state.draft.csvFormat == i)
@@ -2550,45 +2624,75 @@ void exportSettings(Ui &u, float w) {
     });
 }
 void fileSettings(Ui &u, float w) {
-    section(u, "output.files", "文件保存", w, [&](float c) {
-        const auto directory = [&](float width) {
-            u.column("output.directory.field")
+    section(u, "output.files", "目录与文件名", w, [&](float c) {
+        paragraph(u, "files.desktop", "目录留空时使用 Windows 系统桌面，相对路径从桌面开始。",
+                  c, muted, 17.5f);
+        const auto directory = [&](const std::string &id, const std::string &label,
+                                   std::string Draft::*member, float width) {
+            u.column(id + ".field")
                 .width(width)
                 .gap(5)
                 .content([&] {
-                    text(u, "dirlabel", "输出目录", width, 21, 13);
-                    u.row("dirrow")
+                    text(u, id + ".label", label, width, 21, 13);
+                    u.row(id + ".row")
                         .width(width)
                         .gap(10)
                         .content([&] {
-                            input(u, "directory", state.draft.directory, width - 106,
-                                  msa::config_path().parent_path().u8string(), true);
-                            button(u, "choosedirectory", "选择目录", 96, [] {
-                                if (state.busy())
-                                    return;
-                                safe([] {
-                                    if (auto p = platform::choose(false, true)) {
-                                        if (state.draft.directory == p->u8string())
+                            input(u, id, state.draft.*member, width - 106, "留空使用系统桌面", true);
+                            button(u, id + ".browse", "选择目录", 96, [member] {
+                                safe([member] {
+                                    const auto initial = msa::resolve_output_directory(
+                                        native_ui::trim(state.draft.*member));
+                                    if (const auto p = state.chooseDirectory(initial)) {
+                                        if (state.draft.*member == p->u8string())
                                             return;
-                                        state.draft.directory = p->u8string();
+                                        state.draft.*member = p->u8string();
                                         state.outputChanged();
                                     }
                                 });
-                            });
+                            }, false, state.busy());
                         })
                         .build();
                 })
                 .build();
         };
-        const auto filename = [&](float width) {
-            field(u, "filename", "CSV 文件名模板", state.draft.filename, width, "msa_data.csv", true);
+        const auto output = [&](const std::string &directoryId, const char *directoryLabel,
+                                std::string Draft::*directoryMember, const char *nameId,
+                                const char *nameLabel, std::string &name, const char *hint,
+                                std::function<std::string(const std::string &)> normalizeName) {
+            if (c >= 760) {
+                u.row(directoryId + ".filename.row").width(c).gap(20).content([&] {
+                    directory(directoryId, directoryLabel, directoryMember, (c - 20) * .6f);
+                    field(u, nameId, nameLabel, name, (c - 20) * .4f, hint, true);
+                }).build();
+            } else {
+                directory(directoryId, directoryLabel, directoryMember, c);
+                field(u, nameId, nameLabel, name, c, hint, true);
+            }
+            u.find(std::string(nameId) + ".hit")->onFocusChanged =
+                [&name, normalizeName = std::move(normalizeName)](bool focused) {
+                    if (!focused) {
+                        try {
+                            name = normalizeName(name);
+                        } catch (const msa::ConfigError &) {
+                            // Keep an unfinished template editable. Save and export report validation errors.
+                        }
+                    }
+                };
         };
+        output("import.directory", "测量数据导入目录", &Draft::importDirectory, "import.filename",
+               "测量数据导入名称", state.draft.importFilename, "选填，例：来料复核",
+               msa::normalize_import_filename);
+        output("directory", "测量数据导出目录", &Draft::directory, "filename",
+               "测量数据导出名称", state.draft.filename, "msa_data", [](const std::string &name) {
+                   return msa::normalize_filename_template(name, state.draft.dataFileType ? "xlsx" : "csv");
+               });
         const auto collision = [&](float width) {
             u.column("output.collision.field")
                 .width(width)
                 .gap(5)
                 .content([&] {
-                    text(u, "collision.label", "同名文件处理", width, 21, 13);
+                    text(u, "collision.label", "测量数据同名文件处理", width, 21, 13);
                     segments(u, "collision", {"追加序号", "覆盖文件"}, state.draft.existingFile,
                              width, [](int i) {
                                  if (state.busy() || state.draft.existingFile == i)
@@ -2601,20 +2705,14 @@ void fileSettings(Ui &u, float w) {
         };
         const auto note = [&](float width) {
             paragraph(u, "silentoutput",
-                      state.draft.existingFile == 0
-                          ? "目录留空或填写相对路径时，以配置目录为基准。同名时追加序号。"
-                          : "目录留空或填写相对路径时，以配置目录为基准。同名时会替换原文件。",
+                      !state.draft.silentCsv
+                          ? "另存为会预填目录和文件名。所选文件已存在时由保存窗口确认覆盖。"
+                      : state.draft.existingFile == 0
+                          ? "静默保存测量数据时，同名文件追加序号。"
+                          : "静默保存测量数据时，同名文件将被替换。",
                       width, muted, 17.5f);
         };
         if (c >= 760) {
-            u.row("output.files.location")
-                .width(c)
-                .gap(20)
-                .content([&] {
-                    directory((c - 20) * .6f);
-                    filename((c - 20) * .4f);
-                })
-                .build();
             u.row("output.files.policy")
                 .width(c)
                 .gap(20)
@@ -2625,11 +2723,72 @@ void fileSettings(Ui &u, float w) {
                 })
                 .build();
         } else {
-            directory(c);
-            filename(c);
             collision(c);
             note(c);
         }
+        output("chart.directory", "图表导出目录", &Draft::chartDirectory, "chart.filename",
+               "图表导出名称", state.draft.chartFilename, "MSA_Charts", [](const std::string &name) {
+                   return msa::normalize_export_basename(name, msa::ExportBasenameKind::Chart);
+               });
+        output("report.directory", "方法对比报告导出目录", &Draft::reportDirectory,
+               "report.filename", "方法对比报告导出名称", state.draft.reportFilename, "MSA_Comparison",
+               [](const std::string &name) {
+                   return msa::normalize_export_basename(name, msa::ExportBasenameKind::ComparisonReport);
+               });
+        paragraph(u, "files.extensions",
+                  "四个名称均支持「帮助 → 名称变量」中的变量，只需填写基本名称。导出时自动添加扩展名。",
+                  c, muted, 17.5f);
+    });
+}
+void exportPreferences(Ui &u, float w) {
+    section(u, "export.preferences", "导出方式", w, [&](float c) {
+        paragraph(u, "export.preferences.note",
+                  "开启静默导出后直接保存到设定目录。关闭后，每次导出都会打开「另存为」。",
+                  c, muted, 17.5f);
+        const auto switches = [&](float width) {
+            auto option = [&](const char *id, const char *label, bool Draft::*member) {
+                toggle(u, id, label, state.draft.*member, width, [member](bool enabled) {
+                    if (state.busy() || state.draft.*member == enabled)
+                        return;
+                    state.draft.*member = enabled;
+                    state.outputChanged();
+                });
+            };
+            option("silent.csv", "静默导出测量数据", &Draft::silentCsv);
+            option("silent.charts", "静默导出图表", &Draft::silentCharts);
+            option("silent.report", "静默导出方法对比报告", &Draft::silentReport);
+        };
+        if (c >= 900)
+            u.row("export.preferences.switches").width(c).gap(12)
+                .content([&] { switches((c - 24) / 3); }).build();
+        else
+            switches(c);
+        constexpr float gap = 12;
+        const float fieldWidth = std::min(300.f, (c - gap) / 2);
+        const auto formatField = [&](const std::string &id, const char *label,
+                                     const std::vector<std::string> &formats, int Draft::*setting) {
+            u.column(id + ".field")
+                .width(fieldWidth)
+                .gap(5)
+                .content([&] {
+                    text(u, id + ".label", label, fieldWidth, 21, 13);
+                    segments(u, id, formats, state.draft.*setting, fieldWidth, [setting](int i) {
+                        if (state.busy() || state.draft.*setting == i)
+                            return;
+                        state.draft.*setting = i;
+                        state.outputChanged();
+                    });
+                })
+                .build();
+        };
+        u.row("export.preferences.formats")
+            .width(c)
+            .gap(gap)
+            .content([&] {
+                formatField("data.filetype", "测量数据默认文件类型", {"CSV", "XLSX"}, &Draft::dataFileType);
+                formatField("report.format", "方法对比报告默认格式", {"PDF", "HTML"}, &Draft::reportFormat);
+            })
+            .build();
     });
 }
 void runOrderSettings(Ui &u, float w) {
@@ -2836,8 +2995,9 @@ void config(Ui &u, float w, float disclosureProgress = reveal(state.advancedChan
             statisticsSettings(u, w);
         }
     } else if (state.optionsTab == 2) {
-        pairedCards(u, "options.output", w, "output", exportSettings, "runorder", runOrderSettings);
         fileSettings(u, w);
+        exportPreferences(u, w);
+        pairedCards(u, "options.output", w, "output", exportSettings, "runorder", runOrderSettings);
     }
     pathSettings(u, w);
 }
@@ -2854,7 +3014,7 @@ void optionsPage(Ui &u, float w, float h) {
                 const float tabsWidth =
                     navigationWidth - titleWidth - secondaryNavGap - 2 * secondaryNavInset;
                 tabs(
-                    u, "options.tabs", {"研究", "分析", "导出"}, state.optionsTab,
+                    u, "options.tabs", {"研究", "分析", "文件"}, state.optionsTab,
                     std::min(tabsWidth, 378.f),
                     [](int i) {
                         state.optionsTab = i;
@@ -3626,8 +3786,8 @@ void helpQuickStart(Ui &v, float cw) {
         step("help.step3", "3", "生成并核对结果",
              "点击「生成数据」。在「指标复核」核对实际值，在「数据预览」检查测量记录，"
              "再到「分析详情」或「ANOVA 详情」查看计算结果。搜索期间可在底栏取消。");
-        step("help.step4", "4", "导出 CSV",
-             "在「选项 → 导出」选择格式、运行顺序和保存位置，然后回到「数据」页点击「导出 CSV」。");
+        step("help.step4", "4", "导出数据",
+             "在「选项 → 文件」选择格式、运行顺序和保存位置，然后回到「数据」页点击「导出数据」。");
     });
 
     section(v, "help.rules", "部件取样与分布", cw, [&](float c) {
@@ -3669,7 +3829,7 @@ void helpQuickStart(Ui &v, float cw) {
              "只填一侧规格限或未填规格时，也需要其中一项。"},
             {"数据生成种子",
              "相同版本、配置和固定种子可复现生成结果。搜索超时可能提前结束，"
-             "小数位数同时决定生成时的舍入和 CSV 的精度。"},
+             "小数位数同时决定生成时的舍入和 导出测量值的精度。"},
         }};
         helpRows(v, "help.scale.settings", settings, c);
     });
@@ -3817,28 +3977,28 @@ void helpAnalysis(Ui &v, float cw) {
 void helpCsv(Ui &v, float cw) {
     section(v, "help.files", "导出当前结果", cw, [&](float c) {
         helpText(v, "help.csv.start",
-                 "在「选项 → 导出」选择 CSV 格式、运行顺序和保存位置。回到「数据」页，"
-                 "点击底部「导出 CSV」。更改导出设置后可直接再次导出同一批数据。",
+                 "在「选项 → 文件」选择测量数据文件类型、数据布局、运行顺序和保存位置。回到「数据」页，"
+                 "点击底部「导出数据」。在「导出方式」关闭测量数据静默导出，即可每次选择位置。",
                  c);
-        button(v, "help.files.open", "前往导出设置", 160, [] {
+        button(v, "help.files.open", "前往文件选项", 160, [] {
             state.optionsTab = 2;
             state.configOffset = 0;
             state.navigate(Page::Options);
         });
         helpItem(v, "help.csv.location", "保存位置",
-                 "在「文件保存」填写输出目录和 CSV 文件名模板。目录留空时保存到配置"
-                 "文件所在目录，相对路径也从该目录开始。完整保存路径和失败原因可在「日志」查看。",
+                 "在「目录与文件名」填写「测量数据导出目录」和「测量数据导出名称」。目录留空时使用 Windows"
+                 " 系统桌面，相对路径也从桌面开始。完整保存路径和失败原因可在「日志」查看。",
                  c);
     });
-    section(v, "help.runorder", "CSV 格式与运行顺序", cw, [&](float c) {
+    section(v, "help.runorder", "数据布局与运行顺序", cw, [&](float c) {
         helpItem(v, "help.csv", "默认（宽表）",
-                 "列按部件编号排列，每行记录一名操作员在一轮中测得的全部数值。文件采用 "
+                 "列按部件编号排列，每行记录一名操作员在一轮中测得的全部数值。CSV 宽表采用 "
                  "UTF-8 BOM 编码。选择任一长表格式即可设置逐条测量的运行顺序。",
                  c);
         helpItem(v, "help.csv.encoding", "长表",
                  "Minitab、SPSS、JMP 19、Origin 和 MATLAB 共用长表。每行一次测量，"
                  "依次记录操作员（Operator）、部件（Part）、重复测量编号（Trial）和"
-                 "测量值（Measurement）。长表采用 UTF-8 无 BOM，宽表和长表均使用"
+                 "测量值（Measurement）。CSV 长表采用 UTF-8 无 BOM，CSV 宽表和长表均使用"
                  "英文逗号、小数点及 CRLF 换行。",
                  c);
         helpItem(v, "help.runorder.modes", "三种运行顺序",
@@ -3853,11 +4013,12 @@ void helpCsv(Ui &v, float cw) {
         helpItem(v, "help.runorder.seed", "复现运行顺序",
                  "运行顺序种子只控制测量记录的排列，数据生成种子控制测量值。"
                  "随机化时可填正整数，留空时为本批数据自动选取。比较多种运行顺序时，"
-                 "对同一批数据重复导出即可。跨命令行进程复现时，固定两个种子并沿用相同设置。",
+                 "对同一批数据重复导出即可。重新生成时可固定两个种子和研究设置，也可用 "
+                 "--replay-report 从含导出记录的生成报告还原测量数据文件。",
                  c);
         helpItem(v, "help.runorder.standard", "追溯标准顺序",
-                 "在「CSV 格式」勾选「保留标准运行序号（StdOrder）」，首列会记录"
-                 "随机化前的序号。CSV 行序是实际运行顺序，Trial 始终保留原重复测量编号。"
+                 "在「数据布局」勾选「保留标准运行序号（StdOrder）」，首列会记录"
+                 "随机化前的序号。数据行序是实际运行顺序，Trial 始终保留原重复测量编号。"
                  "排序会移动完整记录，测量值和字段对应关系随记录一起移动。",
                  c);
         helpItem(v, "help.runorder.identity", "手工核对序号",
@@ -3883,18 +4044,19 @@ void helpCsv(Ui &v, float cw) {
 }
 
 void helpFilename(Ui &v, float cw) {
-    section(v, "help.filename", "导出文件名变量", cw, [&](float c) {
+    section(v, "help.filename", "导入与导出名称变量", cw, [&](float c) {
         helpText(v, "help.filename.syntax",
-                 "点击变量名复制带方括号的写法，再粘贴到「选项 → 导出 → 文件保存」"
-                 "的「CSV 文件名模板」。模板填写 .csv 文件名，目录在「输出目录」中另设。",
+                 "点击变量名复制带方括号的写法，可用于「选项 → 文件 → 目录与文件名」中的"
+                 "「测量数据导入名称」「测量数据导出名称」「图表导出名称」和「方法对比报告导出名称」。"
+                 "只填写基本名称，导出时按所选文件类型添加扩展名。",
                  c);
-        button(v, "help.filename.open", "编辑文件名模板", 176, [] {
+        button(v, "help.filename.open", "编辑导入与导出名称", 176, [] {
             state.optionsTab = 2;
             state.configOffset = 0;
             state.navigate(Page::Options);
         });
         helpExample(v, "help.filename.example",
-                    "研究_[OPERATORS]人_[PARTS]件_[DATETIME].csv\n"
+                    "研究_[OPERATORS]人_[PARTS]件_[DATETIME]\n"
                     "→ 研究_3人_10件_2026-10-24_22-08-12.csv",
                     c);
         for (const auto &variable : msa::filename_variables()) {
@@ -3910,13 +4072,18 @@ void helpFilename(Ui &v, float cw) {
             filenameVariableHelp(v, variable, c);
         }
         helpItem(v, "help.filename.values", "拼写和取值",
-                 "变量区分大小写，[MM] 表示月份，[M] 表示分钟。输入 [[ 或 ]] 可输出"
-                 "字面方括号。日期取导出开始时的本地时间，研究参数和指标取当前结果。"
-                 "百分比指标用两位小数，省略百分号。未设置的规格限和不可计算的指标写为 NA。",
+                 "变量区分大小写，可使用表中的英文名或中文别名。[MM] 表示月份，[M] 表示分钟。"
+                 "输入 [[ 或 ]] 可输出字面方括号。日期取本次操作的本地时间。"
+                 "测量数据导出使用已生成结果，图表和报告使用所选数据源的研究设置与指标。"
+                 "百分比指标保留两位小数并省略百分号。缺少的值写为 NA，导入的数据没有生成种子。",
+                 c);
+        helpItem(v, "help.filename.import", "预填导入名称",
+                 "导入时使用当前研究设置和所选数据源的可用指标。尚无有效结果时，指标写为 NA。"
+                 "展开后的名称仅用于预填文件选择窗口，仍可另选 CSV 或 XLSX。留空时直接选择文件。",
                  c);
         helpItem(v, "help.filename.collision", "同名文件与保存失败",
-                 "「追加序号」遇到同名文件会在扩展名前加 _001、_002 等。"
-                 "选择「覆盖文件」会替换同名文件。出现保存或导出错误时，先检查变量拼写、"
+                 "测量数据静默导出时，「追加序号」会在扩展名前加 _001、_002 等；「覆盖文件」会替换同名文件。"
+                 "图表和报告静默保存时，重名会追加 _1、_2 等。出现保存或导出错误时，先检查变量拼写、"
                  "括号、Windows 保留名称和文件名长度，再到「日志」查看具体原因。",
                  c);
     });
@@ -3939,7 +4106,7 @@ void helpCli(Ui &v, float cw) {
                  "false。同一参数写多次时，以最后一次为准。",
                  c);
     });
-    section(v, "help.cli.generate", "生成并导出 CSV", cw, [&](float c) {
+    section(v, "help.cli.generate", "生成并导出数据", cw, [&](float c) {
         helpText(v, "help.cli.example.intro",
                  "这条命令使用分层随机、80% 最低部件跨度，导出 Minitab 长表和 JSON 报告。",
                  c);
@@ -3957,10 +4124,11 @@ void helpCli(Ui &v, float cw) {
                  "也可用 between:下限:上限、at_most:阈值、at_least:阈值或 none，整项替换原约束。",
                  c);
     });
-    section(v, "help.cli.analyze.section", "分析已有 CSV", cw, [&](float c) {
+    section(v, "help.cli.analyze.section", "分析已有测量数据", cw, [&](float c) {
         helpText(v, "help.cli.analyze",
                  "用 --input 读取已有数据，程序按表头识别宽表或长表。操作员数、重复测量次数"
-                 "和部件数应与文件一致。此模式用 --report 保存分析报告。下例分析上一步的 Minitab 长表。",
+                 "和部件数应与文件一致。分析 XLSX 时可加 --sheet \"复测 数据\" 指定工作表，"
+                 "省略时读取第一张数据工作表。用 --report 保存分析报告。下例分析上一步的 Minitab 长表。",
                  c);
         helpCommand(v, "help.cli.analyze.example",
                     ".\\msa_cli.exe --no-config --input data.csv --csv-format minitab "
@@ -3970,13 +4138,13 @@ void helpCli(Ui &v, float cw) {
     section(v, "help.cli.outputs", "文件路径与退出状态", cw, [&](float c) {
         helpItem(v, "help.cli.files", "选择输出位置",
                  "省略 --output 时按配置的目录、文件名模板和同名处理方式保存。显式 "
-                 "--output 直接指定 CSV 路径。命令中的相对 --config、--input、--output "
-                 "和 --report 路径从当前工作目录开始。配置中的相对输出目录从用户配置目录开始。",
+                 "--output 直接指定 .csv 或 .xlsx 路径。命令中的相对 --config、--input、--output "
+                 "和 --report 路径从当前工作目录开始。配置中的相对输出目录从 Windows 系统桌面开始。",
                  c);
         helpText(v, "help.cli.report",
                  "--report 保存生效配置、测量矩阵和统计结果。生成模式同时记录实际种子。", c);
         helpItem(v, "help.cli.status", "覆盖文件与查看退出码",
-                 "确认要替换显式指定的 CSV 或报告时加 --overwrite。"
+                 "确认要替换显式指定的测量数据或报告时加 --overwrite。"
                  "生成过程中可按 Ctrl+C 取消。\n"
                  "0 · 成功。1 · 配置、生成或文件操作失败，或生成已取消。"
                  "2 · 参数错误或显式文件路径检查失败。",
@@ -3990,13 +4158,18 @@ void helpCharts(Ui &v, float cw) {
                  "先在「数据」页生成一组数据，再到「图表」选择「当前结果」。图表沿用这批数据的"
                  "研究配置与统计结果。",
                  c);
-        helpItem(v, "help.charts.source.import", "导入 CSV",
+        helpItem(v, "help.charts.source.import", "导入数据",
                  "先在「选项」按文件设置操作员数、重复测量次数、部件数及分析方法。再到「图表」"
-                 "点击「导入 CSV」，选择包含完整测量记录的宽表或长表，文件最大为 4 MiB。",
+                 "点击「导入数据」，选择包含完整宽表或长表测量记录的 CSV 文件或 XLSX 工作簿。"
+                 "CSV 和只有一张数据工作表的 XLSX 会直接导入。若有多张，弹窗按工作簿顺序列出数据工作表，"
+                 "也可选择隐藏的数据工作表。选中一张后点击「导入」或按回车。取消会保留原数据和图表。"
+                 "「选项 → 文件 → 目录与文件名」可设置导入目录和用于预填的「测量数据导入名称」。",
                  c);
         helpText(v, "help.charts.source.switch",
-                 "导入成功后可在「当前结果」和「CSV 文件」之间切换。需要按新的分析设置查看"
-                 "导入数据时，请重新导入文件。",
+                 "导入成功后可在「当前结果」和「已导入数据」之间切换。修改分析选项后，点击"
+                 "「按当前设置重算」重新分析原始记录。「导出方法对比报告」可将当前数据源的"
+                 " Xbar-R 与 ANOVA 结果保存为 PDF 或 HTML，默认选中 PDF。「选项 → 文件」中可设置"
+                 "报告目录、文件名、默认格式和静默保存开关。",
                  c);
         button(v, "help.charts.open", "打开图表页", 152, [] { state.navigate(Page::Charts); });
     });
@@ -4023,7 +4196,7 @@ void helpCharts(Ui &v, float cw) {
                  "每张图表有独立草稿，收起编辑器或切换图表时可保留。点击「应用编辑」更新预览"
                  "和导出样式。点击「撤销草稿」返回上次应用的样式，「重置当前图表」恢复默认外观。",
                  c);
-        helpText(v, "help.charts.edit.session", "图表外观、组合选择和图表导出设置保留在本次运行期间。",
+        helpText(v, "help.charts.edit.session", "图表外观、组合选择和图表分辨率保留在本次运行期间。",
                  c);
     });
     section(v, "help.charts.export", "导出单图或组合", cw, [&](float c) {
@@ -4032,8 +4205,9 @@ void helpCharts(Ui &v, float cw) {
                  "顺序排列，支持单列或双列。先应用或撤销待导出图表的草稿。",
                  c);
         helpItem(v, "help.charts.export.files", "设置格式和保存位置",
-                 "选择 PNG、JPEG 或 PDF，设置单图宽度、文件名和导出目录，再点击「导出图表」。"
-                 "同名时自动追加序号。保存后可点击「上次导出目录」查看文件。",
+                 "选择 PNG、JPEG 或 PDF 和单图宽度。「目录与文件名」可打开选项页修改图表名称和目录。"
+                 "默认打开「另存为」。开启图表静默导出后直接保存，同名时追加序号。"
+                 "保存后可点击「上次导出目录」查看文件。",
                  c);
         helpText(v, "help.charts.export.pdf",
                  "PDF 将全部所选图表保存为一页，图形与中文文字一起绘制成高分辨率图像。", c);
@@ -4042,7 +4216,7 @@ void helpCharts(Ui &v, float cw) {
 
 void helpPage(Ui &u, float w, float h) {
     static const std::vector<std::string> topics{
-        "快速入门", "分析指标", "CSV 导出", "文件名变量", "命令行", "结果图表"};
+        "快速入门", "分析指标", "数据导出", "名称变量", "命令操作", "结果图表"};
     using Article = void (*)(Ui &, float);
     constexpr std::array<Article, 6> articles{
         helpQuickStart, helpAnalysis, helpCsv, helpFilename, helpCli, helpCharts};
@@ -4400,7 +4574,7 @@ void footer(Ui &u, float w) {
         footerStatus(u, w - applyWidth - exportWidth - 24, chartFooterSummary());
         button(u, "charts.apply", "应用编辑", applyWidth, [] { applyChartEdits(visual.selected); },
                false, visual.busy() || !insightResult() || !visual.editDirty[visual.selected]);
-        button(u, "charts.export", visual.busy() ? "导出中…" : "导出图表", exportWidth,
+        button(u, "charts.export", visual.busy() && !visual.exportingReport ? "导出中…" : "导出图表", exportWidth,
                exportVisuals, true, visual.busy() || !insightResult() || selectedChartCount() == 0);
         return;
     }
@@ -4411,9 +4585,10 @@ void footer(Ui &u, float w) {
                                   state.draft.attempts + " · " + number(state.elapsed) + " 秒"
                             : std::to_string(state.ticks.load()) + " 次 · " +
                                   number(state.elapsed) + " 秒")
+            : !state.dataExportError.empty() ? "测量数据导出失败，请查看页面提示"
             : state.retainedResult() ? "保留上次成功结果，可复核或导出"
             : !state.message.empty() ? "操作失败，请查看页面提示"
-            : state.validResult()    ? "数据已生成，可复核并导出 CSV"
+            : state.validResult()    ? "数据已生成，可复核并导出数据"
             : state.result && state.resultRevision != state.revision ? "参数已修改，请重新生成"
             : "准备就绪";
         const float generateWidth = compact ? 112.f : 146.f, exportWidth = compact ? 124.f : 158.f;
@@ -4433,7 +4608,7 @@ void footer(Ui &u, float w) {
             },
             state.busy() || !state.validResult(), state.status == Status::Cancelling);
         button(
-            u, "export", "导出 CSV", exportWidth, [] { exportData(); }, state.validResult(),
+            u, "export", "导出数据", exportWidth, [] { exportData(); }, state.validResult(),
             !state.validResult());
     } else if (state.busy()) {
         footerStatus(u, w - 284, "生成中 · " + number(state.elapsed) + " 秒");

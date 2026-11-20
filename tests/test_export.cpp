@@ -1,4 +1,5 @@
 #include "msa/core.hpp"
+#include "msa/xlsx.hpp"
 #include "ui_model.hpp"
 #include <algorithm>
 #include <fstream>
@@ -147,6 +148,69 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
         check(export_csv(ref, path, output) == ref.metrics, "written reference metrics");
         check(parse_export_csv(read_text(path), refCfg) == reference, "written reference mapping");
     }
+    for (int dp : {0, 4, 10}) {
+        const auto sample = study(3, 2, 7, dp);
+        for (const char *format : native_ui::csv_formats) {
+            auto settings = sample.config.at("output");
+            settings["format"] = format;
+            settings["file_type"] = "xlsx";
+            settings["run_order"] = {{"mode", "all"}, {"seed", nullptr},
+                                     {"store_standard_order", true}, {"randomize_operators", false}};
+            const auto xlsx = out / (std::string(format) + "_roundtrip.XLSX");
+            Json receipt;
+            check(export_data(sample, xlsx, settings, ExistingFile::Replace, &receipt) == sample.metrics &&
+                      read_data(xlsx, sample.config) == sample.matrix,
+                  "workbook did not roundtrip through normal file APIs");
+            const auto bytes = read_text(xlsx);
+            auto ordered = export_csv_text(sample, settings);
+            if (ordered.compare(0, 3, "\xef\xbb\xbf") == 0)
+                ordered.erase(0, 3);
+            check(csv_from_xlsx(bytes) == ordered,
+                  "workbook rows, labels, ordering or numeric display precision changed");
+            check(bytes.rfind("PK", 0) == 0 && receipt["file_type"] == "xlsx" &&
+                      receipt["data_path"] == xlsx.u8string() && receipt["sha256"] == sha256(bytes),
+                  "workbook receipt does not describe the saved bytes");
+            auto report = sample.as_json();
+            report["config"]["schema_version"] = 1;
+            report["config"]["input"]["filename"] = "[DATE].csv";
+            report["export"] = receipt;
+            const auto replay = out / "workbook-replay.xlsx";
+            replay_data(report, replay, ExistingFile::Replace);
+            check(read_text(replay) == bytes, "workbook replay was not byte-identical");
+            report["export"]["sha256"] = std::string(64, '0');
+            rejects([&] { replay_data(report, replay, ExistingFile::Replace); });
+            check(read_text(replay) == bytes, "failed hash verification replaced the prior workbook");
+        }
+    }
+    {
+        auto settings = refCfg.at("output");
+        settings["file_type"] = "xlsx";
+        settings["filename"] = "[SEED]_数据.CSV";
+        settings["directory"] = std::filesystem::absolute(out).u8string();
+        settings["existing_file"] = "overwrite";
+        auto dest = export_configured_data(ref, settings);
+        check(dest.filename() == std::filesystem::u8path("123_数据.xlsx") &&
+                  read_data(dest, refCfg) == ref.matrix,
+              "configured workbook naming or format selection failed");
+        const auto legacy = out / "legacy.data";
+        Json receipt;
+        export_data(ref, legacy, settings, ExistingFile::Replace, &receipt);
+        check(receipt["file_type"] == "csv" && receipt["csv_path"] == legacy.u8string() &&
+                  read_data(legacy, refCfg) == ref.matrix,
+              "explicit non-workbook path lost legacy CSV semantics");
+        auto report = ref.as_json();
+        receipt.erase("file_type");
+        receipt.erase("data_path");
+        report["export"] = receipt;
+        report["config"]["output"]["filename"] = "legacy.csv";
+        report["config"]["schema_version"] = 1;
+        report["config"]["output"]["charts"]["filename"] = "旧[图表]";
+        report["config"]["output"].erase("file_type");
+        replay_data(report, out / "legacy-replay.csv", ExistingFile::Replace);
+        check(read_text(out / "legacy-replay.csv") == read_text(legacy),
+              "old CSV receipt could not be replayed");
+        rejects([&] { replay_data(report, out / "wrong-type.xlsx", ExistingFile::Replace); });
+    }
     int configurations = 0;
     for (int o : {2, 3})
         for (int t : {2, 3})
@@ -215,6 +279,42 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
                     check(s.matrix == original, "randomization mutated original data");
                 }
     auto s = study(3, 3, 10);
+    for (const auto *invalid : {"+-1", "++1", "--1", "-+1", "+", "-"}) {
+        rejects([&] { parse_number(invalid); });
+        rejects([&] { parse_integer(invalid); });
+        rejects([&] { native_ui::numeric(invalid, "种子", true); });
+    }
+    check(parse_number("+.25e-1") == .025 && parse_integer("+1") == 1 &&
+              parse_number("-1") == -1, "valid signed values");
+    check(sha256("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" &&
+              sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "system SHA-256 vectors");
+    auto external_output = s.config["output"];
+    external_output["format"] = "minitab";
+    external_output["run_order"]["store_standard_order"] = true;
+    std::string external = "\"Trial\",\"备注\",\"Measurement\",\"StdOrder\",\"Part\",\"Operator\"\r\n";
+    for (const auto &r : export_records(s, external_output))
+        external += "\"" + std::to_string(r.trial) + "\",\"a,\"\"b\"\"\n续行\",\"" +
+                    fixed(r.measurement, 4) + "\",\"" + std::to_string(r.standard_order) +
+                    "\",\"" + std::to_string(r.part) + "\",\"" +
+                    char('A' + r.operator_number - 1) + "\"\r\n";
+    check(parse_export_csv(external, s.config) == s.matrix,
+          "quoted, reordered long CSV with multiline metadata");
+    rejects([&] { parse_export_csv("Trial,Part,Measurement,Trial,Operator\n", s.config); });
+    rejects([&] { parse_export_csv("Operator,Trial,Measurement\n", s.config); });
+    const auto check_diagnostic = [&](const std::string &csv, const std::string &location) {
+        try {
+            parse_export_csv(csv, s.config);
+        } catch (const ConfigError &e) {
+            check(std::string(e.what()).find(location) != std::string::npos,
+                  "CSV diagnostic lacks physical row/column");
+            return;
+        }
+        throw std::runtime_error("malformed CSV was accepted");
+    };
+    check_diagnostic("Trial,Part,Measurement,Operator\n1,1,+-2,A\n", "第 2 行，第 3 列");
+    check_diagnostic("Trial,Part,Measurement,Operator\n1,1,\"2,A\n", "第 2 行，第 3 列");
+    check_diagnostic("1,2,3,4,5,6,7,8,+-9,10\n", "第 1 行，第 9 列");
     const auto labeled = export_csv_text(s, s.config["output"]);
     auto badHeader = labeled;
     badHeader.replace(badHeader.find(",2,"), 3, ",3,");
@@ -268,13 +368,104 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     bad = output;
     bad["run_order"]["randomize_operators"] = 1;
     rejects([&] { normalize_output(bad); });
+    auto legacy = output;
+    legacy.erase("silent");
+    legacy.erase("comparison_report");
+    legacy.erase("charts");
+    legacy.erase("file_type");
+    legacy["filename"] = "msa_data.csv";
+    const auto upgraded = normalize_output(legacy);
+    check(upgraded["file_type"] == "csv" && upgraded["filename"] == "msa_data" &&
+              upgraded["silent"] == Json{{"csv", false}, {"charts", false}, {"comparison_report", false}} &&
+              upgraded["comparison_report"] == Json{{"format", "pdf"}, {"directory", ""},
+                                                    {"filename", "MSA_Comparison"}} &&
+              upgraded["charts"] == Json{{"directory", ""}, {"filename", "MSA_Charts"}},
+          "legacy output settings changed export behavior");
+    auto oldStudy = s.config;
+    oldStudy.erase("input");
+    oldStudy["output"] = legacy;
+    const auto oldDraft = native_ui::from_config(oldStudy);
+    check(oldDraft.importDirectory.empty() && oldDraft.importFilename.empty() &&
+              oldDraft.chartFilename == "MSA_Charts" && oldDraft.reportFilename == "MSA_Comparison",
+          "old study lost default filenames or directory");
+    legacy["silent"] = {{"charts", true}};
+    legacy["comparison_report"] = {{"format", "html"}};
+    const auto partial = normalize_output(legacy);
+    check(partial["silent"]["charts"] == true && partial["silent"]["csv"] == false &&
+              partial["silent"]["comparison_report"] == false &&
+              partial["comparison_report"]["directory"] == "",
+          "partial export preferences did not inherit missing fields");
+    const auto chartsPrompt = native_ui::from_config(Json{{"output", legacy}});
+    check(!chartsPrompt.silentCsv && chartsPrompt.silentCharts && !chartsPrompt.silentReport &&
+              chartsPrompt.reportFormat == 1 &&
+              native_ui::output_config(chartsPrompt)["silent"] == partial["silent"],
+          "chart prompt affects another export type");
+    for (const char *key : {"csv", "charts", "comparison_report"}) {
+        bad = output;
+        bad["silent"][key] = "false";
+        rejects([&] { normalize_output(bad); });
+    }
+    bad = output;
+    bad["comparison_report"]["format"] = "png";
+    rejects([&] { normalize_output(bad); });
+    bad = output;
+    bad["comparison_report"]["directory"] = nullptr;
+    rejects([&] { normalize_output(bad); });
+    bad["comparison_report"]["directory"] = std::string("reports\0hidden", 14);
+    rejects([&] { normalize_output(bad); });
+    for (const char *field : {"charts", "comparison_report"}) {
+        for (const char *invalid : {"", ".", "..", "LPT².note", "con.txt", "A:B", "../report", "x/y"}) {
+            bad = output;
+            bad[field]["filename"] = invalid;
+            rejects([&] { normalize_output(bad); });
+        }
+        bad = output;
+        bad[field]["filename"] = std::string(252, 'a');
+        rejects([&] { normalize_output(bad); });
+    }
+    check(normalize_import_filename("") == "" && normalize_import_filename("  ") == "" &&
+              normalize_import_filename(" 来料复核.v2 ") == "来料复核.v2" &&
+              normalize_import_filename("测量.CSV") == "测量" &&
+              normalize_import_filename("测量.XLSX") == "测量",
+          "import preset did not normalize the data basename");
+    for (const char *invalid : {"../old.csv", "NUL.csv", ".csv", "x/y", "..", "a?.csv"})
+        rejects([&] { normalize_config(Json{{"input", {{"filename", invalid}}}}); });
+    rejects([&] { normalize_config(Json{{"input", {{"directory", false}}}}); });
+    output["silent"] = {{"csv", false}, {"charts", true}, {"comparison_report", true}};
+    output["file_type"] = "xlsx";
+    output["charts"] = {{"directory", "质量部/图表"}, {"filename", "极差图.v2.JPG"}};
+    output["comparison_report"] = {{"format", "pdf"}, {"directory", "质量部/对照报告"},
+                                   {"filename", " 研究对照.v2.HTML "}};
     auto saved = s.config;
+    saved["input"] = {{"directory", "质量部/原始记录"}, {"filename", "来料"}};
     saved["output"] = normalize_output(output);
     const auto configPath = out / "saved-config.json";
     save_config(saved, configPath);
     check(load_config(configPath) == normalize_config(saved), "settings persistence");
     check(native_ui::output_config(native_ui::from_config(saved)) == saved["output"],
           "UI settings roundtrip");
+    const auto restored = native_ui::from_config(load_config(configPath));
+    check(!restored.silentCsv && restored.silentCharts && restored.silentReport &&
+              restored.reportFormat == 0 && restored.dataFileType == 1 && restored.reportDirectory == "质量部/对照报告" &&
+              restored.reportFilename == "研究对照.v2" && restored.chartDirectory == "质量部/图表" &&
+              restored.chartFilename == "极差图.v2" && restored.importDirectory == "质量部/原始记录" &&
+              restored.importFilename == "来料" &&
+              native_ui::to_config(restored) == normalize_config(saved),
+          "saved GUI export preferences were lost");
+    auto invalidReport = restored;
+    invalidReport.reportFormat = -1;
+    invalidReport.reportFilename = "../outside";
+    invalidReport.chartFilename = "";
+    invalidReport.importFilename = "CON.csv";
+    rejects([&] { native_ui::output_config(invalidReport); });
+    check(native_ui::csv_output_config(invalidReport) == native_ui::csv_output_config(restored),
+          "unrelated unfinished fields affected CSV export");
+    check(native_ui::to_config(restored, native_ui::ConfigUse::Generation) ==
+              native_ui::to_config(invalidReport, native_ui::ConfigUse::Generation),
+          "report format affected GUI generation snapshot");
+    check(native_ui::to_config(restored, native_ui::ConfigUse::Analysis) ==
+              native_ui::to_config(invalidReport, native_ui::ConfigUse::Analysis),
+          "report format affected GUI analysis snapshot");
     for (const std::string seed : {"0", "-1", "1.5", "abc", "9223372036854775808"}) {
         auto draft = native_ui::from_config(saved);
         draft.runSeed = seed;
@@ -298,10 +489,14 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     generatedCfg["generation"]["seed"] = 123;
     const auto before = generate(generatedCfg);
     export_csv_text(before, output);
+    generatedCfg["output"]["silent"] = output["silent"];
+    generatedCfg["input"] = saved["input"];
+    generatedCfg["output"]["charts"] = output["charts"];
+    generatedCfg["output"]["comparison_report"] = output["comparison_report"];
     const auto after = generate(generatedCfg);
     check(before.matrix == after.matrix && before.metrics == after.metrics &&
               before.attempts == after.attempts,
-          "export RNG influenced data generation");
+          "export preferences or RNG influenced data generation");
     atomic_text(out / "export-verification.json",
                 Json{{"passed", true},
                      {"version", version},

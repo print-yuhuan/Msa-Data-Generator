@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(MsaNative VERSION 1.0.1 LANGUAGES C CXX)
+project(MsaNative VERSION 1.0.2 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -23,9 +23,24 @@ if(WIN32)
 endif()
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/release-version.json"
   CONTENT "{\"version\":\"${PROJECT_VERSION}\",\"native_version\":\"${PROJECT_VERSION}-native\"}\n")
-add_library(msa_core STATIC src/msa/config.cpp src/msa/numeric.cpp src/msa/anova.cpp src/msa/analysis_options.cpp src/msa/confidence.cpp src/msa/search.cpp src/msa/io.cpp src/msa/task.cpp src/msa/filename.cpp src/msa/csv_export.cpp src/msa/charts.cpp)
+add_library(msa_core STATIC
+  src/msa/config.cpp src/msa/numeric.cpp src/msa/anova.cpp src/msa/analysis_options.cpp
+  src/msa/confidence.cpp src/msa/search.cpp src/msa/io.cpp src/msa/task.cpp
+  src/msa/filename.cpp src/msa/csv_export.cpp src/msa/csv_read.cpp src/msa/sha256.cpp
+  src/msa/charts.cpp src/msa/comparison_report.cpp src/msa/report_pdf.cpp)
 target_include_directories(msa_core PUBLIC src third_party "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_sources(msa_core PRIVATE src/msa/xlsx.cpp src/msa/xlsx_package.cpp)
 target_link_libraries(msa_core PUBLIC Threads::Threads)
+if(WIN32)
+  target_link_libraries(msa_core PRIVATE xmllite shlwapi)
+  target_link_libraries(msa_core PRIVATE bcrypt advapi32 shell32 ole32 uuid)
+else()
+  find_package(LibArchive REQUIRED)
+  find_package(LibXml2 REQUIRED)
+  target_link_libraries(msa_core PRIVATE LibArchive::LibArchive LibXml2::LibXml2)
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  target_link_libraries(msa_core PRIVATE OpenSSL::Crypto)
+endif()
 if(MSVC)
   target_compile_options(msa_core PRIVATE /utf-8 /EHsc /W4 /fp:strict)
 else()
@@ -54,6 +69,13 @@ if(MSVC)
   target_compile_options(msa_export_tests PRIVATE /utf-8 /EHsc /W4 /fp:strict)
 endif()
 enable_testing()
+add_executable(msa_xlsx_tests tests/test_xlsx.cpp)
+target_link_libraries(msa_xlsx_tests PRIVATE msa_core)
+if(MSVC)
+  target_compile_options(msa_xlsx_tests PRIVATE /utf-8 /EHsc /W4)
+endif()
+add_test(NAME msa_xlsx_regression COMMAND msa_xlsx_tests
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures" "${CMAKE_CURRENT_BINARY_DIR}/xlsx-test-output")
 add_executable(msa_analysis_options_tests tests/test_analysis_options.cpp)
 target_link_libraries(msa_analysis_options_tests PRIVATE msa_core)
 if(MSVC)
@@ -78,6 +100,9 @@ add_test(NAME msa_native_regression COMMAND msa_tests "${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME msa_export_regression COMMAND msa_export_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/export_examples" "${CMAKE_CURRENT_BINARY_DIR}/export-test-output")
 if(WIN32)
   find_program(MSA_POWERSHELL NAMES pwsh powershell REQUIRED)
+  add_test(NAME msa_comparison_report_regression COMMAND "${MSA_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
+    -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_comparison_report.ps1" -Cli "$<TARGET_FILE:msa_cli>"
+    -OutputDirectory "${CMAKE_CURRENT_BINARY_DIR}/comparison-test-output")
   add_test(NAME msa_cli_regression COMMAND "${MSA_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli.ps1" -Cli "$<TARGET_FILE:msa_cli>" -OutputDirectory "${CMAKE_CURRENT_BINARY_DIR}/cli-test-output" -ExpectedVersion "${PROJECT_VERSION}")
   add_test(NAME msa_release_evidence_regression COMMAND "${MSA_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release.ps1" -BuildDirectory "${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME msa_source_package_regression COMMAND "${MSA_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
@@ -162,7 +187,7 @@ target_link_libraries(msa_text_atlas_tests PRIVATE eui::neo freetype)
 add_test(NAME msa_text_atlas_regression COMMAND msa_text_atlas_tests
   "${MSA_UI_FONT_FILE}" "${CMAKE_CURRENT_BINARY_DIR}/text-atlas-test-output")
 set_tests_properties(msa_text_atlas_regression PROPERTIES LABELS "gui;opengl;fonts")
-add_executable(msa_gui_layout_tests tests/test_gui_layout.cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/app-icon.rc" "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded-font.rc")
+add_executable(msa_gui_layout_tests tests/test_gui_layout.cpp resources/worksheet-dialog.rc "${CMAKE_CURRENT_BINARY_DIR}/generated/app-icon.rc" "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded-font.rc")
 target_compile_definitions(msa_gui_layout_tests PRIVATE MSA_UI_VERSION="${PROJECT_VERSION}")
 target_compile_options(msa_gui_layout_tests PRIVATE /utf-8 /EHsc /W4)
 target_link_options(msa_gui_layout_tests PRIVATE /MANIFEST:EMBED "/MANIFESTINPUT:${CMAKE_CURRENT_BINARY_DIR}/generated/app.manifest")
@@ -170,7 +195,8 @@ target_link_libraries(msa_gui_layout_tests PRIVATE msa_core msa_font_resource ms
 add_dependencies(msa_gui_layout_tests msa_embedded_font)
 add_test(NAME msa_gui_layout_regression COMMAND msa_gui_layout_tests
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts/NotoSansCJKsc-Regular.otf"
-  "${CMAKE_CURRENT_SOURCE_DIR}/examples/示例配置.json")
+  "${CMAKE_CURRENT_SOURCE_DIR}/examples/示例配置.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/xlsx-multiple-sheets.xlsx")
 set_tests_properties(msa_gui_layout_regression PROPERTIES LABELS "gui")
 add_executable(msa_embedded_resources_tests tests/test_embedded_resources.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/generated/app-icon.rc"
@@ -202,7 +228,7 @@ if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/font-optimization-baseline/eui_neo.lib")
     eui::neo)
 endif()
 endif()
-add_executable(msa_generator src/gui.cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded-font.rc")
+add_executable(msa_generator src/gui.cpp resources/worksheet-dialog.rc "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded-font.rc")
 target_include_directories(msa_generator PRIVATE third_party)
 target_compile_definitions(msa_generator PRIVATE MSA_UI_VERSION="${PROJECT_VERSION}")
 eui_neo_configure_app(msa_generator)

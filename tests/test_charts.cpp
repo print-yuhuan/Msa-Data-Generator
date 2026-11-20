@@ -1,5 +1,6 @@
 #include "msa/charts.hpp"
 #include "platform/chart_export.hpp"
+#include "platform/save_target.hpp"
 #include "platform/embedded_resources_win.hpp"
 // clang-format off: GDI+ 需要先声明 Windows 与 COM 类型。
 #include <objidl.h>
@@ -295,6 +296,58 @@ void record_file(const std::filesystem::path &path, const platform::ChartExportO
 }
 
 void model_checks() {
+    check("另存为按文件类型补齐扩展名并允许在 HTML/PDF 之间切换", [] {
+        using platform::completeExportFilename;
+        using platform::ExportKind;
+        require(completeExportFilename(L"测量", ExportKind::Csv) == L"测量.csv" &&
+                    completeExportFilename(L"结果", ExportKind::Png) == L"结果.png" &&
+                    completeExportFilename(L"结果.JPEG", ExportKind::Jpeg) == L"结果.JPEG" &&
+                    completeExportFilename(L"图表", ExportKind::ChartPdf) == L"图表.pdf",
+                "CSV 或图表扩展名无效");
+        require(completeExportFilename(L"研究", ExportKind::Xlsx) == L"研究.xlsx" &&
+                    completeExportFilename(L"测量.v2.CSV", ExportKind::Xlsx) == L"测量.v2.xlsx" &&
+                    completeExportFilename(L"测量.v2.XLSX", ExportKind::Csv) == L"测量.v2.csv",
+                "改变测量数据文件类型未保留基本名或引入重复后缀");
+        require(completeExportFilename(L"量具报告.htm", ExportKind::ReportPdf) == L"量具报告.pdf" &&
+                    completeExportFilename(L"量具报告.PDF", ExportKind::Html) == L"量具报告.html" &&
+                    completeExportFilename(L"报告.HTM", ExportKind::Html) == L"报告.HTM",
+                "方法对比报告的后缀与所选格式不符");
+        rejects([] { completeExportFilename(L"研究.json", ExportKind::Csv); });
+        rejects([] { completeExportFilename(L"报告.csv", ExportKind::ReportPdf); });
+        rejects([] { completeExportFilename(L"文件夹/", ExportKind::Html); });
+    });
+    check("大中心值下的规格限和均值控制限保留差异", [] {
+        auto result = study(2, 2, 5, "crossed_xbarr", 1e6, .01);
+        for (int row = 0; row < 4; ++row)
+            for (int part = 0; part < 5; ++part)
+                result.matrix[row][part] = 1e6 + (part - 2) * .01 + (row % 2 ? .01 : -.01);
+        result.metrics = msa::calculate(result.matrix, result.config);
+        for (auto kind : {Kind::MeanChart, Kind::MeasurementByPart, Kind::Histogram}) {
+            const auto scene = msa::charts::make_scene(
+                result, kind, msa::charts::default_editor(kind), 900, 560);
+            if (kind == Kind::MeanChart) {
+                const std::regex limits(R"(UCL = ([^ ]+) +CL = ([^ ]+) +LCL = ([^ ]+))");
+                int found = 0;
+                for (const auto &item : scene.items) {
+                    std::smatch match;
+                    if (std::regex_match(item.text, match, limits)) {
+                        ++found;
+                        require(std::abs(std::stod(match[1]) - 1000000.0376) < .0001 &&
+                                    std::stod(match[2]) == 1e6 &&
+                                    std::abs(std::stod(match[3]) - 999999.9624) < .0001,
+                                "控制限舍入丢失子组波动");
+                    }
+                }
+                require(found == 1, "缺少控制限说明");
+            } else {
+                int found = 0;
+                for (const auto &item : scene.items)
+                    if (item.text == "LSL 999999.9" || item.text == "USL 1000000.1")
+                        ++found;
+                require(found == 2, "规格参考线丢失精度");
+            }
+        }
+    });
     check("图表类型完整且说明不为空", [] {
         require(msa::charts::all_kinds().size() == 7, "图表类型数量不正确");
         for (const auto kind : msa::charts::all_kinds())

@@ -289,6 +289,18 @@ void historical_one_sided_confidence() {
                 ci = {{"enabled", true}, {"level", 2 * level - 100}, {"bound", "both"},
                       {"method", method}};
                 const auto paired = calculate(data(), config)["confidence"];
+                if (std::string(method) == "satterthwaite") {
+                    const auto &df = paired["effective_df"];
+                    if (std::string(process) == "historical") {
+                        require(df["TV"].is_null() && df["PV"].is_null() && df["GRR"].is_number(),
+                                "历史变换区间保留了研究估计的自由度");
+                        require(paired.at("interval_source")["TV"] == "fixed_historical_variance" &&
+                                    paired["interval_source"]["PV"] == "historical_tv_minus_grr_variance",
+                                "历史区间的来源不明确");
+                    } else
+                        require(df["TV"].is_number() && df["PV"].is_number(),
+                                "研究估计的自由度不应被清除");
+                }
                 for (const char *bound : {"lower", "upper"}) {
                     ci["level"] = level;
                     ci["bound"] = bound;

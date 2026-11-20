@@ -10,12 +10,12 @@ namespace {
 constexpr const char *ink = "#243247", *muted = "#69778A", *grid = "#E8EDF3", *green = "#16866B",
                      *red = "#BC4049", *amber = "#B87918";
 
-std::string number(double value) {
+std::string number(double value, int precision = 6) {
     if (!std::isfinite(value))
         return "—";
     char buffer[96]{};
     const auto converted =
-        std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general, 6);
+        std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general, precision);
     return converted.ec == std::errc{} ? std::string(buffer, converted.ptr) : "—";
 }
 std::string exact_number(double value) {
@@ -427,8 +427,8 @@ void specification_lines(Plot &plot, const Result &result) {
     for (const auto &limit : specs(result)) {
         plot.segment(plot.xlow, limit.second, plot.xhigh, limit.second, amber, 1, true);
         if (limit.second >= plot.low && limit.second <= plot.high)
-            text(plot.scene, plot.left + plot.width - 92, plot.y(limit.second) - 15, 90, 15,
-                 limit.first + " " + number(limit.second), 10, amber, Primitive::Align::Right);
+            text(plot.scene, plot.left + 2, plot.y(limit.second) - 15, plot.width - 4, 15,
+                 limit.first + " " + exact_number(limit.second), 10, amber, Primitive::Align::Right);
     }
 }
 double percentile(const std::vector<double> &sorted, double q) {
@@ -603,11 +603,24 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
         entries.emplace_back("控制限 / 超限点", red);
     }
     legend(frame, e, entries);
-    if (e.show_limits)
-        text(s, 72, frame.axis_label_top + 17, s.width - 96, 17,
-             "UCL = " + number(upper) + "    CL = " + number(center) + "    LCL = " +
-                 number(lower),
-             frame.compact ? 9.f : 11.f, muted);
+    if (e.show_limits) {
+        int precision = 6;
+        const double smallestGap = (upper == center || lower == center)
+                                       ? upper - lower
+                                       : std::min(upper - center, center - lower);
+        const double magnitude = std::max(std::abs(upper), std::abs(lower));
+        if (smallestGap > 0 && magnitude > 0)
+            precision = std::clamp(int(std::ceil(std::log10(magnitude) -
+                                                 std::log10(smallestGap))) + 3,
+                                   precision, std::numeric_limits<double>::max_digits10);
+        const auto caption = "UCL = " + number(upper, precision) + "    CL = " +
+                             number(center, precision) + "    LCL = " + number(lower, precision);
+        const float left = frame.compact ? frame.margin : 72.f;
+        const float width = s.width - left - frame.margin;
+        const float size = std::min(frame.compact ? 9.f : 11.f,
+                                    width / (.65f * static_cast<float>(caption.size())));
+        text(s, left, frame.axis_label_top + 17, width, 17, caption, size, muted);
+    }
     const float gap = 12, available = s.width - 96;
     const float panelWidth = (available - gap * (data.operators - 1)) / data.operators;
     const int skip = std::max(1, int(std::ceil(data.parts * 21.f / panelWidth)));
@@ -710,8 +723,10 @@ void histogram(Frame &frame, const Result &result, const Data &data, const Edito
     if (e.show_limits)
         for (const auto &limit : specs(result)) {
             p.segment(limit.second, p.low, limit.second, p.high, amber, 1, true);
-            text(s, std::clamp(p.x(limit.second) - 42, p.left, p.left + p.width - 84), p.top + 5,
-                 84, 17, limit.first + " " + number(limit.second), 10, amber,
+            const auto label = limit.first + " " + exact_number(limit.second);
+            const float width = std::min(p.width, std::max(84.f, 7.f * static_cast<float>(label.size())));
+            text(s, std::clamp(p.x(limit.second) - width / 2, p.left, p.left + p.width - width),
+                 p.top + 5, width, 17, label, 10, amber,
                  Primitive::Align::Center);
         }
 }
