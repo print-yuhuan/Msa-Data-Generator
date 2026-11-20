@@ -13,6 +13,7 @@
 // There is no window loop to wake in this layout-only executable.
 namespace app {
 void requestUpdate() {}
+double frameRateLimit() { return dslAppConfig().fpsValue; }
 } // namespace app
 
 namespace {
@@ -409,10 +410,12 @@ void xbar_details(const msa::Result &generated) {
         gui::results(details, width);
         details.end();
         details.layout(width, 700);
-        const auto *grr = details.find("study.table.cell.2.1");
+        const auto *grr = details.find("study.table.body.slot.2.cell.1");
         const auto expected =
             native_ui::review_number(generated.metrics["study"]["components"]["GRR"]["sd"], 6);
-        if (gui::state.resultTab != 2 || !grr || grr->text.find(expected) == std::string::npos ||
+        if (gui::state.resultTab != 2 || !grr || grr->accessibleRole != core::AccessibleRole::Cell ||
+            grr->horizontalAlign != eui::HorizontalAlign::Right || !grr->wrap ||
+            grr->text.find(expected) == std::string::npos ||
             details.find("anova.pending"))
             throw std::runtime_error("Xbar-R details tab resets or loses study results");
         const auto *sampling = details.find("search.sampling");
@@ -482,14 +485,14 @@ void result_table_layout(const msa::Result &generated) {
         const auto *reviewHeader = review.find("reviewheader.wrap");
         const auto *previewHeader = preview.find("previewrow-1.wrap");
         const auto *detailsTable = details.find("study.table");
-        const auto *detailsHeader = details.find("study.table.header.cap");
+        const auto *detailsHeader = details.find("study.table.header.clip");
         if (!previewHeader || !detailsTable || !detailsHeader ||
             std::fabs(previewHeader->frame.x - detailsTable->frame.x) > .1f ||
             std::fabs(previewHeader->frame.y - detailsTable->frame.y) > .1f ||
             std::fabs(previewHeader->frame.width - detailsTable->frame.width) > .1f ||
             std::fabs(previewHeader->frame.height - 40.f) > .1f ||
-            std::fabs(detailsHeader->frame.y - detailsTable->frame.y - 1.f) > .1f ||
-            std::fabs(previewHeader->frame.height - detailsHeader->frame.height - 1.f) > .1f ||
+            std::fabs(detailsHeader->frame.y - detailsTable->frame.y) > .1f ||
+            std::fabs(previewHeader->frame.height - detailsHeader->frame.height) > .1f ||
             preview.find("previewinfo") || preview.find("csvhint") || details.find("study.basis") ||
             review.find("result.caution") || preview.find("result.caution") ||
             details.find("result.caution") || details.find("study.process.note"))
@@ -503,7 +506,7 @@ void result_table_layout(const msa::Result &generated) {
             fillsResults(review, rowsEnd(review, "review", ".wrap", 5), false);
             fillsResults(preview, rowsEnd(preview, "previewrow", ".wrap", generated.matrix.size()),
                          true);
-            fillsResults(details, rowsEnd(details, "study.table.row.", "", 5) + 1, true);
+            fillsResults(details, rowsEnd(details, "study.table.body.slot.", "", 5) + 2, true);
         }
 
         const auto *pagination = preview.find("preview.pagination");
@@ -1732,6 +1735,11 @@ void header_status_presentation(const msa::Result &generated) {
 
 void render_request_lifecycle() {
     app::AppRunner runner;
+    for (double hz : {59.0, 120.0, 144.0}) {
+        runner.updateFrameInterval(hz, 1, true);
+        if (std::abs(runner.frameInterval - 1.0 / hz) > 1e-9)
+            throw std::runtime_error("active frame pacing does not follow the current monitor");
+    }
     runner.beginRender();
     // 模拟首次显示窗口的刷新回调发生在绘制和提交之间。
     runner.paintRequested = true;
@@ -2587,6 +2595,15 @@ void runtime_keyboard_navigation() {
         compose();
         key(core::InputKey::Tab);
         expect(0);
+        const auto *selectedTab = ui->find("navigation.hit.0");
+        const auto semantics = ui->accessibilityTree();
+        if (!selectedTab || selectedTab->border.width != 2 ||
+            ui->find("navigation.hit.0.focusRing") ||
+            std::none_of(semantics.begin(), semantics.end(), [&](const auto &node) {
+                return node.id == selectedTab->id && node.role == core::AccessibleRole::Tab &&
+                       node.focused && node.checked;
+            }))
+            throw std::runtime_error("MSA tab must expose semantic focus and exactly one focus border");
         key(core::InputKey::Right);
         expect(1);
         key(core::InputKey::Space);
@@ -2598,7 +2615,7 @@ void runtime_keyboard_navigation() {
         key(core::InputKey::Left);
         expect(2);
         key(core::InputKey::Tab);
-        if (!ui->isFocused("tail"))
+        if (!ui->isFocused("tail") || !ui->find("tail.focusRing"))
             throw std::runtime_error("Tab visits unselected, disabled or hidden controls");
         key(core::InputKey::Tab, true);
         expect(2);
@@ -2732,6 +2749,17 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     typeLabel.font_size = 16;
     typeLabel.text = "中文图表字号检查";
     typeScene.items.push_back(typeLabel);
+    msa::charts::Primitive stroke;
+    stroke.x = 20;
+    stroke.y = 30;
+    stroke.x2 = 50;
+    stroke.y2 = 70;
+    stroke.stroke_width = 2;
+    typeScene.items.push_back(stroke);
+    stroke.x2 = 110;
+    stroke.y2 = 30;
+    stroke.dashed = true;
+    typeScene.items.push_back(stroke);
     eui::Ui typeUi;
     typeUi.begin("chart-typography");
     gui::drawChartScene(typeUi, "chart-type", typeScene);
@@ -2742,6 +2770,24 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                 std::fabs(typeNode->lineHeight - 16.f * 1.448f) < .001f &&
                 std::fabs(typeNode->frame.height - 36.f) < .001f,
             "预览文字未使用统一字号，或换算误改了场景文字框高度");
+    const auto *diagonal = typeUi.find("chart-type.p1.0");
+    const auto *firstDash = typeUi.find("chart-type.p2.0");
+    const auto *lastDash = typeUi.find("chart-type.p2.9");
+    require(diagonal && diagonal->kind == core::dsl::ElementKind::Polygon &&
+                diagonal->frame.width < 36 && diagonal->frame.height < 46 &&
+                diagonal->polygonPoints.size() == 4 &&
+                std::abs(diagonal->frame.x + diagonal->polygonPoints[0].x - 19.2f) < .001f &&
+                std::abs(diagonal->frame.y + diagonal->polygonPoints[0].y - 30.6f) < .001f &&
+                std::abs(diagonal->frame.x + diagonal->polygonPoints[2].x - 50.8f) < .001f &&
+                std::abs(diagonal->frame.y + diagonal->polygonPoints[2].y - 69.4f) < .001f &&
+                std::abs(diagonal->frame.x + diagonal->frame.width / 2 - 35.f) < .001f &&
+                std::abs(diagonal->frame.y + diagonal->frame.height / 2 - 50.f) < .001f,
+            "斜线未按原中点、角度和线宽绘制");
+    require(firstDash && lastDash && !typeUi.find("chart-type.p2.10") &&
+                firstDash->kind == core::dsl::ElementKind::Polygon && firstDash->frame.width < 10 &&
+                std::abs(firstDash->polygonPoints[1].x - firstDash->polygonPoints[0].x - 9.f * .58f) < .001f &&
+                std::abs(lastDash->frame.x + lastDash->polygonPoints[0].x - 101.f) < .001f,
+            "控制线虚线分段或间距与原场景不一致");
     // 长文件名、空数据和异常快照都占用同一个说明槽，不推移后续图表。
     for (const float width : {292.f, 588.f, 1020.f}) {
         float baseline = 0;

@@ -17,9 +17,11 @@ inline void Runtime::compose(const std::string& pageId, float logicalWidth, floa
     const Screen screen{logicalWidth, logicalHeight};
     ui_.begin(pageId);
     ui_.setFocusedId(focusedId_);
+    ui_.setFocusVisible(focusVisible_);
     composeFn(ui_, screen);
     ui_.end();
     ui_.layout(screen);
+    synchronizeFocusScope();
     elementStructure_ = collectElementStructure();
     syncScrollStateBindings();
     for (const std::string& scope : ui_.consumeReleasedStateScopes()) {
@@ -29,7 +31,7 @@ inline void Runtime::compose(const std::string& pageId, float logicalWidth, floa
             ui_.setFocusedId(focusedId_);
         }
     }
-    if (!focusedId_.empty() && isElementInDisabledTree(focusedId_)) {
+    if (!focusedId_.empty() && (!ui_.find(focusedId_) || isElementInDisabledTree(focusedId_))) {
         setFocusedId({});
     }
     applyFocusRequest();
@@ -106,6 +108,9 @@ inline bool Runtime::update(core::window::Handle window, float deltaSeconds, flo
 
     for (std::size_t index = 0; index < pointerEvents.size(); ++index) {
         const PointerEvent& event = pointerEvents[index];
+        if (inputEnabled && event.action == PointerAction::Press) {
+            setFocusVisible(false);
+        }
         if (event.isPress(PointerButton::Left)) {
             setFocusedId(hitTestFocusable(event, dpiScale));
         }
@@ -280,6 +285,9 @@ inline void Runtime::render(int windowWidth, int windowHeight, float dpiScale) {
 }
 
 inline void Runtime::shutdown(bool releaseCachedImageTextures) {
+    focusScopes_.clear();
+    focusVisible_ = false;
+    ui_.setFocusVisible(false);
     releaseGraphicsResources(releaseCachedImageTextures);
     instances_.clear();
     elementStructure_.clear();

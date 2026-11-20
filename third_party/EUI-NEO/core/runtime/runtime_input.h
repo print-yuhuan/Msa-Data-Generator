@@ -32,7 +32,7 @@ inline bool Runtime::findElementDisabledState(
     const std::string& id,
     bool ancestorDisabled,
     bool& disabledTree) const {
-    const bool currentDisabledTree = ancestorDisabled || element.disabled;
+    const bool currentDisabledTree = ancestorDisabled || element.disabled || element.accessibleHidden || element.opacity <= 0;
     if (element.id == id) {
         disabledTree = currentDisabledTree;
         return true;
@@ -66,7 +66,8 @@ inline std::string Runtime::hitTestFocusable(const PointerEvent& event, float dp
 
 inline std::string Runtime::hitTestScrollable(const PointerEvent& event, float dpiScale) const {
     return hitTest(event, dpiScale, [](const Element& element) {
-        return (!element.scrollStateId.empty() || static_cast<bool>(element.onScroll)) && !element.disabled;
+        // A list whose content already fits must allow its scrollable parent to receive the wheel.
+        return ((!element.scrollStateId.empty() && element.scrollMaxOffset > 0.0f) || element.onScroll) && !element.disabled;
     });
 }
 
@@ -224,6 +225,15 @@ inline bool Runtime::hitTestFocusableElement(
     return false;
 }
 
+inline void Runtime::setFocusVisible(bool visible) {
+    if (focusVisible_ == visible) return;
+    focusVisible_ = visible;
+    ui_.setFocusVisible(visible);
+    // 输入方式切换时，即使焦点 ID 不变，也必须重建或移除焦点框。
+    composeRequested_ = true;
+    paintRequested_ = true;
+}
+
 inline void Runtime::setFocusedId(const std::string& id) {
     if (focusedId_ == id) {
         return;
@@ -337,62 +347,145 @@ inline void Runtime::updateTextInput(const TextInputEvent& event) {
     }
 }
 
-inline void Runtime::updateKeyInput(const std::vector<KeyEvent>& events) {
-    const Element* focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
-    if (focused != nullptr && (focused->disabled || isElementInDisabledTree(focusedId_))) {
-        setFocusedId({});
-        focused = nullptr;
+inline std::vector<std::string> Runtime::focusOrder() const {
+    std::vector<std::string> order;
+    const std::string scope = focusScopes_.empty() ? std::string{} : focusScopes_.back().first;
+    const auto visit = [&](const auto& self, const Element& element, bool inScope) -> void {
+        if (element.disabled || element.opacity <= 0.0f || element.accessibleHidden) return;
+        inScope = inScope || element.id == scope;
+        if (inScope && element.focusable && element.tabStop && element.frame.width > 0 && element.frame.height > 0)
+            order.push_back(element.id);
+        for (const auto& child : element.children) self(self, *child, inScope);
+    };
+    for (const auto& root : ui_.roots()) visit(visit, *root, scope.empty());
+    return order;
+}
+
+inline void Runtime::moveFocus(bool backwards) {
+    const auto order = focusOrder();
+    if (order.empty()) { setFocusedId({}); return; }
+    const auto it = std::find(order.begin(), order.end(), focusedId_);
+    const auto count = static_cast<std::ptrdiff_t>(order.size());
+    const auto index = it == order.end() ? (backwards ? count - 1 : 0)
+        : (std::distance(order.begin(), it) + (backwards ? count - 1 : 1)) % count;
+    const Element* target = ui_.find(order[static_cast<std::size_t>(index)]);
+    // Layout coordinates precede scrolling. Reveal the target from the innermost
+    // viewport outward, accounting for the offset applied by each inner viewport.
+    float top = target->frame.y;
+    const auto reveal = [&](const auto& self, const Element& element) -> bool {
+        if (&element == target) return true;
+        for (const auto& child : element.children) {
+            if (!self(self, *child)) continue;
+            if (element.clip && !element.scrollStateId.empty()) {
+                float offset = element.scrollOffset;
+                if (top - offset < element.frame.y)
+                    offset = top - element.frame.y - 6.0f;
+                else if (top - offset + target->frame.height > element.frame.y + element.frame.height)
+                    offset = top + target->frame.height - element.frame.y - element.frame.height + 6.0f;
+                offset = std::clamp(offset, 0.0f, element.scrollMaxOffset);
+                setScrollOffset(element.scrollStateId, offset);
+                top -= offset;
+            }
+            return true;
+        }
+        return false;
+    };
+    for (const auto& root : ui_.roots()) {
+        if (reveal(reveal, *root)) break;
     }
+    setFocusedId(target->id);
+}
+
+inline void Runtime::synchronizeFocusScope() {
+    std::vector<std::string> active;
+    const auto visit = [&](const auto& self, const Element& element) -> void {
+        if (element.disabled || element.opacity <= 0 || element.accessibleHidden) return;
+        if (element.focusScope) active.push_back(element.id);
+        for (const Element* child : element.orderedChildren) self(self, *child);
+    };
+    for (const Element* root : ui_.orderedRoots()) visit(visit, *root);
+    const std::string top = active.empty() ? std::string{} : active.back();
+    while (!focusScopes_.empty() && focusScopes_.back().first != top &&
+           std::find(active.begin(), active.end(), focusScopes_.back().first) == active.end()) {
+        const auto restore = focusScopes_.back().second;
+        focusScopes_.pop_back();
+        setFocusedId(ui_.find(restore) && !isElementInDisabledTree(restore) ? restore : std::string{});
+    }
+    if (!top.empty() && (focusScopes_.empty() || focusScopes_.back().first != top)) {
+        focusScopes_.push_back({top, focusedId_});
+        setFocusedId({});
+        moveFocus(false);
+    }
+    if (focusScopes_.empty()) return;
+    const auto order = focusOrder();
+    if (std::find(order.begin(), order.end(), focusedId_) == order.end()) {
+        setFocusedId({});
+        moveFocus(false);
+    }
+}
+
+inline void Runtime::updateKeyInput(const std::vector<KeyEvent>& events) {
 
     for (const KeyEvent& key : events) {
-        // MSA integration: native keyboard traversal, including scrolled fields.
-        if (key.key == InputKey::Tab && key.isDown() && !key.modifiers.control && !key.modifiers.alt) {
-            if (keyEventHandler_) keyEventHandler_(key);
-            std::vector<const Element*> stops;
-            std::vector<const Element*> scrollParents;
-            std::vector<std::vector<const Element*>> parentPaths;
-            std::function<void(const Element&, bool)> visit = [&](const Element& node, bool blocked) {
-                blocked = blocked || node.disabled || node.opacity <= 0.0f;
-                if (blocked) return;
-                if (node.focusable) { stops.push_back(&node); parentPaths.push_back(scrollParents); }
-                const bool scroll = !node.scrollStateId.empty() && node.clip;
-                if (scroll) scrollParents.push_back(&node);
-                for (const auto& child : node.children) visit(*child, blocked);
-                if (scroll) scrollParents.pop_back();
-            };
-            for (const auto& root : ui_.roots()) visit(*root, false);
-            if (!stops.empty()) {
-                int index = -1;
-                for (int i = 0; i < static_cast<int>(stops.size()); ++i)
-                    if (stops[i]->id == focusedId_) index = i;
-                index = index < 0 ? (key.modifiers.shift ? static_cast<int>(stops.size()) - 1 : 0)
-                    : (index + (key.modifiers.shift ? -1 : 1) + static_cast<int>(stops.size())) % static_cast<int>(stops.size());
-                const Element* target = stops[index];
-                // Layout frames precede the scroll render transform. Bring each
-                // destination into view before the next compose, rather than
-                // allowing keyboard focus to disappear outside a clipped panel.
-                for (const Element* parent : parentPaths[index]) {
-                    float top = target->frame.y - parent->scrollOffset;
-                    float bottom = top + target->frame.height;
-                    if (top < parent->frame.y) setScrollOffset(parent->scrollStateId, parent->scrollOffset + top - parent->frame.y - 6.0f);
-                    else if (bottom > parent->frame.y + parent->frame.height)
-                        setScrollOffset(parent->scrollStateId, parent->scrollOffset + bottom - parent->frame.y - parent->frame.height + 6.0f);
-                }
-                setFocusedId(target->id);
-                focused = target;
-                composeRequested_ = true;
-                paintRequested_ = true;
+        if (key.isDown() && !key.modifiers.control && !key.modifiers.alt && !key.modifiers.super) {
+            switch (key.key) {
+            case InputKey::Tab:
+            case InputKey::Left: case InputKey::Right: case InputKey::Up: case InputKey::Down:
+            case InputKey::Home: case InputKey::End: case InputKey::PageUp: case InputKey::PageDown:
+            case InputKey::Enter: case InputKey::Space:
+                setFocusVisible(true);
+                break;
+            default:
+                break;
             }
+        }
+        const Element* focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
+        if (focused && isElementInDisabledTree(focusedId_)) { setFocusedId({}); focused = nullptr; }
+        bool handled = false;
+        if (key.isDown() && key.key == InputKey::Tab && !key.modifiers.control && !key.modifiers.alt && !key.modifiers.super) {
+            if (keyEventHandler_) keyEventHandler_(key);
+            moveFocus(key.modifiers.shift);
             applyFocusRequest();
-            focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
             continue;
         }
-        bool handled = false;
+        if (key.action == KeyAction::Press && key.key == InputKey::Escape && !focusScopes_.empty()) {
+            const Element* scope = ui_.find(focusScopes_.back().first);
+            if (scope && scope->onDismiss) {
+                auto dismiss = scope->onDismiss;
+                dismiss();
+                composeRequested_ = paintRequested_ = true;
+                continue;
+            }
+        }
         if (focused != nullptr && focused->onKeyEvent) {
             handled = focused->onKeyEvent(key);
             if (handled) {
                 composeRequested_ = true;
                 paintRequested_ = true;
+            }
+        }
+        if (!handled && focused && focused->onClick && key.action == KeyAction::Press &&
+            (key.key == InputKey::Enter || key.key == InputKey::Space) &&
+            !key.modifiers.control && !key.modifiers.alt && !key.modifiers.super) {
+            auto activate = focused->onClick;
+            activate();
+            handled = true;
+            composeRequested_ = paintRequested_ = true;
+        }
+        if (!handled && focused && !focused->focusGroup.empty() && key.isDown() &&
+            (key.key == InputKey::Left || key.key == InputKey::Right || key.key == InputKey::Up || key.key == InputKey::Down)) {
+            std::vector<std::string> group;
+            for (const auto& id : focusOrder()) {
+                if (ui_.find(id)->focusGroup == focused->focusGroup) group.push_back(id);
+            }
+            const auto it = std::find(group.begin(), group.end(), focusedId_);
+            if (it != group.end()) {
+                const bool backwards = key.key == InputKey::Left || key.key == InputKey::Up;
+                const auto index = (std::distance(group.begin(), it) + (backwards ? group.size() - 1 : 1)) % group.size();
+                setFocusedId(group[index]);
+                const auto activate = ui_.find(focusedId_)->onClick;
+                if (activate) activate();
+                handled = true;
             }
         }
         if (!handled && keyEventHandler_) {
@@ -401,7 +494,6 @@ inline void Runtime::updateKeyInput(const std::vector<KeyEvent>& events) {
             paintRequested_ = true;
         }
         applyFocusRequest();
-        focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
     }
 }
 

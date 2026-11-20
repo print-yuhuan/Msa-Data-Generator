@@ -166,6 +166,8 @@ private:
 
     void setFocusedId(const std::string& id);
 
+    void setFocusVisible(bool visible);
+
     void applyFocusRequest();
 
     void updateScroll(const ScrollEvent& event, const std::string& targetId, float dpiScale);
@@ -173,6 +175,10 @@ private:
     void updateTextInput(const TextInputEvent& event);
 
     void updateKeyInput(const std::vector<KeyEvent>& events);
+    void synchronizeFocusScope();
+    void moveFocus(bool backwards);
+    std::vector<std::string> focusOrder() const;
+    std::vector<std::pair<std::string, std::string>> focusScopes_;
 
     void updateImeCursorRect(core::window::Handle window, float dpiScale);
 
@@ -289,6 +295,7 @@ private:
     float hoverTargetCacheDpiScale_ = 0.0f;
     std::string hoverTargetCacheId_;
     std::string focusedId_;
+    bool focusVisible_ = false;
     std::function<void(const KeyEvent&)> keyEventHandler_;
     RenderTransform focusedElementRenderTransform_;
     bool focusedElementRenderTransformValid_ = false;

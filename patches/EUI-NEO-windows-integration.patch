@@ -1,7 +1,8 @@
 diff --git a/3rd/glfw/src/win32_window.c b/3rd/glfw/src/win32_window.c
+index e6a9496cdcb9642c7abc5bf99b4ddd5e8b554016..30e2b0888741866ffa25e8d834bd1a40920f4fc3 100644
 --- a/3rd/glfw/src/win32_window.c
 +++ b/3rd/glfw/src/win32_window.c
-@@ -713,11 +713,12 @@
+@@ -713,11 +713,12 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
              const int mods = getKeyMods();
  
              scancode = (HIWORD(lParam) & (KF_EXTENDED | 0xff));
@@ -16,7 +17,7 @@ diff --git a/3rd/glfw/src/win32_window.c b/3rd/glfw/src/win32_window.c
              }
  
              // HACK: Alt+PrtSc has a different scancode than just PrtSc
-@@ -2137,7 +2138,12 @@
+@@ -2136,7 +2137,12 @@ void _glfwPollEventsWin32(void)
      handle = GetActiveWindow();
      if (handle)
      {
@@ -31,9 +32,10 @@ diff --git a/3rd/glfw/src/win32_window.c b/3rd/glfw/src/win32_window.c
          {
              int i;
 diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c9a98a46d98a244abf9980884b10a4c29f842dca..99e3fe3d3df90379f952f9f0a2dc27ca6eafcafa 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -407,7 +407,7 @@
+@@ -407,7 +407,7 @@ if(WIN32)
      set(APP_ICON_RC "${CMAKE_CURRENT_BINARY_DIR}/eui_app_icon.rc")
      file(TO_NATIVE_PATH "${APP_ICON_ICO}" APP_ICON_ICO_NATIVE)
      string(REPLACE "\\" "\\\\" APP_ICON_ICO_ESCAPED "${APP_ICON_ICO_NATIVE}")
@@ -43,9 +45,10 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
  endif()
  set_property(GLOBAL PROPERTY EUI_NEO_APP_ICON_RESOURCE "${APP_ICON_RESOURCE}")
 diff --git a/components/input.h b/components/input.h
+index 7cfdece778121d92168b2acf820c8af3ce816ae5..a128c8b1aedf9531819cba45903b3009bfbebe66 100644
 --- a/components/input.h
 +++ b/components/input.h
-@@ -135,7 +135,7 @@
+@@ -140,7 +140,7 @@ public:
          const std::string textDirtyKey = id_ + ".text|" + std::to_string(state.textRevision) + "|" + std::to_string(display.textRevision) +
              "|" + std::to_string(static_cast<int>(std::lround(state.horizontalScroll * 64.0f))) +
              "|" + std::to_string(static_cast<int>(std::lround(state.verticalScroll * 64.0f))) +
@@ -55,9 +58,10 @@ diff --git a/components/input.h b/components/input.h
          const float caretX = layout.clampedCursorX();
          const auto compositionRange = InputModel::selectionRange(state);
 diff --git a/components/scrollview.h b/components/scrollview.h
+index ef7776d6a4f97228b931c5e21df5a43e8f65d51b..c6442c70f39099930dd6679fdc16f8d074c286f1 100644
 --- a/components/scrollview.h
 +++ b/components/scrollview.h
-@@ -38,6 +38,7 @@
+@@ -38,6 +38,7 @@ public:
      ScrollViewBuilder& step(float value) { step_ = std::max(1.0f, value); return *this; }
      ScrollViewBuilder& scrollbarWidth(float value) { scrollbarWidth_ = std::max(0.0f, value); return *this; }
      ScrollViewBuilder& scrollbarGap(float value) { scrollbarGap_ = std::max(0.0f, value); return *this; }
@@ -65,7 +69,7 @@ diff --git a/components/scrollview.h b/components/scrollview.h
      ScrollViewBuilder& zIndex(int value) { zIndex_ = value; return *this; }
      ScrollViewBuilder& style(const ScrollStyle& value) { scrollStyle_ = value; return *this; }
      ScrollViewBuilder& theme(const theme::ThemeColorTokens& tokens) {
-@@ -65,16 +66,19 @@
+@@ -65,16 +66,19 @@ public:
  
      void build() {
          MeasureCache* cache = contentKey_.empty() ? nullptr : &ui_.state<MeasureCache>(id_ + ".measure");
@@ -92,7 +96,7 @@ diff --git a/components/scrollview.h b/components/scrollview.h
              ? (contentKey_.empty() ? measureContentHeight(contentWidth, height_) : cachedContentHeight(*cache, contentWidth, height_))
              : initialContentHeight;
          const float maxOffset = std::max(0.0f, contentHeight - height_);
-@@ -205,6 +209,7 @@
+@@ -205,6 +209,7 @@ private:
      float y_ = 0.0f;
      bool hasX_ = false;
      bool hasY_ = false;
@@ -101,23 +105,25 @@ diff --git a/components/scrollview.h b/components/scrollview.h
  };
  
 diff --git a/core/app/app_runner.h b/core/app/app_runner.h
+index ab201f8e11fad8a85e5ffaf9c6ee63bfaeed4fe8..72bec3871a027399cb56011a6e5c3842da4ee63b 100644
 --- a/core/app/app_runner.h
 +++ b/core/app/app_runner.h
-@@ -128,8 +128,12 @@
+@@ -128,8 +128,12 @@ struct AppRunner {
          lastRefreshRateUpdate = now;
      }
  
+-    void markRendered() {
 +    void beginRender() {
 +        // 仅消费开始绘制前的请求；显示窗口或提交缓冲期间的新请求留给下一帧。
-+        paintRequested = false;
+         paintRequested = false;
 +    }
 +
-     void markRendered() {
--        paintRequested = false;
++    void markRendered() {
          ++renderedFrames;
          renderedSinceLastClock = true;
      }
 diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
+index f85e55271fb09abc1df67cef56cc287fc4296998..ef44e86d8c6790970789d4df015b942b7aa946e6 100644
 --- a/core/app/glfw_app_main.cpp
 +++ b/core/app/glfw_app_main.cpp
 @@ -30,6 +30,7 @@
@@ -128,13 +134,13 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
  #include <memory>
  #include <thread>
  #include <vector>
-@@ -39,7 +40,42 @@
+@@ -39,8 +40,43 @@ struct WindowState : app::AppRunner {
      bool forceClose = false;
      bool iconified = false;
      GLFWwindow* modalChildWindow = nullptr;
 +    std::function<void()> repaintImmediately;
  };
-+
+ 
 +// Windows runs an internal message loop during a native border/corner drag.
 +// GLFW resize/refresh callbacks still arrive, but the outer application loop
 +// cannot draw until that drag ends. Reuse the normal renderer from those
@@ -168,10 +174,11 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
 +    }
 +#endif
 +}
- 
++
  struct ManagedWindow {
      GLFWwindow* window = nullptr;
-@@ -210,18 +246,17 @@
+     WindowState state;
+@@ -210,18 +246,17 @@ void restoreWindowFromTray(GLFWwindow* window, WindowState& windowState) {
  void installWindowCallbacks(GLFWwindow* window, WindowState& windowState) {
      glfwSetWindowUserPointer(window, &windowState);
      glfwSetFramebufferSizeCallback(window, [](GLFWwindow* currentWindow, int w, int h) {
@@ -195,16 +202,16 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
      });
      glfwSetWindowFocusCallback(window, [](GLFWwindow* currentWindow, int focused) {
          WindowState* state = static_cast<WindowState*>(glfwGetWindowUserPointer(currentWindow));
-@@ -249,6 +284,8 @@
-         }
+@@ -250,6 +285,8 @@ void installWindowCallbacks(GLFWwindow* window, WindowState& windowState) {
      });
  }
-+
-+bool updateManagedWindow(ManagedWindow& managed, float deltaSeconds, bool updateRequested);
  
++bool updateManagedWindow(ManagedWindow& managed, float deltaSeconds, bool updateRequested);
++
  std::unique_ptr<ManagedWindow> createManagedWindow(const app::DslWindowRequest& request,
                                                     GLFWwindow* parentWindow,
-@@ -288,6 +325,10 @@
+                                                    core::render::RenderBackend& shareBackend) {
+@@ -288,6 +325,10 @@ std::unique_ptr<ManagedWindow> createManagedWindow(const app::DslWindowRequest&
      }
  
      managed->state.paintRequested = true;
@@ -215,7 +222,7 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
      if (managed->content.request().modal) {
          glfwFocusWindow(childWindow);
      }
-@@ -301,6 +342,7 @@
+@@ -301,6 +342,7 @@ void destroyManagedWindow(std::unique_ptr<ManagedWindow>& managed) {
      }
  
      GLFWwindow* windowToDestroy = managed->window;
@@ -223,7 +230,7 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
      if (managed->renderBackend) {
          managed->renderBackend->makeCurrent();
          managed->renderBackend->releaseRenderCache();
-@@ -496,8 +538,6 @@
+@@ -496,8 +538,6 @@ int eui_app_run() {
      }
      app::MainWindowRuntime mainWindowRuntime(windowState, [&] {
          glfwShowWindow(window);
@@ -232,7 +239,7 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
      });
      windowState.initializeTray();
      glfwSetWindowCloseCallback(window, [](GLFWwindow* currentWindow) {
-@@ -527,6 +567,17 @@
+@@ -527,6 +567,17 @@ int eui_app_run() {
      });
  
      app::DslWindowManager<ManagedWindow> childWindows;
@@ -250,7 +257,7 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
  
      while (!glfwWindowShouldClose(window)) {
          renderBackend->makeCurrent();
-@@ -585,42 +636,46 @@
+@@ -585,42 +636,46 @@ int eui_app_run() {
  
          const bool mainInputEnabled = windowState.modalChildWindow == nullptr;
  
@@ -325,9 +332,10 @@ diff --git a/core/app/glfw_app_main.cpp b/core/app/glfw_app_main.cpp
      core::releaseInputQueue(window);
      renderBackend->makeCurrent();
 diff --git a/core/app/main_window_runtime.h b/core/app/main_window_runtime.h
+index 3db56ae522c0f280b5305cf0e0cbdfb971d8ac79..8cc3462c078d7eee8ec860d36f0415afe817b0df 100644
 --- a/core/app/main_window_runtime.h
 +++ b/core/app/main_window_runtime.h
-@@ -139,6 +139,7 @@
+@@ -139,6 +139,7 @@ public:
          }
  
          const auto renderStart = std::chrono::steady_clock::now();
@@ -335,7 +343,7 @@ diff --git a/core/app/main_window_runtime.h b/core/app/main_window_runtime.h
          renderBackend.beginFrame({
              window,
              core::window::nativeWindowInfo(window),
-@@ -152,6 +153,10 @@
+@@ -152,6 +153,10 @@ public:
          if (firstFrameReady_) {
              auto ready = std::move(firstFrameReady_);
              ready();
@@ -347,9 +355,28 @@ diff --git a/core/app/main_window_runtime.h b/core/app/main_window_runtime.h
          renderBackend.present();
          core::render::publishRenderFrameStats();
 diff --git a/core/dsl.h b/core/dsl.h
+index 2977127b293bf354489e48488241b50013ad44ec..c7efa1da68b8d1c8dba56c6f9e7d4c0749b13a3a 100644
 --- a/core/dsl.h
 +++ b/core/dsl.h
-@@ -1485,6 +1485,12 @@
+@@ -160,6 +160,8 @@ struct Element {
+ 
+     bool interactive = false;
+     bool focusable = false;
++    // Hosts that draw a focus border on this element can omit the automatic ring.
++    bool customFocusIndicator = false;
+     bool tabStop = true;
+     bool focusScope = false;
+     bool accessibleHidden = false;
+@@ -1434,7 +1436,7 @@ public:
+         stack_.clear();
+         // 焦点框复用现有 Rect 渲染与 dirty/layer 失效路径，不增加后端特判。
+         Element* focused = find(focusedId_);
+-        if (focusVisible_ && focused && focused->focusable && !focused->disabled) {
++        if (focusVisible_ && focused && focused->focusable && !focused->disabled && !focused->customFocusIndicator) {
+             auto ring = std::make_unique<Element>();
+             ring->kind = ElementKind::Rect;
+             ring->id = focusedId_ + ".focusRing";
+@@ -1580,6 +1582,12 @@ public:
          return !focusedId_.empty() && focusedId_ == resolveId(id);
      }
  
@@ -362,7 +389,7 @@ diff --git a/core/dsl.h b/core/dsl.h
      template <typename T>
      T& state(const std::string& id) {
          return stateStore_.get<T>(resolveId(id));
-@@ -1499,6 +1505,8 @@
+@@ -1594,6 +1602,8 @@ public:
      void clearState() {
          stateStore_.clear();
          releasedStateScopes_.clear();
@@ -371,31 +398,33 @@ diff --git a/core/dsl.h b/core/dsl.h
      }
  
  private:
-@@ -1792,6 +1800,8 @@
-     std::vector<Element*> stack_;
+@@ -1892,6 +1902,8 @@ private:
      std::unordered_map<std::string, Element*> index_;
      std::string focusedId_;
+     bool focusVisible_ = false;
 +    std::string requestedFocusId_;
 +    bool focusRequested_ = false;
      StateStore stateStore_;
      std::vector<std::string> releasedStateScopes_;
      std::size_t generatedId_ = 0;
 diff --git a/core/dsl_runtime.h b/core/dsl_runtime.h
+index f2f60dbee002154bd287b7946ec71d4e28ca1a7f..1d35dd8576cb47619269473252847d496a0ccfec 100644
 --- a/core/dsl_runtime.h
 +++ b/core/dsl_runtime.h
-@@ -165,6 +165,8 @@
-                                  std::string& targetId) const;
+@@ -168,6 +168,8 @@ private:
  
-     void setFocusedId(const std::string& id);
-+
+     void setFocusVisible(bool visible);
+ 
 +    void applyFocusRequest();
- 
++
      void updateScroll(const ScrollEvent& event, const std::string& targetId, float dpiScale);
  
+     void updateTextInput(const TextInputEvent& event);
 diff --git a/core/render/opengl/opengl_backend.h b/core/render/opengl/opengl_backend.h
+index d499d68d8cd25d6ae18b0cf875e21e60529581cc..4719d11bb9264e22d07d6e9498dd589617c552a3 100644
 --- a/core/render/opengl/opengl_backend.h
 +++ b/core/render/opengl/opengl_backend.h
-@@ -152,6 +152,8 @@
+@@ -152,6 +152,8 @@ private:
      int textBatchWindowHeight_ = 0;
      std::uint64_t textBatchGrayGeneration_ = 0;
      std::uint64_t textBatchColorGeneration_ = 0;
@@ -404,10 +433,37 @@ diff --git a/core/render/opengl/opengl_backend.h b/core/render/opengl/opengl_bac
      core::Color textBatchColor_{};
      std::size_t currentBackbuffer_ = 0;
      unsigned int imageVao_ = 0;
+diff --git a/core/render/opengl/opengl_image.cpp b/core/render/opengl/opengl_image.cpp
+index fc6dab8d13ea5105c778cd51bc910f06055813ca..bc08e694708a0c010ef416e404ee94ae467a05f9 100644
+--- a/core/render/opengl/opengl_image.cpp
++++ b/core/render/opengl/opengl_image.cpp
+@@ -600,7 +600,9 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
+ 
+     bindVertexArray(imageVao_);
+     bindArrayBuffer(imageVbo_);
+-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
++    // 图像与保留层共用顶点缓冲；流式更换存储，避免连续绘制反复原位写入。
++    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)),
++                 vertices, GL_STREAM_DRAW);
+     activeTextureUnit(0);
+     bindTexture2D(texture);
+     GLint previousSampler = 0;
+@@ -661,7 +663,9 @@ void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
+ 
+     bindVertexArray(imageVao_);
+     bindArrayBuffer(imageVbo_);
+-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), uploadVertices);
++    // 保留层可能连续多帧提交，为本次顶点提供独立存储而不等待整条渲染队列。
++    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)),
++                 uploadVertices, GL_STREAM_DRAW);
+     activeTextureUnit(0);
+     bindTexture2D(texture);
+     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));
 diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text.cpp
+index 75c6ee492309fe39bd9482e2b7940b8cf2eba9fe..eca5c22127c6e43d658e1871ad28c9bca4510e55 100644
 --- a/core/render/opengl/opengl_text.cpp
 +++ b/core/render/opengl/opengl_text.cpp
-@@ -14,6 +14,7 @@
+@@ -14,6 +14,7 @@ namespace core::render::opengl {
  namespace {
  
  constexpr std::size_t kTextBatchMaxFloats = 262144;
@@ -415,7 +471,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
  
  struct TextAtlasTexture {
      GLuint texture = 0;
-@@ -21,6 +22,7 @@
+@@ -21,6 +22,7 @@ struct TextAtlasTexture {
      int height = 0;
      int channels = 0;
      std::uint64_t generation = 0;
@@ -423,7 +479,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
  };
  
  struct TextRenderResources {
-@@ -31,8 +33,12 @@
+@@ -31,8 +33,12 @@ struct TextRenderResources {
      GLint colorLocation = -1;
      GLint grayTextureLocation = -1;
      GLint colorTextureLocation = -1;
@@ -438,7 +494,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
  };
  
  std::unordered_map<window::ContextKey, TextRenderResources>& textResourcesByContext() {
-@@ -75,8 +81,7 @@
+@@ -75,8 +81,7 @@ void destroyTextRenderResources(TextRenderResources& resources) {
      if (resources.shaderProgram != 0) {
          glDeleteProgram(resources.shaderProgram);
      }
@@ -448,7 +504,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
      resources = {};
  }
  
-@@ -234,6 +239,52 @@
+@@ -234,6 +239,52 @@ bool ensureAtlasTexture(TextAtlasTexture& texture, const TextAtlasPageData& page
      return texture.texture != 0;
  }
  
@@ -501,7 +557,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
  } // namespace
  
  void OpenGLRenderBackend::flushTextBatch() {
-@@ -244,7 +295,7 @@
+@@ -244,7 +295,7 @@ void OpenGLRenderBackend::flushTextBatch() {
      TextRenderResources& resources = textResources();
      if (textBatchWindowWidth_ <= 0 || textBatchWindowHeight_ <= 0 ||
          !ensureTextRenderResources(resources) ||
@@ -510,7 +566,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
          textBatchVertices_.clear();
          textBatchWindowWidth_ = 0;
          textBatchWindowHeight_ = 0;
-@@ -262,9 +313,9 @@
+@@ -262,9 +313,9 @@ void OpenGLRenderBackend::flushTextBatch() {
      glUniform1i(resources.grayTextureLocation, 0);
      glUniform1i(resources.colorTextureLocation, 1);
      activeTextureUnit(0);
@@ -522,7 +578,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
      activeTextureUnit(0);
      bindVertexArray(resources.vao);
      bindArrayBuffer(resources.vbo);
-@@ -293,36 +344,32 @@
+@@ -293,36 +344,32 @@ void OpenGLRenderBackend::drawText(const TextDrawCommand& command, int windowWid
  
      TextRenderResources& resources = textResources();
      const bool hadResources = resources.shaderProgram != 0 && resources.vao != 0 && resources.vbo != 0;
@@ -581,7 +637,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
      if (!hadResources || grayAtlasUpload || colorAtlasUpload) {
          resetStateCache();
      }
-@@ -334,7 +381,9 @@
+@@ -334,7 +381,9 @@ void OpenGLRenderBackend::drawText(const TextDrawCommand& command, int windowWid
           textBatchColor_.a != command.color.a);
      const bool atlasChanged = !textBatchVertices_.empty() &&
          (textBatchGrayGeneration_ != command.grayAtlas.generation ||
@@ -592,7 +648,7 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
      const bool targetChanged = !textBatchVertices_.empty() &&
          (textBatchWindowWidth_ != windowWidth || textBatchWindowHeight_ != windowHeight);
      if (colorChanged || atlasChanged || targetChanged) {
-@@ -349,6 +398,8 @@
+@@ -349,6 +398,8 @@ void OpenGLRenderBackend::drawText(const TextDrawCommand& command, int windowWid
          textBatchWindowHeight_ = windowHeight;
          textBatchGrayGeneration_ = command.grayAtlas.generation;
          textBatchColorGeneration_ = command.colorAtlas.generation;
@@ -602,9 +658,10 @@ diff --git a/core/render/opengl/opengl_text.cpp b/core/render/opengl/opengl_text
      }
      textBatchVertices_.insert(textBatchVertices_.end(),
 diff --git a/core/render/render_backend.h b/core/render/render_backend.h
+index 86bdc811fd47c818e97da53e93094162cbc18bbc..932c566227c6b3028966e7ed91cfdddb21c67e5a 100644
 --- a/core/render/render_backend.h
 +++ b/core/render/render_backend.h
-@@ -37,6 +37,8 @@
+@@ -37,6 +37,8 @@ struct TextAtlasPageData {
      int channels = 0;
      std::uint64_t generation = 0;
      const unsigned char* pixels = nullptr;
@@ -613,7 +670,7 @@ diff --git a/core/render/render_backend.h b/core/render/render_backend.h
  };
  
  struct TextDrawCommand {
-@@ -72,6 +74,10 @@
+@@ -72,6 +74,10 @@ struct RenderFrameStats {
      int backendResolveDraws = 0;
      int textBatchFlushes = 0;
      std::uint64_t textBatchVertices = 0;
@@ -625,6 +682,7 @@ diff --git a/core/render/render_backend.h b/core/render/render_backend.h
      int backdropCaptureReuses = 0;
      int rectDraws = 0;
 diff --git a/core/render/text.cpp b/core/render/text.cpp
+index ffbf08b8655ccc542952f27923cd4ae5a1de03b9..6d50c8ced664f0e49ddb45da50dcf92dc2e7f127 100644
 --- a/core/render/text.cpp
 +++ b/core/render/text.cpp
 @@ -22,9 +22,11 @@
@@ -639,13 +697,13 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  #include <limits>
  #include <string>
  #include <unordered_map>
-@@ -39,7 +41,28 @@
+@@ -39,8 +41,29 @@ constexpr const char* kDefaultUiFontFile = "JingNanJunJunTi-JinNanJunJunTi-Bold-
  constexpr const char* kDefaultIconFontFile = "Font Awesome 7 Free-Solid-900.otf";
  constexpr int kGrayAtlasSize = 2048;
  constexpr int kColorAtlasSize = 1024;
 +constexpr std::size_t kTextAtlasByteBudget = 32u * 1024u * 1024u;
  constexpr FT_Int32 kGlyphLoadFlags = FT_LOAD_DEFAULT | FT_LOAD_COLOR | FT_LOAD_NO_SVG | FT_LOAD_TARGET_LIGHT;
-+
+ 
 +using FontBytes = std::vector<unsigned char>;
 +struct MemoryFont {
 +    std::shared_ptr<const FontBytes> bytes;
@@ -665,10 +723,11 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 +bool isMemoryFontReference(const std::string& path) {
 +    return path.compare(0, 7, "memory:") == 0;
 +}
- 
++
  struct GlyphAdvance {
      unsigned int index = std::numeric_limits<unsigned int>::max();
-@@ -49,6 +72,8 @@
+     float advance = 0.0f;
+@@ -49,6 +72,8 @@ struct GlyphAdvance {
  
  struct FontFace {
      std::string path;
@@ -677,7 +736,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      FT_Face face = nullptr;
      float size = 16.0f;
      float ascent = 0.0f;
-@@ -76,6 +101,8 @@
+@@ -76,6 +101,8 @@ struct FontFace {
              FT_Done_Face(face);
          }
          path = std::move(other.path);
@@ -686,7 +745,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
          face = other.face;
          size = other.size;
          ascent = other.ascent;
-@@ -98,10 +125,14 @@
+@@ -98,10 +125,14 @@ struct FontFace {
  struct FontInfoHolder {
      std::vector<FontFace> faces;
      std::vector<std::string> lazyFallbackPaths;
@@ -701,7 +760,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  
  struct FontStackCacheEntry {
      std::shared_ptr<FontInfoHolder> holder;
-@@ -169,6 +200,21 @@
+@@ -169,6 +200,21 @@ TextSizeCache& sharedTextSizeCache() {
      return cache;
  }
  
@@ -723,7 +782,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  void clearSharedFontStackCache() {
      FontStackCache& cache = sharedFontStackCache();
      cache.entries.clear();
-@@ -177,9 +223,15 @@
+@@ -177,9 +223,15 @@ void clearSharedFontStackCache() {
      TextSizeCache& sizeCache = sharedTextSizeCache();
      sizeCache.entries.clear();
      sizeCache.accessTick = 0;
@@ -739,7 +798,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      int width = 0;
      int height = 0;
      int channels = 1;
-@@ -194,8 +246,12 @@
+@@ -194,8 +246,12 @@ struct AtlasPage {
  };
  
  struct SharedTextAtlas {
@@ -754,7 +813,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      int references = 0;
  };
  
-@@ -220,7 +276,7 @@
+@@ -220,7 +276,7 @@ std::uint64_t& textAtlasGenerationCounter() {
  }
  
  bool ensureAtlasPage(AtlasPage& page, int width, int height, int channels) {
@@ -763,7 +822,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
          return true;
      }
  
-@@ -231,6 +287,10 @@
+@@ -231,6 +287,10 @@ bool ensureAtlasPage(AtlasPage& page, int width, int height, int channels) {
      page.y = 1;
      page.rowHeight = 0;
      page.generation = ++textAtlasGenerationCounter();
@@ -774,18 +833,18 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      page.pixels.clear();
      return true;
  }
-@@ -239,10 +299,6 @@
-     SharedTextAtlas& atlas = sharedTextAtlas();
-     ++atlas.references;
+@@ -241,10 +301,6 @@ bool retainSharedTextAtlas() {
      return true;
--}
--
--void releaseAtlasPage(AtlasPage& page) {
--    page = {};
  }
  
+-void releaseAtlasPage(AtlasPage& page) {
+-    page = {};
+-}
+-
  void releaseSharedTextAtlas() {
-@@ -252,8 +308,70 @@
+     SharedTextAtlas& atlas = sharedTextAtlas();
+     atlas.references = std::max(0, atlas.references - 1);
+@@ -252,8 +308,70 @@ void releaseSharedTextAtlas() {
          return;
      }
  
@@ -858,7 +917,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  }
  
  std::uint64_t makeGlyphKey(size_t faceIndex, unsigned int glyphIndex) {
-@@ -269,7 +387,7 @@
+@@ -269,7 +387,7 @@ unsigned int glyphIndexFromGlyphKey(std::uint64_t key) {
  }
  
  std::string glyphCacheKey(const FontFace& face, float fontSize, unsigned int glyphIndex, bool colored) {
@@ -867,7 +926,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
             std::to_string(static_cast<int>(std::round(fontSize * 64.0f))) + "#" +
             (colored ? "color#" : "gray#") +
             std::to_string(glyphIndex);
-@@ -512,6 +630,9 @@
+@@ -512,6 +630,9 @@ std::string resolveProjectAssetPath(const std::string& filename) {
  std::string resolveDefaultUiFontPath() {
      const std::string& override = defaultUiFontFileOverride();
      const std::string path = override.empty() ? resolveProjectAssetPath(kDefaultUiFontFile) : resolveFontFilePath(override);
@@ -877,7 +936,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      if (const std::string existing = existingPath(path); !existing.empty()) {
          return existing;
      }
-@@ -521,6 +642,9 @@
+@@ -521,6 +642,9 @@ std::string resolveDefaultUiFontPath() {
  std::string resolveDefaultIconFontPath() {
      const std::string& override = defaultIconFontFileOverride();
      const std::string path = override.empty() ? resolveProjectAssetPath(kDefaultIconFontFile) : resolveFontFilePath(override);
@@ -887,7 +946,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      if (const std::string existing = existingPath(path); !existing.empty()) {
          return existing;
      }
-@@ -528,6 +652,9 @@
+@@ -528,6 +652,9 @@ std::string resolveDefaultIconFontPath() {
  }
  
  std::string resolveFontFilePath(const std::string& path) {
@@ -897,7 +956,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      const std::filesystem::path raw(path);
      if (const std::string existing = existingPath(raw); !existing.empty()) {
          return existing;
-@@ -564,7 +691,22 @@
+@@ -564,7 +691,22 @@ bool loadFontFace(const std::string& path, float fontSize, FontFace& face) {
      }
  
      FT_Face loadedFace = nullptr;
@@ -921,7 +980,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
          return false;
      }
  
-@@ -614,6 +756,8 @@
+@@ -614,6 +756,8 @@ bool loadFontFace(const std::string& path, float fontSize, FontFace& face) {
      }
  
      face.path = path;
@@ -930,113 +989,119 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      face.face = loadedFace;
      face.size = fontSize;
      face.glyphScale = glyphScale;
-@@ -635,48 +779,17 @@
+@@ -635,6 +779,50 @@ std::string fontStackCacheKey(const std::string& fontPath, float fontSize) {
      return fontPath + "#" + std::to_string(static_cast<int>(std::round(fontSize * 64.0f)));
  }
  
--std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath, float fontSize) {
--    const std::string cacheKey = fontStackCacheKey(fontPath, fontSize);
--    FontStackCache& cache = sharedFontStackCache();
--    const auto existing = cache.entries.find(cacheKey);
--    if (existing != cache.entries.end()) {
--        existing->second.lastUsed = ++cache.accessTick;
--        return existing->second.holder;
--    }
--
--    auto holder = std::make_shared<FontInfoHolder>();
--
--    auto addLoadedFace = [&](const std::string& path) {
--        if (path.empty()) {
--            return false;
--        }
--        const bool alreadyLoaded = std::any_of(holder->faces.begin(), holder->faces.end(),
--                                               [&](const FontFace& loadedFace) {
--                                                   return loadedFace.path == path;
--                                               });
--        if (alreadyLoaded) {
--            return true;
--        }
--        FontFace face;
--        if (!loadFontFace(path, fontSize, face)) {
--            return false;
--        }
--        holder->faces.push_back(std::move(face));
--        return true;
--    };
--
--    if (!addLoadedFace(fontPath) &&
--        !addLoadedFace(resolveDefaultUiFontPath()) &&
--        !addLoadedFace(resolveSystemUiFontPath())) {
--        return {};
--    }
--
 +// 只有主字体缺字时才解析后备字体；正常中文布局不做多余的文件系统探测。
 +void resolveLazyFallbackPaths(FontInfoHolder& holder) {
 +    if (holder.fallbackPathsResolved) {
 +        return;
 +    }
-     auto addLazyFallback = [&](const std::string& fallbackPath) {
--        if (fallbackPath.empty() || fallbackPath == fontPath) {
++    auto addLazyFallback = [&](const std::string& fallbackPath) {
 +        if (fallbackPath.empty() || fallbackPath == holder.primaryPath) {
-             return;
-         }
--        if (std::find(holder->lazyFallbackPaths.begin(), holder->lazyFallbackPaths.end(), fallbackPath) == holder->lazyFallbackPaths.end()) {
--            holder->lazyFallbackPaths.push_back(fallbackPath);
++            return;
++        }
 +        if (std::find(holder.lazyFallbackPaths.begin(), holder.lazyFallbackPaths.end(), fallbackPath) == holder.lazyFallbackPaths.end()) {
 +            holder.lazyFallbackPaths.push_back(fallbackPath);
-         }
-     };
- 
-@@ -707,6 +820,48 @@
-     addLazyFallback("/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc");
-     addLazyFallback("/usr/share/fonts/dejavu/DejaVuSans.ttf");
- #endif
++        }
++    };
++
++    addLazyFallback(resolveDefaultUiFontPath());
++    addLazyFallback(resolveDefaultIconFontPath());
++    addLazyFallback(resolveSystemUiFontPath());
++    addLazyFallback(resolveSystemIconFontPath());
++    addLazyFallback(resolveSystemEmojiFontPath());
++
++#ifdef _WIN32
++    addLazyFallback("C:/Windows/Fonts/seguiemj.ttf");
++    addLazyFallback("C:/Windows/Fonts/seguisym.ttf");
++    addLazyFallback("C:/Windows/Fonts/msyh.ttc");
++    addLazyFallback("C:/Windows/Fonts/simhei.ttf");
++#elif defined(__APPLE__)
++    addLazyFallback("/System/Library/Fonts/Apple Color Emoji.ttc");
++    addLazyFallback("/System/Library/Fonts/Supplemental/Arial Unicode.ttf");
++    addLazyFallback("/System/Library/Fonts/Supplemental/Arial.ttf");
++#else
++    // Debian / Ubuntu layout
++    addLazyFallback("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
++    addLazyFallback("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc");
++    addLazyFallback("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
++    // Fedora / RHEL family
++    addLazyFallback("/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf");
++    addLazyFallback("/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf");
++    addLazyFallback("/usr/share/fonts/google-noto-sans-cjk/NotoSansCJK-Regular.ttc");
++    addLazyFallback("/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc");
++    addLazyFallback("/usr/share/fonts/dejavu/DejaVuSans.ttf");
++#endif
 +    holder.fallbackPathsResolved = true;
 +}
 +
-+std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath, float fontSize) {
-+    const std::string cacheKey = fontStackCacheKey(fontPath, fontSize);
-+    FontStackCache& cache = sharedFontStackCache();
-+    const auto existing = cache.entries.find(cacheKey);
-+    if (existing != cache.entries.end()) {
-+        existing->second.lastUsed = ++cache.accessTick;
-+        return existing->second.holder;
-+    }
-+
-+    auto holder = std::make_shared<FontInfoHolder>();
+ std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath, float fontSize) {
+     const std::string cacheKey = fontStackCacheKey(fontPath, fontSize);
+     FontStackCache& cache = sharedFontStackCache();
+@@ -645,6 +833,7 @@ std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath,
+     }
+ 
+     auto holder = std::make_shared<FontInfoHolder>();
 +    holder->primaryPath = fontPath;
-+
-+    auto addLoadedFace = [&](const std::string& path) {
-+        if (path.empty()) {
-+            return false;
-+        }
-+        const bool alreadyLoaded = std::any_of(holder->faces.begin(), holder->faces.end(),
-+                                               [&](const FontFace& loadedFace) {
-+                                                   return loadedFace.path == path;
-+                                               });
-+        if (alreadyLoaded) {
-+            return true;
-+        }
-+        FontFace face;
-+        if (!loadFontFace(path, fontSize, face)) {
-+            return false;
-+        }
-+        holder->faces.push_back(std::move(face));
-+        return true;
-+    };
-+
+ 
+     auto addLoadedFace = [&](const std::string& path) {
+         if (path.empty()) {
+@@ -665,49 +854,15 @@ std::shared_ptr<FontInfoHolder> loadSharedFontStack(const std::string& fontPath,
+         return true;
+     };
+ 
 +    if (isMemoryFontReference(fontPath) && !addLoadedFace(fontPath)) {
 +        return {};
 +    }
-+    if (!addLoadedFace(fontPath) &&
-+        !addLoadedFace(resolveDefaultUiFontPath()) &&
-+        !addLoadedFace(resolveSystemUiFontPath())) {
-+        return {};
-+    }
+     if (!addLoadedFace(fontPath) &&
+         !addLoadedFace(resolveDefaultUiFontPath()) &&
+         !addLoadedFace(resolveSystemUiFontPath())) {
+         return {};
+     }
  
+-    auto addLazyFallback = [&](const std::string& fallbackPath) {
+-        if (fallbackPath.empty() || fallbackPath == fontPath) {
+-            return;
+-        }
+-        if (std::find(holder->lazyFallbackPaths.begin(), holder->lazyFallbackPaths.end(), fallbackPath) == holder->lazyFallbackPaths.end()) {
+-            holder->lazyFallbackPaths.push_back(fallbackPath);
+-        }
+-    };
+-
+-    addLazyFallback(resolveDefaultUiFontPath());
+-    addLazyFallback(resolveDefaultIconFontPath());
+-    addLazyFallback(resolveSystemUiFontPath());
+-    addLazyFallback(resolveSystemIconFontPath());
+-    addLazyFallback(resolveSystemEmojiFontPath());
+-
+-#ifdef _WIN32
+-    addLazyFallback("C:/Windows/Fonts/seguiemj.ttf");
+-    addLazyFallback("C:/Windows/Fonts/seguisym.ttf");
+-    addLazyFallback("C:/Windows/Fonts/msyh.ttc");
+-    addLazyFallback("C:/Windows/Fonts/simhei.ttf");
+-#elif defined(__APPLE__)
+-    addLazyFallback("/System/Library/Fonts/Apple Color Emoji.ttc");
+-    addLazyFallback("/System/Library/Fonts/Supplemental/Arial Unicode.ttf");
+-    addLazyFallback("/System/Library/Fonts/Supplemental/Arial.ttf");
+-#else
+-    // Debian / Ubuntu layout
+-    addLazyFallback("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
+-    addLazyFallback("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc");
+-    addLazyFallback("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+-    // Fedora / RHEL family
+-    addLazyFallback("/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf");
+-    addLazyFallback("/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf");
+-    addLazyFallback("/usr/share/fonts/google-noto-sans-cjk/NotoSansCJK-Regular.ttc");
+-    addLazyFallback("/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc");
+-    addLazyFallback("/usr/share/fonts/dejavu/DejaVuSans.ttf");
+-#endif
+-
      if (cache.entries.size() >= kFontStackCacheCapacity) {
          const auto oldest = std::min_element(cache.entries.begin(), cache.entries.end(),
-@@ -783,6 +938,7 @@
+                                              [](const auto& left, const auto& right) {
+@@ -783,6 +938,7 @@ size_t findFaceForCodepoint(FontInfoHolder& holder, unsigned int codepoint, floa
          }
      }
  
@@ -1044,7 +1109,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      for (const std::string& fallbackPath : holder.lazyFallbackPaths) {
          if (fallbackPath.empty()) {
              continue;
-@@ -818,6 +974,7 @@
+@@ -818,6 +974,7 @@ size_t findEmojiFaceForCodepoint(FontInfoHolder& holder, unsigned int codepoint,
          }
      }
  
@@ -1052,7 +1117,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      for (const std::string& fallbackPath : holder.lazyFallbackPaths) {
          if (fallbackPath.empty() || !isEmojiFontPath(fallbackPath)) {
              continue;
-@@ -958,21 +1115,34 @@
+@@ -958,21 +1115,34 @@ bool appendToAtlas(AtlasPage& page,
          return true;
      }
  
@@ -1060,14 +1125,13 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 -        page.x = 1;
 -        page.y += page.rowHeight + 1;
 -        page.rowHeight = 0;
--    }
--    if (page.y + height + 1 >= page.height) {
 +    int nextX = page.x, nextY = page.y, rowHeight = page.rowHeight;
 +    if (nextX + width + 1 >= page.width) {
 +        nextX = 1;
 +        nextY += rowHeight + 1;
 +        rowHeight = 0;
-+    }
+     }
+-    if (page.y + height + 1 >= page.height) {
 +    if (width + 2 > page.width || nextY + height + 1 >= page.height) {
          return false;
      }
@@ -1077,7 +1141,6 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 -                                      static_cast<std::size_t>(page.channels);
 -    if (page.pixels.size() < requiredBytes) {
 -        page.pixels.resize(requiredBytes, 0);
--    }
 +    // 保留最外侧的透明像素，缩放或旋转采样时不读取尚未上传的纹理区域。
 +    const int requiredRows = nextY + std::max(rowHeight, height) + 1;
 +    const std::size_t stride = std::size_t(page.width) * page.channels;
@@ -1093,14 +1156,14 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 +        } catch (const std::bad_alloc&) {
 +            return false;
 +        }
-+    }
+     }
 +    page.x = nextX;
 +    page.y = nextY;
 +    page.rowHeight = rowHeight;
  
      const int copyChannels = std::min(channels, page.channels);
      for (int row = 0; row < height; ++row) {
-@@ -993,12 +1163,32 @@
+@@ -993,15 +1163,35 @@ bool appendToAtlas(AtlasPage& page,
      glyph.v0 = static_cast<float>(page.y) / static_cast<float>(page.height);
      glyph.u1 = static_cast<float>(page.x + width) / static_cast<float>(page.width);
      glyph.v1 = static_cast<float>(page.y + height) / static_cast<float>(page.height);
@@ -1112,9 +1175,9 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 -    page.usedHeight = std::max(page.usedHeight, page.y + page.rowHeight);
 +    page.usedHeight = std::max(page.usedHeight, page.y + page.rowHeight + 1);
      page.generation = ++textAtlasGenerationCounter();
-+    return true;
-+}
-+
+     return true;
+ }
+ 
 +bool storeAtlasGlyph(bool colored, const std::string& key,
 +                     const unsigned char* pixels, int width, int height,
 +                     TextPrimitive::Glyph& glyph) {
@@ -1131,10 +1194,13 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 +    const auto page = newAtlasPage(colored, width, height);
 +    if (!page || !appendToAtlas(*page, pixels, width, height, channels, glyph)) return false;
 +    page->glyphs[key] = glyph;
-     return true;
- }
- 
-@@ -1053,6 +1243,7 @@
++    return true;
++}
++
+ std::vector<unsigned char> copyGrayBitmap(const FT_Bitmap& bitmap) {
+     if (bitmap.width == 0 || bitmap.rows == 0 || !bitmap.buffer ||
+         std::abs(bitmap.pitch) < static_cast<int>(bitmap.width)) {
+@@ -1053,6 +1243,7 @@ struct TextPrimitive::Impl {
          Glyph glyph;
          float x = 0.0f;
          float y = 0.0f;
@@ -1142,7 +1208,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      };
  
      struct Line {
-@@ -1065,6 +1256,7 @@
+@@ -1065,6 +1256,7 @@ struct TextPrimitive::Impl {
  
      Impl() = default;
      Impl(float x, float y) : position_{x, y} {}
@@ -1150,7 +1216,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  
      bool initialize();
      void destroy();
-@@ -1103,6 +1295,7 @@
+@@ -1103,6 +1295,7 @@ struct TextPrimitive::Impl {
      void render(int windowWidth, int windowHeight);
  
      bool loadFont();
@@ -1158,7 +1224,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      bool ensureGlyph(const ShapedGlyph& shaped);
      Glyph* findGlyph(std::uint64_t key);
      void cacheGlyph(std::uint64_t key, const Glyph& glyph);
-@@ -1134,27 +1327,34 @@
+@@ -1134,27 +1327,34 @@ struct TextPrimitive::Impl {
  
      std::vector<Line> lines_;
      std::vector<float> vertices_;
@@ -1195,7 +1261,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      measuredSize_ = {};
      layoutDirty_ = true;
      verticesDirty_ = true;
-@@ -1195,6 +1395,7 @@
+@@ -1195,6 +1395,7 @@ void TextPrimitive::Impl::setText(const std::string& text) {
              : std::numeric_limits<std::size_t>::max());
      if (vertices_.capacity() > desiredCapacity) {
          std::vector<float>().swap(vertices_);
@@ -1203,7 +1269,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      }
      invalidateLayout();
  }
-@@ -1351,6 +1552,7 @@
+@@ -1351,6 +1552,7 @@ Vec2 TextPrimitive::Impl::position() const {
  }
  
  Vec2 TextPrimitive::Impl::measuredSize() {
@@ -1211,7 +1277,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      if (layoutDirty_) {
          rebuildLayout();
      }
-@@ -1377,12 +1579,37 @@
+@@ -1377,12 +1579,37 @@ TextPrimitive::TextMetrics TextPrimitive::Impl::measureTextMetrics(const std::st
  
      const float size = std::max(1.0f, fontSize);
      const std::string fontPath = resolveFontPath(fontFamily, fontWeight);
@@ -1250,7 +1316,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  }
  
  Vec2 TextPrimitive::Impl::measureTextSize(const TextStyle& style) {
-@@ -1458,10 +1685,12 @@
+@@ -1458,10 +1685,12 @@ void TextPrimitive::Impl::setDefaultFontFiles(const std::string& textFontFile, c
      ++defaultFontConfigurationRevision();
      defaultUiFontFileOverride() = textFontFile;
      defaultIconFontFileOverride() = iconFontFile;
@@ -1263,7 +1329,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      if (layoutDirty_) {
          rebuildLayout();
      }
-@@ -1482,32 +1711,62 @@
+@@ -1482,32 +1711,62 @@ void TextPrimitive::Impl::render(int windowWidth, int windowHeight) {
          return;
      }
  
@@ -1281,6 +1347,16 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 -        atlas.gray.channels,
 -        atlas.gray.generation,
 -        atlas.gray.pixels.empty() ? nullptr : atlas.gray.pixels.data()
+-    };
+-    command.colorAtlas = {
+-        core::render::TextAtlasPageKind::Color,
+-        atlas.color.width,
+-        atlas.color.height,
+-        atlas.color.usedWidth,
+-        atlas.color.usedHeight,
+-        atlas.color.channels,
+-        atlas.color.generation,
+-        atlas.color.pixels.empty() ? nullptr : atlas.color.pixels.data()
 +    std::shared_ptr<AtlasPage> runPage;
 +    std::size_t runStart = 0, runFloats = 0;
 +    const auto submit = [&] {
@@ -1305,16 +1381,6 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 +        backend->drawText(command, windowWidth, windowHeight);
 +        runFloats = 0;
      };
--    command.colorAtlas = {
--        core::render::TextAtlasPageKind::Color,
--        atlas.color.width,
--        atlas.color.height,
--        atlas.color.usedWidth,
--        atlas.color.usedHeight,
--        atlas.color.channels,
--        atlas.color.generation,
--        atlas.color.pixels.empty() ? nullptr : atlas.color.pixels.data()
--    };
 -    backend->drawText(command, windowWidth, windowHeight);
 +    for (std::size_t i = 0; i < vertexGlyphs_.size(); ++i) {
 +        const auto& shaped = vertexGlyphs_[i];
@@ -1351,21 +1417,21 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
  }
  
  bool TextPrimitive::Impl::loadFont() {
-@@ -1526,15 +1785,24 @@
+@@ -1526,15 +1785,24 @@ bool TextPrimitive::Impl::loadFont() {
      glyphs_.clear();
  
      fontDirty_ = false;
 +    memoryFontRevision_ = memoryFontRevision();
      return true;
-+}
-+
+ }
+ 
 +void TextPrimitive::Impl::refreshMemoryFonts() {
 +    if (memoryFontRevision_ != memoryFontRevision()) {
 +        fontDirty_ = true;
 +        invalidateLayout();
 +    }
- }
- 
++}
++
  bool TextPrimitive::Impl::ensureGlyph(const ShapedGlyph& shaped) {
      if (shaped.key == 0) {
          return true;
@@ -1378,7 +1444,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      }
  
      if (fontDirty_ && !loadFont()) {
-@@ -1599,57 +1867,27 @@
+@@ -1599,57 +1867,27 @@ bool TextPrimitive::Impl::ensureGlyph(const ShapedGlyph& shaped) {
      }
  
      const std::string cacheKey = glyphCacheKey(face, style_.fontSize, glyphIndex, colorBitmap);
@@ -1441,7 +1507,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      } else {
          cacheGlyph(shaped.key, glyph);
          return true;
-@@ -1736,17 +1974,18 @@
+@@ -1736,17 +1974,18 @@ void TextPrimitive::Impl::invalidateVertices() {
  
  void TextPrimitive::Impl::rebuildVertices() {
      vertices_.clear();
@@ -1463,7 +1529,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      float blockYOffset = 0.0f;
      if (style_.verticalAlign == VerticalAlign::Center) {
          float inkTop = std::numeric_limits<float>::max();
-@@ -1781,6 +2020,7 @@
+@@ -1781,6 +2020,7 @@ void TextPrimitive::Impl::rebuildVertices() {
          const float lineY = position_.y + blockYOffset + static_cast<float>(lineIndex) * lineHeight;
          for (const LaidOutGlyph& laidOut : line.glyphs) {
              const Glyph& glyph = laidOut.glyph;
@@ -1471,7 +1537,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
              const float x0 = lineX + laidOut.x + glyph.xOffset;
              const float y0 = lineY + laidOut.y + glyph.yOffset;
              const float x1 = x0 + glyph.width;
-@@ -1851,6 +2091,7 @@
+@@ -1851,6 +2091,7 @@ void TextPrimitive::Impl::rebuildVertices() {
                  p2.x, p2.y, glyph.u1, glyph.v1, colored,
                  p3.x, p3.y, glyph.u0, glyph.v1, colored
              });
@@ -1479,7 +1545,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
          }
      }
      verticesDirty_ = false;
-@@ -1876,7 +2117,7 @@
+@@ -1876,7 +2117,7 @@ void TextPrimitive::Impl::appendShapedGlyphToLine(Line& line, const ShapedGlyph&
  
      const Glyph* glyph = findGlyph(shaped.key);
      if (glyph && shaped.key != 0 && shaped.codepoint != ' ' && shaped.codepoint != '\t') {
@@ -1488,7 +1554,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
          const float top = shaped.yOffset + glyph->yOffset;
          const float bottom = top + glyph->height;
          if (!line.hasInk) {
-@@ -1897,6 +2138,9 @@
+@@ -1897,6 +2138,9 @@ unsigned int TextPrimitive::Impl::readCodepoint(const std::string& text, size_t&
  }
  
  std::string TextPrimitive::Impl::resolveFontPath(const std::string& fontFamily, int fontWeight) {
@@ -1498,7 +1564,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
      if (!fontFamily.empty() && fontFamily.find('.') != std::string::npos) {
          return resolveFontFilePath(fontFamily);
      }
-@@ -2024,6 +2268,67 @@
+@@ -2024,6 +2268,67 @@ std::uint64_t TextPrimitive::fontConfigurationRevision() { return core::defaultF
  void TextPrimitive::setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile) {
      Impl::setDefaultFontFiles(textFontFile, iconFontFile);
  }
@@ -1567,6 +1633,7 @@ diff --git a/core/render/text.cpp b/core/render/text.cpp
 +
  } // namespace core
 diff --git a/core/render/text.h b/core/render/text.h
+index 77134965e9c6561899c95464c738544e69895ad6..9d3790e1fc32bcc3c43f0fb933750bf49686111c 100644
 --- a/core/render/text.h
 +++ b/core/render/text.h
 @@ -4,6 +4,7 @@
@@ -1577,7 +1644,7 @@ diff --git a/core/render/text.h b/core/render/text.h
  #include <cstdint>
  #include <string>
  #include <vector>
-@@ -23,6 +24,8 @@
+@@ -23,6 +24,8 @@ public:
          float u1 = 0.0f;
          float v1 = 0.0f;
          bool colored = false;
@@ -1586,7 +1653,7 @@ diff --git a/core/render/text.h b/core/render/text.h
      };
  
      struct ShapedGlyph {
-@@ -84,6 +87,24 @@
+@@ -84,6 +87,24 @@ public:
      // Changes when the default font configuration changes; metric caches may key on it.
      static std::uint64_t fontConfigurationRevision();
      static void setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile);
@@ -1612,9 +1679,20 @@ diff --git a/core/render/text.h b/core/render/text.h
      void prepare();
      void render(int windowWidth, int windowHeight);
 diff --git a/core/runtime/runtime_input.h b/core/runtime/runtime_input.h
+index 70c3958775622cc7a2b950f804ef0d0ff534b0d6..8dbccf7b17472c7c65ded3a1c0793c7f44e30100 100644
 --- a/core/runtime/runtime_input.h
 +++ b/core/runtime/runtime_input.h
-@@ -248,6 +248,41 @@
+@@ -66,7 +66,8 @@ inline std::string Runtime::hitTestFocusable(const PointerEvent& event, float dp
+ 
+ inline std::string Runtime::hitTestScrollable(const PointerEvent& event, float dpiScale) const {
+     return hitTest(event, dpiScale, [](const Element& element) {
+-        return (!element.scrollStateId.empty() || static_cast<bool>(element.onScroll)) && !element.disabled;
++        // A list whose content already fits must allow its scrollable parent to receive the wheel.
++        return ((!element.scrollStateId.empty() && element.scrollMaxOffset > 0.0f) || element.onScroll) && !element.disabled;
+     });
+ }
+ 
+@@ -257,6 +258,41 @@ inline void Runtime::setFocusedId(const std::string& id) {
      paintRequested_ = true;
  }
  
@@ -1656,68 +1734,74 @@ diff --git a/core/runtime/runtime_input.h b/core/runtime/runtime_input.h
  inline void Runtime::updateScroll(const ScrollEvent& event, const std::string& targetId, float dpiScale) {
      const Element* element = targetId.empty() ? nullptr : ui_.find(targetId);
      const std::string activeScrollStateId = element != nullptr && !element->disabled
-@@ -310,6 +345,48 @@
-     }
- 
-     for (const KeyEvent& key : events) {
-+        // MSA integration: native keyboard traversal, including scrolled fields.
-+        if (key.key == InputKey::Tab && key.isDown() && !key.modifiers.control && !key.modifiers.alt) {
-+            if (keyEventHandler_) keyEventHandler_(key);
-+            std::vector<const Element*> stops;
-+            std::vector<const Element*> scrollParents;
-+            std::vector<std::vector<const Element*>> parentPaths;
-+            std::function<void(const Element&, bool)> visit = [&](const Element& node, bool blocked) {
-+                blocked = blocked || node.disabled || node.opacity <= 0.0f;
-+                if (blocked) return;
-+                if (node.focusable) { stops.push_back(&node); parentPaths.push_back(scrollParents); }
-+                const bool scroll = !node.scrollStateId.empty() && node.clip;
-+                if (scroll) scrollParents.push_back(&node);
-+                for (const auto& child : node.children) visit(*child, blocked);
-+                if (scroll) scrollParents.pop_back();
-+            };
-+            for (const auto& root : ui_.roots()) visit(*root, false);
-+            if (!stops.empty()) {
-+                int index = -1;
-+                for (int i = 0; i < static_cast<int>(stops.size()); ++i)
-+                    if (stops[i]->id == focusedId_) index = i;
-+                index = index < 0 ? (key.modifiers.shift ? static_cast<int>(stops.size()) - 1 : 0)
-+                    : (index + (key.modifiers.shift ? -1 : 1) + static_cast<int>(stops.size())) % static_cast<int>(stops.size());
-+                const Element* target = stops[index];
-+                // Layout frames precede the scroll render transform. Bring each
-+                // destination into view before the next compose, rather than
-+                // allowing keyboard focus to disappear outside a clipped panel.
-+                for (const Element* parent : parentPaths[index]) {
-+                    float top = target->frame.y - parent->scrollOffset;
-+                    float bottom = top + target->frame.height;
-+                    if (top < parent->frame.y) setScrollOffset(parent->scrollStateId, parent->scrollOffset + top - parent->frame.y - 6.0f);
-+                    else if (bottom > parent->frame.y + parent->frame.height)
-+                        setScrollOffset(parent->scrollStateId, parent->scrollOffset + bottom - parent->frame.y - parent->frame.height + 6.0f);
-+                }
-+                setFocusedId(target->id);
-+                focused = target;
-+                composeRequested_ = true;
-+                paintRequested_ = true;
+@@ -332,7 +368,32 @@ inline void Runtime::moveFocus(bool backwards) {
+     const auto count = static_cast<std::ptrdiff_t>(order.size());
+     const auto index = it == order.end() ? (backwards ? count - 1 : 0)
+         : (std::distance(order.begin(), it) + (backwards ? count - 1 : 1)) % count;
+-    setFocusedId(order[static_cast<std::size_t>(index)]);
++    const Element* target = ui_.find(order[static_cast<std::size_t>(index)]);
++    // Layout coordinates precede scrolling. Reveal the target from the innermost
++    // viewport outward, accounting for the offset applied by each inner viewport.
++    float top = target->frame.y;
++    const auto reveal = [&](const auto& self, const Element& element) -> bool {
++        if (&element == target) return true;
++        for (const auto& child : element.children) {
++            if (!self(self, *child)) continue;
++            if (element.clip && !element.scrollStateId.empty()) {
++                float offset = element.scrollOffset;
++                if (top - offset < element.frame.y)
++                    offset = top - element.frame.y - 6.0f;
++                else if (top - offset + target->frame.height > element.frame.y + element.frame.height)
++                    offset = top + target->frame.height - element.frame.y - element.frame.height + 6.0f;
++                offset = std::clamp(offset, 0.0f, element.scrollMaxOffset);
++                setScrollOffset(element.scrollStateId, offset);
++                top -= offset;
 +            }
-+            applyFocusRequest();
-+            focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
-+            continue;
++            return true;
 +        }
++        return false;
++    };
++    for (const auto& root : ui_.roots()) {
++        if (reveal(reveal, *root)) break;
++    }
++    setFocusedId(target->id);
+ }
+ 
+ inline void Runtime::synchronizeFocusScope() {
+@@ -355,8 +416,9 @@ inline void Runtime::synchronizeFocusScope() {
+         setFocusedId({});
+         moveFocus(false);
+     }
++    if (focusScopes_.empty()) return;
+     const auto order = focusOrder();
+-    if (!focusScopes_.empty() && std::find(order.begin(), order.end(), focusedId_) == order.end()) {
++    if (std::find(order.begin(), order.end(), focusedId_) == order.end()) {
+         setFocusedId({});
+         moveFocus(false);
+     }
+@@ -381,7 +443,9 @@ inline void Runtime::updateKeyInput(const std::vector<KeyEvent>& events) {
+         if (focused && isElementInDisabledTree(focusedId_)) { setFocusedId({}); focused = nullptr; }
          bool handled = false;
-         if (focused != nullptr && focused->onKeyEvent) {
-             handled = focused->onKeyEvent(key);
-@@ -323,6 +400,8 @@
+         if (key.isDown() && key.key == InputKey::Tab && !key.modifiers.control && !key.modifiers.alt && !key.modifiers.super) {
++            if (keyEventHandler_) keyEventHandler_(key);
+             moveFocus(key.modifiers.shift);
++            applyFocusRequest();
+             continue;
+         }
+         if (key.action == KeyAction::Press && key.key == InputKey::Escape && !focusScopes_.empty()) {
+@@ -429,6 +493,7 @@ inline void Runtime::updateKeyInput(const std::vector<KeyEvent>& events) {
              composeRequested_ = true;
              paintRequested_ = true;
          }
 +        applyFocusRequest();
-+        focused = focusedId_.empty() ? nullptr : ui_.find(focusedId_);
      }
  }
  
 diff --git a/core/runtime/runtime_instances.h b/core/runtime/runtime_instances.h
+index c48b7e0e772b7502b3c7943843325494118c9e9d..c27bc3655e4e40def6a4d4378edf1e61fb33404e 100644
 --- a/core/runtime/runtime_instances.h
 +++ b/core/runtime/runtime_instances.h
-@@ -343,6 +343,16 @@
+@@ -344,6 +344,16 @@ public:
                                      const RenderTransform& inherited) const {
          RenderTransform result = inherited;
  
@@ -1734,7 +1818,7 @@ diff --git a/core/runtime/runtime_instances.h b/core/runtime/runtime_instances.h
          if (element.kind == ElementKind::Row ||
              element.kind == ElementKind::Column ||
              element.kind == ElementKind::Stack ||
-@@ -352,7 +362,12 @@
+@@ -353,7 +363,12 @@ public:
                  const Transform local = layout->second.transform.value();
                  const float opacity = layout->second.opacity.value();
                  if (!isIdentityTransform(local) || !closeEnough(opacity, 1.0f)) {
@@ -1749,17 +1833,18 @@ diff --git a/core/runtime/runtime_instances.h b/core/runtime/runtime_instances.h
                          result,
                          matrixForTransform(toPixelRect(element.frame, dpiScale), scaled));
 diff --git a/core/runtime/runtime_lifecycle.h b/core/runtime/runtime_lifecycle.h
+index 76569195f4b7af155f3bc1145badebb5df5bd59e..e2c053b893294bfdb159588aaf350d5e18dfaf16 100644
 --- a/core/runtime/runtime_lifecycle.h
 +++ b/core/runtime/runtime_lifecycle.h
-@@ -32,6 +32,7 @@
-     if (!focusedId_.empty() && isElementInDisabledTree(focusedId_)) {
+@@ -34,6 +34,7 @@ inline void Runtime::compose(const std::string& pageId, float logicalWidth, floa
+     if (!focusedId_.empty() && (!ui_.find(focusedId_) || isElementInDisabledTree(focusedId_))) {
          setFocusedId({});
      }
 +    applyFocusRequest();
  
      if (elementStructure_ != previousStructure) {
          paintRequested_ = true;
-@@ -111,6 +112,7 @@
+@@ -116,6 +117,7 @@ inline bool Runtime::update(core::window::Handle window, float deltaSeconds, flo
          const std::string hoverTargetId = resolveHoverTarget(event, dpiScale, inputEnabled);
          const float eventDeltaSeconds = index + 1 == pointerEvents.size() ? deltaSeconds : 0.0f;
          updateElementTree(event, eventDeltaSeconds, dpiScale, hoverTargetId);
@@ -1767,7 +1852,7 @@ diff --git a/core/runtime/runtime_lifecycle.h b/core/runtime/runtime_lifecycle.h
      }
      for (const PointerEvent& event : pointerEvents) {
          if (event.touch && (event.action == PointerAction::Release || event.action == PointerAction::Cancel)) {
-@@ -297,6 +299,9 @@
+@@ -305,6 +307,9 @@ inline void Runtime::releaseGraphicsResources(bool releaseCachedImageTextures) {
  }
  
  inline void Runtime::applyCursor(core::window::Handle window) {
@@ -1778,20 +1863,21 @@ diff --git a/core/runtime/runtime_lifecycle.h b/core/runtime/runtime_lifecycle.h
          arrowCursor_ = core::window::createStandardCursor(core::window::CursorType::Arrow);
      }
 diff --git a/core/runtime/runtime_state_bindings.h b/core/runtime/runtime_state_bindings.h
+index 46dbe3b989d389a83f185a95a8b531b719774849..4ac69a51d4767d68799df9b469fce6ff54cf4d72 100644
 --- a/core/runtime/runtime_state_bindings.h
 +++ b/core/runtime/runtime_state_bindings.h
-@@ -16,10 +16,6 @@
- 
- inline bool ownsSliderState(const Element& element) {
+@@ -18,10 +18,6 @@ inline bool ownsSliderState(const Element& element) {
      return !element.sliderStateId.empty() && element.id == element.sliderStateId;
--}
--
--inline constexpr float scrollTransformMinActiveOffset() {
--    return 0.01f;
  }
  
+-inline constexpr float scrollTransformMinActiveOffset() {
+-    return 0.01f;
+-}
+-
  inline constexpr float scrollInertiaFriction() {
-@@ -167,11 +163,7 @@
+     return 12.0f;
+ }
+@@ -167,11 +163,7 @@ inline Transform scrollTransformForElement(const Element& element,
      if (!element.scrollContentSourceId.empty()) {
          const auto state = scrollStates.find(element.scrollContentSourceId);
          if (state != scrollStates.end() && state->second.maxOffset > 0.0f) {
@@ -1804,29 +1890,3 @@ diff --git a/core/runtime/runtime_state_bindings.h b/core/runtime/runtime_state_
          }
      }
      if (!element.scrollThumbSourceId.empty()) {
-diff --git a/core/render/opengl/opengl_image.cpp b/core/render/opengl/opengl_image.cpp
-index ae292c4..6bbb81d 100644
---- a/core/render/opengl/opengl_image.cpp
-+++ b/core/render/opengl/opengl_image.cpp
-@@ -600,7 +600,9 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
- 
-     bindVertexArray(imageVao_);
-     bindArrayBuffer(imageVbo_);
--    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
-+    // 图像与保留层共用顶点缓冲；流式更换存储，避免连续绘制反复原位写入。
-+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)),
-+                 vertices, GL_STREAM_DRAW);
-     activeTextureUnit(0);
-     bindTexture2D(texture);
-     GLint previousSampler = 0;
-@@ -661,7 +663,9 @@ void OpenGLRenderBackend::drawLayerTexture(TextureHandle handle,
- 
-     bindVertexArray(imageVao_);
-     bindArrayBuffer(imageVbo_);
--    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), uploadVertices);
-+    // 保留层可能连续多帧提交，为本次顶点提供独立存储而不等待整条渲染队列。
-+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)),
-+                 uploadVertices, GL_STREAM_DRAW);
-     activeTextureUnit(0);
-     bindTexture2D(texture);
-     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));

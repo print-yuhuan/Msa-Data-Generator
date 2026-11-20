@@ -1,9 +1,9 @@
 <div align="center">
   <h1>MSA 数据生成器</h1>
   <p>生成交叉量具 R&amp;R 模拟数据，复核统计指标，导出测量记录。</p>
-  <p><strong>Windows x64</strong> · v1.0.9 · <a href="LICENSE">MIT 许可证</a></p>
+  <p><strong>Windows x64</strong> · v1.1.0 · <a href="LICENSE">MIT 许可证</a></p>
   <p>
-    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.9/MSA_Data_Generator_v1.0.9_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
+    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.0/MSA_Data_Generator_v1.1.0_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
     · <a href="#快速开始">快速开始</a>
     · <a href="docs/README.md">文档中心</a>
   </p>
@@ -39,6 +39,10 @@
 | 数据文件 | 可导入和导出 CSV 或 Excel 工作簿（XLSX）。提供默认宽表及 Minitab、SPSS、JMP、Origin、MATLAB 五种长表预设。可设置运行顺序、独立排序种子、`StdOrder` 和文件名模板。 |
 
 数据生成、统计分析、图表绘制和文件导出均在本机完成。桌面程序和 CLI 共用统计内核与配置规则。统计口径及外部软件的参数差异见 [Minitab 导入与对标](docs/Minitab导入与对标.md)和 [ANOVA 对标记录](docs/ANOVA设计与五软件对标.md)。
+
+## v1.1.0 更新
+
+界面框架已升级至 EUI‑NEO v0.6.4。图表预览沿用原有线宽和抗锯齿，只绘制每段线实际覆盖的区域。150% 缩放实测中，滚动均值控制图的第 95 百分位帧提交间隔由 36.29 ms 降至 17.29 ms，接近测试显示器 59 Hz 的刷新周期。帮助和日志也减少了重复布局，底栏的成功提示到期时才请求刷新。[滚动性能对照与测试条件](docs/验证报告.md#图表滚动性能)
 
 ## v1.0.9 更新
 
@@ -130,6 +134,6 @@ ctest --test-dir build -C Release --output-on-failure
 
 欢迎提交可复现的问题。反馈时可附上软件版本、研究设置、操作步骤和预期结果。[GitHub Issues](https://github.com/print-yuhuan/Msa-Data-Generator/issues)
 
-[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.9
-[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.9/MSA_Data_Generator_v1.0.9_Windows_x64.zip
-[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.9/MSA_Data_Generator_v1.0.9_Windows_x64.zip.sha256
+[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.1.0
+[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.0/MSA_Data_Generator_v1.1.0_Windows_x64.zip
+[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.0/MSA_Data_Generator_v1.1.0_Windows_x64.zip.sha256

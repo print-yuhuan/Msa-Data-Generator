@@ -2,9 +2,9 @@
   "language": "C++17",
   "gui": {
     "name": "EUI-NEO",
-    "version": "0.6.2",
+    "version": "0.6.4",
     "repository": "https://github.com/sudoevolve/EUI-NEO",
-    "commit": "6fc68e1b660c9d83ebe83ed442f86b7ebba4cc04",
+    "commit": "70f2e29380a678c453a2a7c9fa1f9e0573917b58",
     "local_patch": "patches/EUI-NEO-windows-integration.patch",
     "distribution": "Vendored build/runtime subset; upstream demos, docs, optional modules and Git metadata omitted. See third_party/README.md.",
     "license": "Apache-2.0"

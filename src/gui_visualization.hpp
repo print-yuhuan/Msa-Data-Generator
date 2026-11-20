@@ -521,7 +521,8 @@ const msa::charts::Scene *chartPreview(const msa::Result &result, float width, f
         sameChartEditor(cache.editor, editor))
         return cache.scene ? &*cache.scene : nullptr;
     // 缓存持有数据副本，不保存 Result 指针；重生成、导入或切换数据源都会重新比较内容。
-    cache.snapshot = result;
+    if (!sameData)
+        cache.snapshot = result;
     cache.imported = visual.importedSelected;
     cache.selected = visual.selected;
     cache.editor = editor;
@@ -625,14 +626,18 @@ void drawChartScene(Ui &u, const std::string &id, const msa::charts::Scene &scen
                     for (int j = 0; j < pieces; ++j) {
                         const float a = float(j) / pieces;
                         const float b = p.dashed ? std::min(1.f, (j + .58f) / pieces) : 1.f;
+                        const float x1 = p.x + dx * a, y1 = p.y + dy * a;
+                        const float x2 = p.x + dx * b, y2 = p.y + dy * b;
+                        // EUI shades the entire polygon frame. Bound each stroke to its ink,
+                        // including the antialias fringe for dirty-region and scroll clipping.
+                        const float padX = std::abs(nx) + 2, padY = std::abs(ny) + 2;
+                        const float left = std::min(x1, x2) - padX, top = std::min(y1, y2) - padY;
                         u.polygon(key + "." + std::to_string(j))
-                            .position(0, 0)
-                            .size(scene.width, scene.height)
+                            .position(left, top)
+                            .size(std::abs(x2 - x1) + 2 * padX, std::abs(y2 - y1) + 2 * padY)
                             .color(p.color)
-                            .points({{p.x + dx * a + nx, p.y + dy * a + ny},
-                                     {p.x + dx * b + nx, p.y + dy * b + ny},
-                                     {p.x + dx * b - nx, p.y + dy * b - ny},
-                                     {p.x + dx * a - nx, p.y + dy * a - ny}})
+                            .points({{x1 + nx - left, y1 + ny - top}, {x2 + nx - left, y2 + ny - top},
+                                     {x2 - nx - left, y2 - ny - top}, {x1 - nx - left, y1 - ny - top}})
                             .build();
                     }
                 }
@@ -1522,7 +1527,7 @@ void chartsPage(Ui &u, float w, float h) {
             visual.offset = y;
             menu.id.clear();
         })
-        .content([h](Ui &v, float cw, float) {
+        .content([h, &u](Ui &v, float cw, float) {
             v.column("charts.content")
                 .width(cw)
                 .gap(sectionGap)
@@ -1542,11 +1547,15 @@ void chartsPage(Ui &u, float w, float h) {
                             const auto *scene = result ? chartPreview(*result, c, plotHeight) : nullptr;
                             chartPreviewToolbar(v, c);
                             if (result) {
-                                if (scene)
-                                    drawChartScene(
-                                        v, "charts.scene." + std::to_string(visual.selected),
-                                        *scene);
-                                else if (sideBySide)
+                                if (scene) {
+                                    // The scroll view first builds a separate tree to measure its
+                                    // contents. Only the fixed-size plot frame affects that layout.
+                                    if (&v == &u)
+                                        drawChartScene(v, "charts.scene." + std::to_string(visual.selected),
+                                                       *scene);
+                                    else
+                                        v.stack("charts.measure").size(scene->width, scene->height).build();
+                                } else if (sideBySide)
                                     v.column("charts.invalid.panel")
                                         .size(c, plotHeight)
                                         .content([&] {

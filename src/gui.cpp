@@ -76,6 +76,8 @@ struct LogEntry {
     std::string message;
 };
 constexpr std::size_t logLimit = 100;
+constexpr auto footerHintDuration = std::chrono::milliseconds(6000);
+constexpr UINT_PTR footerHintTimer = 0x4D534148;
 std::string searchSummary(const Json &diagnostics) {
     if (diagnostics.empty())
         return {};
@@ -161,10 +163,12 @@ struct State {
         footerLevel = level;
         footerPage = page;
         footerEntered = Clock::now();
+        if (auto *window = glfwGetCurrentContext())
+            SetTimer(glfwGetWin32Window(window), footerHintTimer, UINT(footerHintDuration.count()), nullptr);
     }
     bool visibleHint() const {
         return !busy() && !footerMessage.empty() && footerPage == page &&
-               Clock::now() - footerEntered < std::chrono::seconds(6);
+               Clock::now() - footerEntered < footerHintDuration;
     }
     void log(std::string s, Level level = Level::Info) {
         SYSTEMTIME now{};
@@ -406,6 +410,7 @@ void keyboard(Ui &u, const std::string &id, std::function<bool(const eui::KeyEve
     if (auto *hit = u.find(id)) {
         hit->focusable = true;
         hit->interactive = true;
+        hit->customFocusIndicator = true;
         hit->onKeyEvent = std::move(fn);
         if (!hit->disabled && u.isFocused(id))
             hit->border = {2, eui::Color(blue)};
@@ -955,9 +960,12 @@ void combo(Ui &u, const std::string &id, const std::vector<std::string> &items, 
                 .build();
         })
         .build();
-    if (auto *control = u.find(id); control && items.empty()) {
-        control->disabled = true;
-        control->focusable = false;
+    if (auto *control = u.find(id)) {
+        control->customFocusIndicator = true;
+        if (items.empty()) {
+            control->disabled = true;
+            control->focusable = false;
+        }
     }
 }
 void inputControl(Ui &u, const std::string &id, std::string &value, float w,
@@ -985,6 +993,8 @@ void inputControl(Ui &u, const std::string &id, std::string &value, float w,
                 changed();
         })
         .build();
+    if (auto *hit = u.find(id + ".hit"))
+        hit->customFocusIndicator = true;
 }
 void input(Ui &u, const std::string &id, std::string &value, float w, const std::string &hint = "",
            bool exportOnly = false) {
@@ -1635,8 +1645,7 @@ void detailTable(Ui &u, const std::string &id, float w, const std::vector<std::s
     auto theme = tokens();
     theme.metrics.typography.label = tableValueFont;
     theme.metrics.spacing.section = 7;
-    theme.metrics.control.segmented =
-        resultTableHeaderHeight - theme.metrics.spacing.hairline - theme.metrics.spacing.micro;
+    theme.metrics.control.control = resultTableHeaderHeight;
     auto style = components::DataTableStyle(theme);
     style.header = eui::Color(tableHeader);
     style.row = eui::Color(surface);
@@ -1645,25 +1654,34 @@ void detailTable(Ui &u, const std::string &id, float w, const std::vector<std::s
     style.accent = style.mutedText;
     style.divider = eui::Color(line);
     style.radius = controlRadius;
-    const float minimumHeight =
-        resultTableHeaderHeight + theme.metrics.spacing.hairline + float(rows.size()) * 42;
+    // All summary rows stay visible. The outer results pane owns wheel scrolling.
+    constexpr float tableBorder = 2;
+    const float minimumHeight = resultTableHeaderHeight + tableBorder + float(rows.size()) * 42;
+    const float height = std::max(availableHeight, minimumHeight);
+    const float bodyHeight = height - resultTableHeaderHeight - tableBorder;
+    // Round down when supplying the height so multiplying it by the row count
+    // cannot create a fractional overflow and a needless inner scrollbar.
+    const float rowHeight = bodyHeight / std::max(1.f, float(rows.size()));
     components::dataTable(u, id)
-        .size(w, std::max(availableHeight, minimumHeight))
+        .size(w, height)
         .columns(columns)
         .rows(rows)
+        .rowHeight(std::nextafter(rowHeight, 0.f))
+        .sortable(false)
+        .resizable(false)
         .theme(theme)
         .style(style)
         .transition(transition())
         .build();
     for (size_t column = 0; column < columns.size(); ++column) {
-        if (auto *header = u.find(id + ".header." + std::to_string(column))) {
+        if (auto *header = u.find(id + ".column." + std::to_string(column) + ".label")) {
             header->fontSize = tableLabelFont;
             if (column > 0)
                 header->horizontalAlign = eui::HorizontalAlign::Right;
         }
         for (size_t row = 0; row < rows.size(); ++row)
             if (auto *cell =
-                    u.find(id + ".cell." + std::to_string(row) + "." + std::to_string(column))) {
+                    u.find(id + ".body.slot." + std::to_string(row) + ".cell." + std::to_string(column))) {
                 cell->wrap = true;
                 if (column > 0)
                     cell->horizontalAlign = eui::HorizontalAlign::Right;
@@ -3720,6 +3738,8 @@ void logsPanel(Ui &u, float w, float h) {
                             components::scrollView(u, "logscroll")
                                 .size(tableWidth + barWidth + barGap, bodyHeight)
                                 .offset(state.logOffset)
+                                .contentKey(std::to_string(state.logSequence) + "." +
+                                            std::to_string(state.logFilter))
                                 .theme(tokens())
                                 .scrollbarWidth(barWidth)
                                 .scrollbarGap(barGap)
@@ -4373,6 +4393,7 @@ void helpPage(Ui &u, float w, float h) {
                 .build();
             components::scrollView(u, "helpscroll")
                 .size(readingWidth, std::max(74.f, h - secondaryNavHeight - sectionGap))
+                .contentKey(std::to_string(topic))
                 .offset(state.helpOffset)
                 .theme(tokens())
                 .scrollbarGap(scrollGutter)
@@ -4492,7 +4513,7 @@ void aboutIdentity(Ui &u, float w) {
                        safe([] {
                            platform::clipboard(platform::wide(
                                std::string("MSA 数据生成器 v") + MSA_UI_VERSION +
-                               "\r\nWindows x64 / EUI-NEO 0.6.2"
+                               "\r\nWindows x64 / EUI-NEO " MSA_EUI_VERSION
                                "\r\n交叉量具 R&R：Xbar-R / ANOVA"
                                "\r\n作者：" +
                                msa::project_author + "\r\n项目仓库：" + msa::project_repository +
@@ -4596,6 +4617,7 @@ void aboutPage(Ui &u, float w, float h) {
             components::scrollView(u, "aboutscroll")
                 .size(viewportWidth, h)
                 .offset(state.aboutOffset)
+                .contentKey(licenseAvailable ? "packaged" : "standalone")
                 .theme(tokens())
                 .scrollbarGap(scrollGutter)
                 .reserveScrollbar()
@@ -4643,7 +4665,7 @@ void aboutPage(Ui &u, float w, float h) {
                     };
                     const auto dependencies = [](Ui &v, float width) {
                         aboutGroup(v, "about.dependencies", "第三方组件", width, [&](float c) {
-                            aboutRow(v, "about.framework", "UI", "EUI-NEO", "界面框架 · 0.6.2",
+                            aboutRow(v, "about.framework", "UI", "EUI-NEO", "界面框架 · " MSA_EUI_VERSION,
                                      "about.euiversion", c, false, {"Apache-2.0"});
                             aboutRow(v, "about.font", "Aa", "Noto Sans CJK SC", "中文字体 · 2.004",
                                      "about.fontlicense", c, true, {"OFL-1.1"});
@@ -4670,18 +4692,14 @@ void aboutPage(Ui &u, float w, float h) {
 void footerStatus(Ui &u, float w, const std::string &fallback) {
     // 固定提示槽仅更新文字和颜色，不改变底栏尺寸或按钮位置。
     const bool showHint = state.visibleHint();
-    auto status = u.text("footer.status")
-                      .size(w, controlHeight)
-                      .text(showHint ? state.footerMessage : fallback)
-                      .fontSize(16.5f)
-                      .color(!showHint                          ? muted
-                             : state.footerLevel == Level::Info ? green
-                                                                : levelColor(state.footerLevel))
-                      .verticalAlign(eui::VerticalAlign::Center)
-                      .clip();
-    if (showHint)
-        status.onFrame([](float) {});
-    status.build();
+    u.text("footer.status")
+        .size(w, controlHeight)
+        .text(showHint ? state.footerMessage : fallback)
+        .fontSize(16.5f)
+        .color(!showHint ? muted : state.footerLevel == Level::Info ? green : levelColor(state.footerLevel))
+        .verticalAlign(eui::VerticalAlign::Center)
+        .clip()
+        .build();
 }
 // 新页面共享现有主题、状态栏与本地统计结果。
 #include "gui_visualization.hpp"
@@ -4699,17 +4717,28 @@ void appKeyEvent(const eui::KeyEvent &key) {
         menu.id.clear();
 }
 
-// The Windows title bar belongs to the main window. While a choice is open,
-// its close button and Alt+F4 dismiss that choice just like the panel's close button.
-LRESULT CALLBACK importWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
-                                  UINT_PTR subclassId, DWORD_PTR) {
+LRESULT CALLBACK guiWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                               UINT_PTR subclassId, DWORD_PTR) {
+    if (message == WM_TIMER && wparam == footerHintTimer) {
+        // A new hint can replace one whose timer message is already queued.
+        const auto remaining = state.footerEntered + footerHintDuration - Clock::now();
+        if (!state.footerMessage.empty() && remaining > Clock::duration::zero()) {
+            const auto delay = std::chrono::ceil<std::chrono::milliseconds>(remaining);
+            SetTimer(window, footerHintTimer, static_cast<UINT>(delay.count()), nullptr);
+        } else {
+            KillTimer(window, footerHintTimer);
+            app::requestUpdate();
+        }
+        return 0;
+    }
+    // The title bar and Alt+F4 dismiss the active import panel first.
     if (message == WM_CLOSE && pendingImport) {
         cancelStudyImport();
         app::requestUpdate();
         return 0;
     }
     if (message == WM_NCDESTROY)
-        RemoveWindowSubclass(window, importWindowProc, subclassId);
+        RemoveWindowSubclass(window, guiWindowProc, subclassId);
     return DefSubclassProc(window, message, wparam, lparam);
 }
 void footer(Ui &u, float w) {
@@ -4902,7 +4931,7 @@ void compose(Ui &u, const eui::Screen &screen) {
             auto body = u.column("body").size(screen.width, h).padding(pad, 0);
             // 正文始终清晰；过渡仅作用于导航和控件状态。
             if (visual.busy())
-                body.onFrame([](float) {});
+                body.onTimer(.1f, [] {});
             body.content([&] {
                     switch (state.page) {
                     case Page::Data:
@@ -4991,14 +5020,14 @@ const DslAppConfig &dslAppConfig() {
             .uiScale(scale)
             .fonts(gui::font(), gui::font())
             .clearColor(eui::Color(gui::bg))
-            .fps(60)
+            .fps(0) // Pace active frames at the current monitor's refresh rate.
             .showDebugOverlay(false)
             .showDebugStatsInTitle(false)
             .onStart([] {
                 // 首次显示前按实际外框居中，工作区不包含任务栏。
                 RECT workArea{}, windowRect{};
                 const HWND window = platform::owner();
-                SetWindowSubclass(window, gui::importWindowProc, 1, 0);
+                SetWindowSubclass(window, gui::guiWindowProc, 1, 0);
                 // Windows 10 不支持标题栏颜色属性，调用失败时使用系统配色。
                 if (SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR,
                                                     &gui::headerBackground,
