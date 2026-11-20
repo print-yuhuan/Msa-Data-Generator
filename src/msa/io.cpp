@@ -283,25 +283,37 @@ std::string encode_data(const Result &study, const Json &settings, const std::st
         return xlsx_from_csv(bytes, decimal_places);
     return bytes;
 }
-using StudyParser = ImportedData (*)(const std::string &, const Json &);
-ImportedData parse_with_known_design(const std::string &csv, const Json &config) {
-    return {parse_export_csv(csv, config), {}, config};
+using StudyParser = std::function<std::optional<ImportedData>(const std::string &, const Json &)>;
+std::optional<ImportedData> parse_with_known_design(const std::string &csv, const Json &config) {
+    return ImportedData{parse_export_csv(csv, config), {}, config};
 }
-ImportedData import_sheet(const XlsxWorkbook &workbook, std::size_t index, const Json &config,
-                          StudyParser parse) {
+ReplicateSelector explicit_replicates(std::optional<int> replicates) {
+    if (!replicates)
+        return {};
+    return [replicates] { return replicates; };
+}
+StudyParser study_parser(const ReplicateSelector &choose_replicates) {
+    return [&choose_replicates](const std::string &bytes, const Json &config) {
+        return import_csv_study(bytes, config, choose_replicates);
+    };
+}
+std::optional<ImportedData> import_sheet(const XlsxWorkbook &workbook, std::size_t index,
+                                         const Json &config, const StudyParser &parse) {
     const auto &names = workbook.sheet_names();
     if (index >= names.size())
         throw ConfigError("XLSX 所选工作表编号无效");
     try {
         auto study = parse(workbook.csv(index), config);
-        study.sheet_name = names[index];
+        if (study)
+            study->sheet_name = names[index];
         return study;
     } catch (const std::invalid_argument &e) {
         throw ConfigError("工作表“" + names[index] + "”：" + e.what());
     }
 }
-ImportedData read_named_sheet(const std::filesystem::path &path, const Json &config,
-                              const std::string &sheet_name, StudyParser parse) {
+std::optional<ImportedData> read_named_sheet(const std::filesystem::path &path, const Json &config,
+                                            const std::string &sheet_name,
+                                            const StudyParser &parse) {
     if (data_file_type(path) != "xlsx")
         throw ConfigError("只有 XLSX 工作簿可以指定工作表");
     const XlsxWorkbook workbook(read_file_bytes(path, xlsx_read_limit));
@@ -312,7 +324,8 @@ ImportedData read_named_sheet(const std::filesystem::path &path, const Json &con
     return import_sheet(workbook, static_cast<std::size_t>(sheet - names.begin()), config, parse);
 }
 std::optional<ImportedData> read_selected_data(const std::filesystem::path &path, const Json &config,
-                                              const WorksheetSelector &selector, StudyParser parse) {
+                                              const WorksheetSelector &selector,
+                                              const StudyParser &parse) {
     if (data_file_type(path) != "xlsx")
         return parse(read_file_bytes(path, csv_read_limit), config);
     const XlsxWorkbook workbook(read_file_bytes(path, xlsx_read_limit));
@@ -325,16 +338,19 @@ std::optional<ImportedData> read_selected_data(const std::filesystem::path &path
     return import_sheet(workbook, *index, config, parse);
 }
 } // namespace
-ImportedData read_study_data(const std::filesystem::path &path, const Json &config) {
-    return read_selected_data(path, config, {}, import_csv_study).value();
+ImportedData read_study_data(const std::filesystem::path &path, const Json &config,
+                             std::optional<int> replicates) {
+    return read_study_data(path, config, WorksheetSelector{}, explicit_replicates(replicates)).value();
 }
 ImportedData read_study_data(const std::filesystem::path &path, const Json &config,
-                             const std::string &sheet_name) {
-    return read_named_sheet(path, config, sheet_name, import_csv_study);
+                             const std::string &sheet_name, std::optional<int> replicates) {
+    const auto choose = explicit_replicates(replicates);
+    return read_named_sheet(path, config, sheet_name, study_parser(choose)).value();
 }
 std::optional<ImportedData> read_study_data(const std::filesystem::path &path, const Json &config,
-                                           const WorksheetSelector &selector) {
-    return read_selected_data(path, config, selector, import_csv_study);
+                                           const WorksheetSelector &selector,
+                                           const ReplicateSelector &choose_replicates) {
+    return read_selected_data(path, config, selector, study_parser(choose_replicates));
 }
 Matrix read_data(const std::filesystem::path &path, const Json &config) {
     const auto type = data_file_type(path);
@@ -343,7 +359,7 @@ Matrix read_data(const std::filesystem::path &path, const Json &config) {
 }
 Matrix read_data(const std::filesystem::path &path, const Json &config,
                  const std::string &sheet_name) {
-    return read_named_sheet(path, config, sheet_name, parse_with_known_design).matrix;
+    return read_named_sheet(path, config, sheet_name, parse_with_known_design).value().matrix;
 }
 std::optional<ImportedData> read_data(const std::filesystem::path &path, const Json &config,
                                       const WorksheetSelector &selector) {

@@ -292,18 +292,20 @@ FileDesign detect_long_design(CsvReader &reader, const Columns &columns) {
     }
     return result;
 }
-int numeric_wide_trials(std::size_t rows, const Json &design) {
+std::optional<int> numeric_wide_trials(std::size_t rows, const ReplicateSelector &choose_replicates) {
     if (rows == 4)
         return 2;
     if (rows == 9)
         return 3;
     if (rows != 6)
         throw ConfigError("纯数值宽表须有 4、6 或 9 行，才能组成两人或三人的平衡研究");
-    // Six rows fit either 2 × 3 or 3 × 2. This is the only layout that needs a hint.
-    const auto trials = design.value("replicates", default_config().at("design").at("replicates"));
-    if (!trials.is_number_integer() || (trials != 2 && trials != 3))
-        throw ConfigError("6 行纯数值宽表需要将重复测量次数设为 2 或 3");
-    return trials.get<int>();
+    if (!choose_replicates)
+        throw ConfigError("6 行无操作员名称的纯数值宽表有两种研究设计。请指定 "
+                          "--replicates 3（2 人各测 3 次）或 --replicates 2（3 人各测 2 次）。");
+    const auto trials = choose_replicates();
+    if (trials && *trials != 2 && *trials != 3)
+        throw ConfigError("6 行纯数值宽表的重复测量次数须为 2 或 3");
+    return trials;
 }
 } // namespace
 Matrix parse_csv(const std::string &bytes) {
@@ -320,6 +322,10 @@ Matrix parse_export_csv(const std::string &bytes, const Json &raw) {
     return wide(reader, &design);
 }
 ImportedData import_csv_study(const std::string &bytes, const Json &raw) {
+    return import_csv_study(bytes, raw, {}).value();
+}
+std::optional<ImportedData> import_csv_study(const std::string &bytes, const Json &raw,
+                                             const ReplicateSelector &choose_replicates) {
     CsvReader reader(bytes);
     if (!reader.next())
         throw ConfigError("数据文件为空");
@@ -349,7 +355,10 @@ ImportedData import_csv_study(const std::string &bytes, const Json &raw) {
         matrix = wide(reader, nullptr, &file.operators);
         file.parts = static_cast<int>(matrix.front().size());
         if (file.operators.empty()) {
-            file.trials = numeric_wide_trials(matrix.size(), design);
+            const auto trials = numeric_wide_trials(matrix.size(), choose_replicates);
+            if (!trials)
+                return std::nullopt;
+            file.trials = *trials;
             const auto count = matrix.size() / file.trials;
             file.operators.assign(legacy_names.begin(), legacy_names.begin() + count);
         } else {
@@ -377,6 +386,6 @@ ImportedData import_csv_study(const std::string &bytes, const Json &raw) {
         records.next();
         matrix = long_table(records, config.at("design"), columns);
     }
-    return {std::move(matrix), {}, std::move(config)};
+    return ImportedData{std::move(matrix), {}, std::move(config)};
 }
 } // namespace msa

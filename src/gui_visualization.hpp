@@ -147,8 +147,8 @@ std::string chartFooterSummary() {
 }
 bool loadInsightData(const std::filesystem::path &path) {
     try {
-        auto data = msa::read_study_data(path,
-            native_ui::to_config(state.draft, native_ui::ConfigUse::DataImport), state.chooseWorksheet);
+        auto data = msa::read_study_data(path, native_ui::to_config(state.draft, native_ui::ConfigUse::DataImport),
+                                         state.chooseWorksheet, state.chooseReplicates);
         if (!data)
             return false;
         msa::Result result;

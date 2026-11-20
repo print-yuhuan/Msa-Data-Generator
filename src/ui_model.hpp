@@ -160,10 +160,7 @@ inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
 enum class ConfigUse { Full, Generation, Analysis, DataImport };
 inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
     auto c = msa::default_config();
-    if (use == ConfigUse::DataImport) {
-        // 唯有无标签的六行宽表需要由当前重复测量次数区分两种设计。
-        c["design"]["replicates"] = d.replicates == "2" ? 2 : 3;
-    } else {
+    if (use != ConfigUse::DataImport) {
         c["design"] = {{"operators", numeric(d.operators, "操作员数", true)},
                        {"operator_names", d.operatorNames},
                        {"replicates", numeric(d.replicates, "重复测量次数", true)},

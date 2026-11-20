@@ -139,17 +139,24 @@ Matrix read_csv(const std::filesystem::path &path);
 std::string data_file_type(const std::filesystem::path &path);
 using WorksheetSelector =
     std::function<std::optional<std::size_t>(const std::vector<std::string> &)>;
+// Used only for six unlabeled numeric rows. A canceled choice cancels the import.
+using ReplicateSelector = std::function<std::optional<int>()>;
 struct ImportedData {
     Matrix matrix;
     std::string sheet_name;
     Json config;
 };
 ImportedData import_csv_study(const std::string &text, const Json &config);
-ImportedData read_study_data(const std::filesystem::path &path, const Json &config);
+std::optional<ImportedData> import_csv_study(const std::string &text, const Json &config,
+                                             const ReplicateSelector &choose_replicates);
 ImportedData read_study_data(const std::filesystem::path &path, const Json &config,
-                             const std::string &sheet_name);
+                             std::optional<int> replicates = std::nullopt);
+ImportedData read_study_data(const std::filesystem::path &path, const Json &config,
+                             const std::string &sheet_name,
+                             std::optional<int> replicates = std::nullopt);
 std::optional<ImportedData> read_study_data(const std::filesystem::path &path, const Json &config,
-                                            const WorksheetSelector &selector);
+                                            const WorksheetSelector &selector,
+                                            const ReplicateSelector &choose_replicates = {});
 Matrix read_data(const std::filesystem::path &path, const Json &config);
 Matrix read_data(const std::filesystem::path &path, const Json &config,
                  const std::string &sheet_name);

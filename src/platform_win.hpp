@@ -249,6 +249,41 @@ inline std::optional<std::size_t> chooseWorksheet(const std::vector<std::string>
         throw std::runtime_error("无法显示工作表选择窗口");
     return static_cast<std::size_t>(selection - 1);
 }
+inline INT_PTR CALLBACK sixRowDialogProc(HWND window, UINT message, WPARAM wparam, LPARAM) {
+    if (message == WM_INITDIALOG) {
+        SetFocus(GetDlgItem(window, IDCANCEL));
+        return FALSE;
+    }
+    if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(wparam) == IDCANCEL)) {
+        EndDialog(window, 0);
+        return TRUE;
+    }
+    if (message != WM_COMMAND)
+        return FALSE;
+    switch (LOWORD(wparam)) {
+    case MSA_TWO_OPERATORS:
+    case MSA_THREE_OPERATORS:
+        EnableWindow(GetDlgItem(window, IDOK), TRUE);
+        return TRUE;
+    case IDOK:
+        if (IsDlgButtonChecked(window, MSA_TWO_OPERATORS) == BST_CHECKED)
+            EndDialog(window, 3);
+        else if (IsDlgButtonChecked(window, MSA_THREE_OPERATORS) == BST_CHECKED)
+            EndDialog(window, 2);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+inline std::optional<int> chooseReplicates() {
+    const auto result = DialogBoxW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(MSA_SIX_ROW_DIALOG),
+                                   owner(), sixRowDialogProc);
+    if (result == 0)
+        return std::nullopt;
+    if (result == 2 || result == 3)
+        return static_cast<int>(result);
+    throw std::runtime_error("无法显示研究设计选择窗口");
+}
 inline std::filesystem::path compatibilityConfig() {
     wchar_t p[32768]{};
     GetEnvironmentVariableW(L"USERPROFILE", p, 32768);

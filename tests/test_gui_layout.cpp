@@ -3282,6 +3282,33 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     const auto worksheetReport = msa::read_text(folder / L"工作表报告_5_NA.html");
     require(worksheetReport.find("复测 数据") != worksheetReport.npos, "方法对比报告遗漏工作表来源");
     gui::state.chooseWorksheet = chooser;
+    const auto sixRows = folder / L"六行宽表.csv";
+    msa::atomic_text(sixRows, msa::csv_text({{1, 2, 3, 4, 5}, {2, 3, 4, 5, 6}, {3, 4, 5, 6, 7},
+                                             {4, 5, 6, 7, 8}, {5, 6, 7, 8, 9}, {6, 7, 8, 9, 10}}, 0));
+    const auto originalSelector = gui::state.chooseReplicates;
+    std::optional<int> repeats;
+    int designRequests = 0;
+    gui::state.chooseReplicates = [&] {
+        ++designRequests;
+        return repeats;
+    };
+    gui::visual.importedSelected = false;
+    gui::visual.preview.attempted = true;
+    const auto feedback = gui::state.footerMessage;
+    require(!gui::loadInsightData(sixRows) && designRequests == 1 && gui::visual.imported->matrix == oldMatrix &&
+                gui::visual.importedSheet == "复测 数据" && !gui::visual.importedSelected &&
+                gui::visual.selected == oldChart && gui::visual.preview.attempted && gui::state.footerMessage == feedback,
+            "取消六行宽表选项改变了先前的数据源、测量值或图表状态");
+    for (int choice : {3, 2}) {
+        repeats = choice;
+        require(gui::loadInsightData(sixRows) && gui::visual.imported->config["design"]["replicates"] == choice &&
+                    gui::visual.imported->config["design"]["operators"] == 6 / choice &&
+                    gui::state.draft.operators == "3" && gui::state.draft.replicates == "3",
+                "六行宽表没有使用本次选择或修改了选项页");
+    }
+    require(designRequests == 3 && gui::loadInsightData(csv) && designRequests == 3,
+            "六行纯数值宽表应每次询问，具名研究应直接导入");
+    gui::state.chooseReplicates = originalSelector;
     std::cout << "图表草稿/应用/撤销、切图隔离、缓存、错误恢复、选择与布局及真实导出通过："
               << folder.u8string() << '\n';
     gui::visual = gui::VisualState{};

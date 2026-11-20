@@ -28,7 +28,7 @@ const Option options[]{
     {"--operator-b", "/design/operator_names/1", ValueType::OperatorName, "第二位操作员名称，留空使用 B"},
     {"--operator-c", "/design/operator_names/2", ValueType::OperatorName, "第三位操作员名称，3 人时使用，留空使用 C"},
     {"--replicates", "/design/replicates", ValueType::Integer,
-     "每位操作员对每件部件的重复测量次数：2 或 3，默认 3；别名 --trials"},
+     "重复测量次数：2 或 3，生成默认 3。导入六行纯数值宽表时必填。别名 --trials"},
     {"--parts", "/design/parts", ValueType::Integer, "部件数量：5～10，默认 10"},
     {"--method", "/analysis/method", ValueType::Text,
      "crossed_xbarr 均值极差法（默认）/ crossed_anova 方差分析法"},
@@ -210,8 +210,8 @@ void help() {
 --input 分析文件中的平衡交叉研究，自动读取操作员、部件数和重复测量次数。
 带标记的宽表按操作员分组排列。长表有 StdOrder 时按标准序号确定人员顺序，
 省略时按 Operator 首次出现的顺序列出。报告和图表使用文件中的名称。
-纯数值宽表按位置使用 A/B/C。只有 6 行时，--replicates 2 指 3 人各测 2 次，
---replicates 3 指 2 人各测 3 次，省略时使用配置的重复次数（内置默认 3）。
+纯数值宽表按位置使用 A/B/C。恰有 6 行且没有操作员名称时，须在本次命令中指定
+--replicates 3（2 人各测 3 次）或 --replicates 2（3 人各测 2 次）。省略时提示后退出。
 导入结果独立于生成用的默认操作员。分析成功时，标准输出的 design 显示本次识别结果。
 
 数据文件与运行顺序：
@@ -600,7 +600,11 @@ int run(const std::vector<std::string> &args) {
             throw msa::ConfigError("配置必须是 JSON 对象");
         // Pointer assignment replaces complete constraints and preserves explicit nulls.
         const msa::Json::json_pointer names("/design/operator_names");
+        const msa::Json::json_pointer replicates("/design/replicates");
+        std::optional<int> explicit_replicates;
         for (const auto &[path, value] : overrides) {
+            if (path == replicates)
+                explicit_replicates = value.get<int>();
             if (path.parent_pointer() == names && !c.contains(names))
                 c[names] = msa::default_config().at(names);
             c[path] = value;
@@ -623,8 +627,8 @@ int run(const std::vector<std::string> &args) {
                 throw std::runtime_error("报告父路径不是目录：" + parent.u8string());
         }
         if (!input.empty()) {
-            auto imported = sheet ? msa::read_study_data(input, c, *sheet)
-                                  : msa::read_study_data(input, c);
+            auto imported = sheet ? msa::read_study_data(input, c, *sheet, explicit_replicates)
+                                  : msa::read_study_data(input, c, explicit_replicates);
             msa::Result result;
             result.config = std::move(imported.config);
             result.matrix = std::move(imported.matrix);

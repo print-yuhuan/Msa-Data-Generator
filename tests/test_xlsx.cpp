@@ -154,6 +154,50 @@ void test_sheet_selection(const std::filesystem::path &fixtures,
                                   [](const auto &) { return std::nullopt; }),
             "cancelled selection should not produce a study");
     expect_config_error([&] { msa::read_study_data(path, preferences, "损坏页"); }, "损坏页");
+
+    std::string numeric =
+        R"(<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>)";
+    msa::Matrix readings;
+    for (int row = 0; row < 6; ++row) {
+        numeric += "<row>";
+        readings.emplace_back();
+        for (int col = 0; col < 5; ++col) {
+            const int value = 10 * row + col;
+            readings.back().push_back(value);
+            numeric += "<c><v>" + std::to_string(value) + "</v></c>";
+        }
+        numeric += "</row>";
+    }
+    const auto six = output / "worksheet-six-rows.xlsx";
+    msa::atomic_text(six, selection_workbook("worksheet", table_xml(two_people),
+                                             numeric + "</sheetData></worksheet>"));
+    int design_prompts = 0;
+    std::optional<int> answer;
+    const auto choose_design = [&] {
+        ++design_prompts;
+        return answer;
+    };
+    const msa::WorksheetSelector cancel_sheet = [](const auto &) { return std::nullopt; };
+    const msa::WorksheetSelector first_sheet = [](const auto &) { return 0; };
+    const msa::WorksheetSelector second_sheet = [](const auto &) { return 1; };
+    require(!msa::read_study_data(six, preferences, cancel_sheet, choose_design),
+            "cancelling worksheet selection should abandon the import");
+    const auto clear = msa::read_study_data(six, preferences, first_sheet, choose_design);
+    require(clear && clear->matrix.size() == 4 && design_prompts == 0,
+            "an unselected six-row worksheet must not trigger a design prompt");
+    require(!msa::read_study_data(six, preferences, second_sheet, choose_design) && design_prompts == 1,
+            "cancelling the design must abandon the selected worksheet");
+    expect_config_error([&] { msa::read_study_data(six, preferences, "数据页"); }, "--replicates");
+    answer = 3;
+    const auto picked = msa::read_study_data(six, preferences, second_sheet, choose_design);
+    const auto explicit_two = msa::read_study_data(six, preferences, "数据页", 2);
+    require(picked && picked->sheet_name == "数据页" && picked->matrix == readings &&
+                picked->config.at("design").at("operators") == 2 &&
+                picked->config.at("design").at("replicates") == 3 && design_prompts == 2 &&
+                explicit_two.matrix == readings &&
+                explicit_two.config.at("design").at("operators") == 3 &&
+                explicit_two.config.at("design").at("replicates") == 2 && preferences == before,
+            "each import must use its own six-row worksheet choice without changing preferences");
 }
 } // namespace
 int main(int argc, char **argv) {

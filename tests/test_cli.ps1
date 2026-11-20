@@ -354,6 +354,27 @@ $varianceReport=Join-Path $runRoot 'variance-overflow.json'
 [IO.File]::WriteAllText($varianceReport,'keep')
 $varianceOverflow=Run-Cli @('--no-config','--input',$varianceInput,'--operators','2','--replicates','2','--parts','5','--report',$varianceReport,'--overwrite')
 Check ($varianceOverflow.exit -eq 1 -and $varianceOverflow.stderr.Contains('方差') -and $varianceOverflow.stdout.Length -eq 0 -and [IO.File]::ReadAllText($varianceReport) -eq 'keep') 'unrepresentable variance reports error and preserves existing analysis report'
+$sixRows = Join-Path $runRoot '六行纯数值.csv'
+[IO.File]::WriteAllLines($sixRows, [string[]](1..6 | ForEach-Object { "$_,2,3,4,5" }))
+$sixReport = Join-Path $runRoot '六行分析.json'
+$sixComparison = Join-Path $runRoot '六行对比.html'
+[IO.File]::WriteAllText($sixReport,'keep')
+$sixArgs = @('--input',$sixRows,'--config',$config)
+$needsChoice = Run-Cli ($sixArgs + @('--report',$sixReport,'--comparison-report',$sixComparison,'--overwrite')) $true
+Check ($needsChoice.exit -ne 0 -and $needsChoice.stdout.Length -eq 0 -and
+       $needsChoice.stderr.Contains('--replicates 2') -and $needsChoice.stderr.Contains('--replicates 3') -and
+       [IO.File]::ReadAllText($sixReport) -ceq 'keep' -and -not (Test-Path -LiteralPath $sixComparison)) 'ambiguous input requires a command-line choice even with saved settings and preserves reports'
+foreach ($repeats in 2,3) {
+    $six = Run-Cli ($sixArgs + @("--replicates=$repeats")) $true
+    Check ($six.exit -eq 0) "six-row input accepts explicit repeat count $repeats"
+    $design = ($six.stdout | ConvertFrom-Json).design
+    Check ($design.replicates -eq $repeats -and $design.operators -eq (6/$repeats)) "six-row input groups readings by explicit repeat count $repeats"
+}
+$aliased = Run-Cli ($sixArgs + @('--replicates','3','--trials','2')) $true
+Check ($aliased.exit -eq 0 -and ($aliased.stdout | ConvertFrom-Json).design.operators -eq 3) 'the last explicit repeat count also works through the trials alias'
+$againNeedsChoice = Run-Cli $sixArgs $true
+Check ($againNeedsChoice.exit -ne 0 -and $againNeedsChoice.stderr.Contains('--replicates') -and
+       (Get-FileHash -LiteralPath $config).Hash -eq $before) 'choosing a design only affects this import'
 $anovaCsv=Join-Path $runRoot 'anova.csv';$anovaReport=Join-Path $runRoot 'anova.json'
 $anova=Run-Cli @('--config',$config,'--method','crossed_anova','--interaction','auto','--interaction-alpha','0.05','--seed','123','--csv-format','minitab','--run-order','all','--run-seed','321','--store-standard-order','true','--output',$anovaCsv,'--report',$anovaReport)
 Check ($anova.exit-eq0) 'ANOVA CLI overrides old GUI configuration and generates data'

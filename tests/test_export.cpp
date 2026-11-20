@@ -231,23 +231,6 @@ void imported_operator_checks(const std::filesystem::path &out) {
             }
         }
     }
-    const auto plain = out / "legacy-numeric.csv";
-    for (const int rows : {4, 6, 9}) {
-        atomic_text(plain, csv_text(Matrix(rows, std::vector<double>(5, 1.5)), 2));
-        for (const int repeats : {2, 3}) {
-            auto options = preferences;
-            options["design"]["replicates"] = repeats;
-            const auto data = read_study_data(plain, options);
-            const int expected = rows == 4 ? 2 : rows == 9 ? 3 : rows / repeats;
-            check(data.config.at("design").at("operators") == expected &&
-                      data.config.at("design").at("replicates") == rows / expected &&
-                      data.config.at("design").at("parts") == 5 &&
-                      operator_names(data.config.at("design")) ==
-                          std::array<std::string, 3>{"A", "B", "C"},
-                  "numeric legacy table did not recover its design with fallback names");
-        }
-    }
-
     const auto invalid_wide = [&](std::vector<std::string> labels) {
         std::string csv = ",1,2,3,4,5\r\n";
         for (const auto &label : labels)
@@ -270,6 +253,63 @@ void imported_operator_checks(const std::filesystem::path &out) {
     rejects([&] { import_csv_study(duplicate, preferences); });
     const auto missing = csv.substr(0, csv.rfind("\r\n", csv.size() - 3) + 2);
     rejects([&] { import_csv_study(missing, preferences); });
+}
+void six_row_import_checks(const std::filesystem::path &out) {
+    auto preferences = config(3, 2, 10);
+    preferences["design"]["operator_names"] = {"默认甲", "默认乙", "默认丙"};
+    const auto saved = preferences;
+    const auto sample = study(2, 3, 5);
+    const auto plain = out / "six-numeric.csv";
+    atomic_text(plain, csv_text(sample.matrix, 4));
+
+    int prompts = 0;
+    std::optional<int> answer;
+    const auto choose = [&] {
+        ++prompts;
+        return answer;
+    };
+    check(!read_study_data(plain, preferences, WorksheetSelector{}, choose) && prompts == 1,
+          "cancelled numeric CSV import must return no study");
+    for (int repeats : {3, 2}) {
+        answer = repeats;
+        const auto chosen = read_study_data(plain, preferences, WorksheetSelector{}, choose);
+        const auto specified = read_study_data(plain, preferences, repeats);
+        const Json names = repeats == 3 ? Json({"A", "B", ""}) : Json({"A", "B", "C"});
+        const Json design = {{"operators", 6 / repeats}, {"replicates", repeats},
+                             {"parts", 5}, {"operator_names", names}};
+        check(chosen && chosen->matrix == sample.matrix && chosen->config.at("design") == design &&
+                  specified.matrix == chosen->matrix && specified.config == chosen->config,
+              "six-row numeric CSV must use the explicit choice and preserve row order");
+    }
+    check(prompts == 3 && preferences == saved,
+          "a choice leaked into another import or the saved design");
+    try {
+        read_study_data(plain, preferences);
+        throw std::runtime_error("six-row numeric CSV accepted without an explicit choice");
+    } catch (const ConfigError &e) {
+        const std::string message = e.what();
+        check(message.find("--replicates 2") != message.npos &&
+                  message.find("--replicates 3") != message.npos,
+              "six-row CLI diagnostic should explain both choices");
+    }
+
+    const ReplicateSelector unexpected = []() -> std::optional<int> {
+        throw std::runtime_error("unexpected design prompt for an unambiguous table");
+    };
+    for (const int operators : {2, 3}) {
+        const auto unambiguous = study(operators, operators, 5);
+        const auto data = import_csv_study(csv_text(unambiguous.matrix, 4), preferences, unexpected);
+        check(data && data->config.at("design").at("operators") == operators &&
+                  data->config.at("design").at("replicates") == operators &&
+                  data->matrix == unambiguous.matrix, "incorrect automatic four- or nine-row import");
+    }
+    for (const char *format : {"default", "minitab"}) {
+        auto settings = sample.config.at("output");
+        settings["format"] = format;
+        const auto data = import_csv_study(export_csv_text(sample, settings), preferences, unexpected);
+        check(data && data->matrix == sample.matrix && data->config.at("design").at("operators") == 2,
+              "six-row labeled study must determine its own design");
+    }
 }
 void inferred_design_edge_checks(const std::filesystem::path &out) {
     auto settings = config(2, 2, 5);
@@ -310,6 +350,7 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     std::filesystem::create_directories(out);
     operator_name_checks(out);
     imported_operator_checks(out);
+    six_row_import_checks(out);
     inferred_design_edge_checks(out);
     auto reference = default_reference(fixtures / std::filesystem::u8path("默认.csv"));
     auto refCfg = config(3, 3, 10);

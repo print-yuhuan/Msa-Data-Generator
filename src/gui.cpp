@@ -109,6 +109,7 @@ struct State {
     std::function<decltype(platform::chooseExportPath)> chooseExportPath = platform::chooseExportPath;
     std::function<decltype(platform::chooseImportData)> chooseImportData = platform::chooseImportData;
     std::function<decltype(platform::chooseWorksheet)> chooseWorksheet = platform::chooseWorksheet;
+    msa::ReplicateSelector chooseReplicates = platform::chooseReplicates;
     std::function<decltype(platform::chooseDirectory)> chooseDirectory = platform::chooseDirectory;
     float logOffset = 0, logPageOffset = 0, helpOffset = 0, aboutOffset = 0;
     unsigned logSequence = 0;
@@ -4202,8 +4203,9 @@ void helpCli(Ui &v, float cw) {
     section(v, "help.cli.analyze.section", "分析已有测量数据", cw, [&](float c) {
         helpText(v, "help.cli.analyze",
                  "用 --input 读取 CSV 或 XLSX。带标签的宽表和长表自动识别操作员名称、人数、"
-                 "部件数和重复次数。纯数值宽表按位置使用 A/B/C；若有六行，用 --replicates 2 或 3 "
-                 "指定每位操作员的重复次数。分析 XLSX 时可加 --sheet \"复测 数据\" 指定工作表，"
+                 "部件数和重复次数。纯数值宽表按位置使用 A/B/C。六行纯数值宽表须显式指定设计："
+                 "--replicates 3 表示 2 人各测 3 次，--replicates 2 表示 3 人各测 2 次。"
+                 "省略时命令行会提示补充参数。分析 XLSX 时可加 --sheet \"复测 数据\" 指定工作表，"
                  "省略时读取第一张数据工作表。用 --report 保存分析报告。下例分析上一步的 Minitab 长表。",
                  c);
         helpCommand(v, "help.cli.analyze.example",
@@ -4238,14 +4240,15 @@ void helpCharts(Ui &v, float cw) {
                  "在「图表」点击「导入数据」，选择 CSV 文件或 XLSX 工作簿。带标签的宽表按首列识别"
                  "操作员，长表按 Operator 列识别。程序从所选数据识别操作员名称、人数、部件数和"
                  "重复次数。选项页保留原有的默认研究设计。"
-                 "CSV 和只有一张数据工作表的 XLSX 会直接导入。若有多张，弹窗按工作簿顺序列出数据工作表，"
+                 "XLSX 只有一张数据工作表时直接读取该表。若有多张，弹窗按工作簿顺序列出数据工作表，"
                  "也可选择隐藏的数据工作表。选中一张后点击「导入」或按回车。取消会保留原数据和图表。"
                  "「选项 → 文件 → 目录与文件名」可设置导入目录和用于预填的「测量数据导入名称」。",
                  c);
         helpItem(v, "help.charts.source.order", "人员顺序与无标签宽表",
                  "宽表按操作员分组顺序显示。长表有 StdOrder 时按标准序号确定人员顺序，省略时"
-                 "按名称首次出现的顺序排列。纯数值宽表按位置使用 A/B/C。六行纯数值既可能是两人各测三次，"
-                 "也可能是三人各测两次，程序按「研究设计」的重复测量次数区分，默认三次。",
+                 "按名称首次出现的顺序排列。纯数值宽表按位置使用 A/B/C。遇到六行纯数值宽表，"
+                 "弹窗会请你选择「2 人各测 3 次」或「3 人各测 2 次」，然后点击「导入」。"
+                 "选择仅用于本次导入。取消或关闭弹窗会保留当前数据和图表。",
                  c);
         helpText(v, "help.charts.source.switch",
                  "导入成功后可在「当前结果」和「已导入数据」之间切换。修改分析选项后，点击"
