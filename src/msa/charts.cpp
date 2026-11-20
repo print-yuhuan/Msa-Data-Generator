@@ -7,8 +7,8 @@
 
 namespace msa::charts {
 namespace {
-constexpr const char *ink = "#243247", *muted = "#69778A", *grid = "#E8EDF3", *green = "#16866B",
-                     *red = "#BC4049", *amber = "#B87918";
+constexpr const char *ink = "#263543", *muted = "#576675", *grid = "#E4E9EE", *axis = "#536271",
+                     *green = "#18785C", *red = "#B13E48", *amber = "#9A6016";
 
 std::string number(double value, int precision = 6) {
     if (!std::isfinite(value))
@@ -124,30 +124,60 @@ void text(Scene &s, float x, float y, float w, float h, const std::string &value
     p.align = align;
     s.items.push_back(std::move(p));
 }
+MarkerShape series_shape(const Editor &e, int series) {
+    constexpr MarkerShape shapes[]{MarkerShape::Square, MarkerShape::Circle, MarkerShape::Triangle};
+    return e.marker_shape == MarkerShape::BySeries ? shapes[series % 3] : e.marker_shape;
+}
+void marker(Scene &s, MarkerShape shape, float x, float y, float r, const std::string &color) {
+    if (shape == MarkerShape::Square) {
+        rect(s, x - r, y - r, 2 * r, 2 * r, color);
+    } else if (shape == MarkerShape::Diamond) {
+        const float edge = std::max(1.f, r * .45f);
+        line(s, x, y - r, x + r, y, color, edge);
+        line(s, x + r, y, x, y + r, color, edge);
+        line(s, x, y + r, x - r, y, color, edge);
+        line(s, x - r, y, x, y - r, color, edge);
+    } else if (shape == MarkerShape::Triangle) {
+        const float edge = std::max(1.f, r * .55f);
+        line(s, x, y - r, x + r, y + r * .8f, color, edge);
+        line(s, x + r, y + r * .8f, x - r, y + r * .8f, color, edge);
+        line(s, x - r, y + r * .8f, x, y - r, color, edge);
+    } else {
+        Primitive p;
+        p.type = Primitive::Type::Circle;
+        p.x = x;
+        p.y = y;
+        p.x2 = r;
+        p.color = color;
+        s.items.push_back(std::move(p));
+    }
+}
 struct Frame {
     Scene &scene;
-    float margin, legend_top, axis_label_top, plot_top, plot_bottom, x_label_top, note_top;
+    float margin, plot_left, plot_right, legend_top, axis_label_top, plot_top, plot_bottom,
+        x_label_top, note_top;
     bool compact;
     Frame(Scene &s, const Result &result, const Editor &editor, Kind kind, int operators,
           int parts, int repeats)
         : scene(s), margin(s.width < 600 ? 14.f : 24.f), compact(s.height < 360 || s.width < 500) {
         const bool anova = result.config.at("analysis").at("method") == "crossed_anova";
-        const float titleSize = compact ? 17.f : 21.f;
-        text(s, margin, 10, s.width - 2 * margin, titleSize + 8, editor.title, titleSize);
+        plot_left = compact ? 58.f : 76.f;
+        plot_right = s.width - margin;
+        const float titleSize = compact ? 16.f : 21.f;
+        const float inner = s.width - 2 * margin;
+        text(s, margin, compact ? 4.f : 10.f, inner, titleSize + 8,
+             operator_label(editor.title, inner, titleSize), titleSize, ink,
+             Primitive::Align::Center);
         const std::string design = std::to_string(operators) + " 名操作员 × " +
                                    std::to_string(parts) + " 部件 × " +
                                    std::to_string(repeats) + " 次重复 · N = " +
                                    std::to_string(operators * parts * repeats);
         const std::string method = anova ? "ANOVA（方差分析法）" : "Xbar-R（均值极差法）";
-        float y = compact ? 36.f : 43.f;
-        if (s.width >= 720) {
-            text(s, margin, y, s.width - 2 * margin, 18, method + "  ·  " + design, 12, muted);
-            y += 20;
-        } else {
-            text(s, margin, y, s.width - 2 * margin, 16, method, 11, muted);
-            text(s, margin, y + 17, s.width - 2 * margin, 16, design, 10.5f, muted);
-            y += 34;
-        }
+        float y = compact ? 27.f : 41.f;
+        const std::string methodLabel = s.width < 600 ? (anova ? "ANOVA" : "Xbar-R") : method;
+        text(s, margin, y, inner, 17, methodLabel + "  ·  " + design, compact ? 10.f : 12.f, muted,
+             Primitive::Align::Center);
+        y += compact ? 17 : 21;
         if (anova) {
             const auto &model = result.metrics.at("anova");
             if (!model.at("interaction_included").is_boolean())
@@ -164,20 +194,22 @@ struct Frame {
                     : std::string("最终模型：") +
                           (included ? "保留交互项" : "交互项合并到误差") +
                           " · 完整模型交互 P = " + p;
-            text(s, margin, y, s.width - 2 * margin, 17, modelNote, compact ? 10.f : 11.f,
-                 muted);
-            y += 18;
+            text(s, margin, y, s.width - 2 * margin, 17, modelNote, compact ? 10.f : 11.f, muted,
+                 Primitive::Align::Center);
+            y += compact ? 15 : 18;
         }
-        legend_top = y + 2;
-        axis_label_top = legend_top + (editor.show_legend ? 22.f : 3.f);
-        plot_top = axis_label_top + 20;
+        const float legendHeight = editor.show_legend ? (compact ? 19.f : 23.f) : 0.f;
+        const bool legendBelow = editor.legend_position == LegendPosition::Bottom;
+        note_top = s.height - (compact ? 17.f : 24.f);
+        legend_top = legendBelow ? note_top - legendHeight - 3 : y;
+        x_label_top = note_top - (legendBelow ? legendHeight : 0) - (compact ? 22.f : 27.f);
+        plot_bottom = x_label_top - (compact ? 19.f : 22.f);
+        axis_label_top = y + (legendBelow ? 0 : legendHeight);
+        plot_top = axis_label_top + (compact ? 18.f : 22.f);
         if (kind == Kind::RangeChart || kind == Kind::MeanChart)
-            plot_top += 34;
-        plot_bottom = s.height - (compact ? 66.f : 77.f);
+            plot_top += (editor.show_limits ? 17.f : 0.f) + 19.f;
         if (plot_bottom - plot_top < 28)
             throw ConfigError("当前图表高度不足以显示标题、图例与坐标，请增大图表高度");
-        x_label_top = s.height - (compact ? 42.f : 49.f);
-        note_top = s.height - 22;
     }
 };
 struct Data {
@@ -234,13 +266,13 @@ struct Plot {
     Frame &frame;
     Scene &scene;
     const Editor &editor;
-    float left = 72, top, width, height;
+    float left, top, width, height;
     double xlow, xhigh, low, high, origin = 0, step = 0;
     Plot(Frame &f, const Editor &e, double minx, double maxx, double miny, double maxy,
          bool zero = false, bool integer = false, float panelLeft = -1, float panelWidth = -1,
          bool showY = true)
-        : frame(f), scene(f.scene), editor(e), top(f.plot_top),
-          width(f.scene.width - 96), height(f.plot_bottom - f.plot_top), xlow(minx),
+        : frame(f), scene(f.scene), editor(e), left(f.plot_left), top(f.plot_top),
+          width(f.plot_right - f.plot_left), height(f.plot_bottom - f.plot_top), xlow(minx),
           xhigh(maxx), low(miny), high(maxy) {
         if (panelLeft >= 0)
             left = panelLeft;
@@ -254,7 +286,7 @@ struct Plot {
             low -= span;
             high += span;
         } else {
-            const double margin = (high - low) * .08;
+            const double margin = (high - low) * .06;
             low -= margin;
             high += margin;
         }
@@ -269,51 +301,73 @@ struct Plot {
         if (!(xhigh > xlow) || !std::isfinite(xhigh - xlow))
             throw ConfigError("横轴范围无效");
         // 大中心值与微小变异同时出现时显式标注偏移，避免刻度舍入成相同文本。
-        origin = std::abs(low) > (high - low) * 10000 ? low : 0;
+        // 取接近数据的整刻度作偏移，而非带有留白和浮点尾数的坐标下界。
+        if (std::abs(low) > (high - low) * 10000) {
+            const double unit = nice_step(high - low, 1);
+            const double rounded = std::nearbyint(low / unit) * unit;
+            origin = std::isfinite(rounded) ? rounded : low;
+        }
         // 小尺寸分面仍要留下足够的刻度文字间距，不能沿用正常画布的刻度数量。
-        step = nice_step(high - low, std::clamp(int(height / 42), 1, 6));
+        const int intervals = e.y_tick_intervals
+                                  ? std::min(e.y_tick_intervals, std::max(1, int(height / 21)))
+                                  : std::clamp(int(height / 38), 2, 7);
+        step = nice_step(high - low, intervals);
         if (integer)
             step = std::max(1., std::ceil(step));
         if (!(step > 0) || !std::isfinite(step))
             throw ConfigError("图表刻度间距超出有效范围");
-        if (!e.y_min)
-            low = origin + std::floor((low - origin) / step) * step;
-        if (!e.y_max)
-            high = origin + std::ceil((high - origin) / step) * step;
+        // 仅在离外侧整刻度较近时延伸边界，避免上下各增加一整格空白。
+        const double floorTick = origin + std::floor((low - origin) / step) * step;
+        const double ceilTick = origin + std::ceil((high - origin) / step) * step;
+        if (!e.y_min && (zero || low - floorTick <= step * .35))
+            low = floorTick;
+        if (!e.y_max && (zero || ceilTick - high <= step * .35))
+            high = ceilTick;
         if (!(high > low) || !std::isfinite(high - low))
             throw ConfigError("图表自动刻度无法表示当前数值范围");
         const double first = std::ceil((low - origin) / step) * step;
         for (int i = 0; i < 20; ++i) {
-            const double value = origin + first + i * step;
+            const double offset = first + i * step;
+            const double value = origin + offset;
             if (value > high + step * 1e-8)
                 break;
             const float yy = y(value);
             if (e.show_grid)
                 line(scene, left, yy, left + width, yy, grid);
             if (showY) {
-                line(scene, left - 4, yy, left, yy, muted);
-                const double shown = std::abs(value - origin) < step * 1e-9 ? 0 : value - origin;
-                text(scene, 3, yy - 8, left - 12, 18, number(shown), 11, muted,
+                line(scene, left - 4, yy, left, yy, axis);
+                const double shown = std::abs(offset) < step * 1e-9 ? 0 : offset;
+                text(scene, 2, yy - 8, left - 10, 17, number(shown), 11, ink,
                      Primitive::Align::Right);
             }
+            if (!integer && showY && y(value) - y(value + step) >= 35 && value + step / 2 <= high) {
+                const float minor = y(value + step / 2);
+                line(scene, left - 2, minor, left, minor, axis);
+            }
         }
-        line(scene, left, top, left, top + height, showY ? muted : grid);
-        line(scene, left, top + height, left + width, top + height, muted);
+        line(scene, left, top, left + width, top, "#A8B4BF");
+        line(scene, left + width, top, left + width, top + height, "#A8B4BF");
+        line(scene, left, top, left, top + height, showY ? axis : grid);
+        line(scene, left, top + height, left + width, top + height, axis);
         if (showY) {
-            text(scene, 72, f.axis_label_top, scene.width - 96, 18,
-                 e.y_label + (origin ? "（值 = 刻度 + " + exact_number(origin) + "）" : ""), 11,
-                 muted);
-            text(scene, 72, f.x_label_top, scene.width - 96, 20, e.x_label, 12, muted,
-                 Primitive::Align::Center);
+            const float available = f.plot_right - f.plot_left;
+            const auto ylabel =
+                e.y_label + (origin ? "（值 = 刻度 + " + exact_number(origin) + "）" : "");
+            text(scene, f.plot_left, f.axis_label_top, available, 18,
+                 operator_label(ylabel, available, 12), 12, ink);
+            text(scene, f.plot_left, f.x_label_top, available, 19,
+                 operator_label(e.x_label, available, 12), 12, ink, Primitive::Align::Center);
         }
     }
     float x(double value) const { return left + float((value - xlow) / (xhigh - xlow)) * width; }
     float y(double value) const { return top + float((high - value) / (high - low)) * height; }
     void tick(double value, const std::string &label, float box = 56) {
         const float xx = x(value);
-        line(scene, xx, top + height, xx, top + height + 4, muted);
-        text(scene, xx - box / 2, top + height + 5, box, 18, label, 11, muted,
-             Primitive::Align::Center);
+        line(scene, xx, top + height, xx, top + height + 4, axis);
+        if (std::all_of(label.begin(), label.end(), [](unsigned char c) { return c < 128; }))
+            box = std::min(box, 8.f * label.size() + 4.f);
+        const float labelX = std::clamp(xx - box / 2, 0.f, scene.width - box);
+        text(scene, labelX, top + height + 4, box, 16, label, 11, ink, Primitive::Align::Center);
     }
     // 裁剪数据线段而不是夹紧端点，避免用户缩窄坐标轴后伪造边界平台。
     void segment(double a, double b, double c, double d, const std::string &color,
@@ -337,26 +391,11 @@ struct Plot {
         line(scene, x(x1 + begin * dx), y(y1 + begin * dy), x(x1 + end * dx), y(y1 + end * dy),
              color, stroke < 0 ? editor.line_width : stroke, dashed);
     }
-    void point(double xx, double yy, const std::string &color, float radius = -1) {
+    void point(double xx, double yy, const std::string &color, float radius = -1,
+               MarkerShape shape = MarkerShape::Circle) {
         if (xx < xlow || xx > xhigh || yy < low || yy > high)
             return;
-        Primitive p;
-        p.type = Primitive::Type::Circle;
-        p.x = x(xx);
-        p.y = y(yy);
-        p.x2 = radius < 0 ? editor.point_radius : radius;
-        // 边界上的零值仍保留标记中心，避免控制图中的零极差点消失。
-        p.color = color;
-        scene.items.push_back(std::move(p));
-    }
-    void diamond(double xx, double yy, const std::string &color, float radius = 4) {
-        if (xx < xlow || xx > xhigh || yy < low || yy > high)
-            return;
-        const float px = x(xx), py = y(yy);
-        line(scene, px, py - radius, px + radius, py, color, 1.5f);
-        line(scene, px + radius, py, px, py + radius, color, 1.5f);
-        line(scene, px, py + radius, px - radius, py, color, 1.5f);
-        line(scene, px - radius, py, px, py - radius, color, 1.5f);
+        marker(scene, shape, x(xx), y(yy), radius < 0 ? editor.point_radius : radius, color);
     }
     void bar(double a, double b, double c, double d, const std::string &color) {
         const double ax = std::max(xlow, std::min(a, c)), bx = std::min(xhigh, std::max(a, c)),
@@ -365,60 +404,82 @@ struct Plot {
             rect(scene, x(ax), y(by), x(bx) - x(ax), y(ay) - y(by), color);
     }
 };
-void legend(Frame &frame, const Editor &e,
-            const std::vector<std::pair<std::string, std::string>> &items,
-            bool withOperators = false) {
+enum class Key { Bar, Line, Dash, Marker, LineMarker };
+struct LegendItem {
+    std::string label, color;
+    Key key = Key::Bar;
+    MarkerShape shape = MarkerShape::Circle;
+};
+void legend(Frame &frame, const Editor &e, const std::vector<LegendItem> &items) {
     if (!e.show_legend || items.empty())
         return;
     auto &s = frame.scene;
-    const float cell = (s.width - 2 * frame.margin) / float(items.size());
+    const float size = frame.compact ? 10.f : 12.f;
+    const float maxCell = (s.width - 2 * frame.margin) / float(items.size());
+    std::vector<float> cells;
+    float total = 0;
+    for (const auto &item : items) {
+        float length = 0;
+        for (unsigned char c : item.label)
+            if ((c & 0xc0) != 0x80)
+                length += (c < 128 ? .7f : 1.f) * size;
+        cells.push_back(std::min(maxCell, length + 40));
+        total += cells.back();
+    }
+    float x = (s.width - total) / 2;
     for (std::size_t i = 0; i < items.size(); ++i) {
-        const float x = frame.margin + i * cell;
-        line(s, x, frame.legend_top + 8, x + 13, frame.legend_top + 8, items[i].second, 2);
-        const float size = frame.compact ? 10.f : 11.f;
-        const auto &label = items[i].first;
-        text(s, x + 18, frame.legend_top, cell - 20, 18,
-             withOperators ? operator_label(label, cell - 20, size) : label, size, muted);
+        const auto &item = items[i];
+        const float y = frame.legend_top + 8;
+        if (item.key == Key::Bar)
+            rect(s, x + 4, y - 4, 12, 8, item.color);
+        if (item.key == Key::Line || item.key == Key::Dash || item.key == Key::LineMarker)
+            line(s, x + 1, y, x + 19, y, item.color,
+                 item.key == Key::LineMarker ? e.line_width : 1.5f, item.key == Key::Dash);
+        if (item.key == Key::Marker || item.key == Key::LineMarker)
+            marker(s, item.shape, x + 10, y, std::min(e.point_radius + .5f, 6.f), item.color);
+        text(s, x + 24, frame.legend_top, cells[i] - 27, 17,
+             operator_label(item.label, cells[i] - 27, size), size, ink);
+        x += cells[i];
     }
 }
+std::array<int, 3> rgb(const std::string &color) {
+    return {std::stoi(color.substr(1, 2), nullptr, 16), std::stoi(color.substr(3, 2), nullptr, 16),
+            std::stoi(color.substr(5, 2), nullptr, 16)};
+}
+std::string light_fill(const std::string &color) {
+    constexpr char hex[] = "0123456789ABCDEF";
+    std::string tint = "#";
+    for (const int channel : rgb(color)) {
+        const int mixed = (channel + 255) / 2;
+        tint += hex[mixed / 16];
+        tint += hex[mixed % 16];
+    }
+    return tint;
+}
 std::vector<std::string> colors(const Editor &e) {
-    const auto rgb = [](const std::string &color) {
-        return std::array<int, 3>{std::stoi(color.substr(1, 2), nullptr, 16),
-                                  std::stoi(color.substr(3, 2), nullptr, 16),
-                                  std::stoi(color.substr(5, 2), nullptr, 16)};
-    };
-    const std::array<std::string, 5> candidates{"#16866B", "#C48428", "#7B51C2", "#CB4A5B",
-                                                "#3B65E8"};
     std::vector<std::string> palette{e.primary_color};
-    // 后续序列从候选色中选与已有颜色距离最大的颜色，避免自选主色使操作员同色。
-    while (palette.size() < 4) {
-        double best = -1;
-        std::string choice;
-        for (const auto &candidate : candidates) {
-            const auto a = rgb(candidate);
-            double nearest = std::numeric_limits<double>::max();
-            for (const auto &used : palette) {
-                const auto b = rgb(used);
-                const double dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
-                nearest = std::min(nearest, dr * dr + dg * dg + db * db);
-            }
-            if (nearest > best) {
-                best = nearest;
-                choice = candidate;
-            }
-        }
-        palette.push_back(choice);
+    const auto primary = rgb(e.primary_color);
+    // 使用固定的色序，在自选主色接近候选色时跳过该色。
+    for (const char *candidate :
+         {"#C85F22", "#10857D", "#795991", "#2F65A4", "#9C433B", "#BB9134", "#415346"}) {
+        const auto c = rgb(candidate);
+        const int dr = c[0] - primary[0], dg = c[1] - primary[1], db = c[2] - primary[2];
+        if (dr * dr + dg * dg + db * db > 56 * 56)
+            palette.emplace_back(candidate);
+        if (palette.size() == 4)
+            break;
     }
     return palette;
 }
 void operators_legend(Frame &frame, const Editor &e, const Data &data, bool averages = false) {
-    std::vector<std::pair<std::string, std::string>> items;
+    std::vector<LegendItem> items;
     const auto palette = colors(e);
     for (int i = 0; i < data.operators; ++i)
-        items.emplace_back("操作员 " + data.names[i], palette[i]);
+        items.push_back({"操作员 " + data.names[i], palette[i],
+                         averages ? Key::Marker : Key::LineMarker, series_shape(e, i)});
     if (averages)
-        items.emplace_back("均值", ink);
-    legend(frame, e, items, true);
+        items.push_back({"均值", ink, Key::LineMarker, MarkerShape::Diamond});
+    legend(frame, e, items);
 }
 std::vector<std::pair<std::string, double>> specs(const Result &r) {
     std::vector<std::pair<std::string, double>> out;
@@ -444,11 +505,19 @@ std::pair<double, double> measurement_bounds(const Data &data, const Result &res
 void specification_lines(Plot &plot, const Result &result) {
     if (!plot.editor.show_limits)
         return;
-    for (const auto &limit : specs(result)) {
+    auto limits = specs(result);
+    float previousTop = plot.top + plot.height + 16;
+    for (const auto &limit : limits) {
         plot.segment(plot.xlow, limit.second, plot.xhigh, limit.second, amber, 1, true);
-        if (limit.second >= plot.low && limit.second <= plot.high)
-            text(plot.scene, plot.left + 2, plot.y(limit.second) - 15, plot.width - 4, 15,
-                 limit.first + " " + exact_number(limit.second), 10, amber, Primitive::Align::Right);
+        if (limit.second < plot.low || limit.second > plot.high)
+            continue;
+        float top = std::min(plot.y(limit.second) - 15, previousTop - 15);
+        const bool upperWillFit =
+            limits.size() == 2 && limit.first == "LSL" && limits.back().second <= plot.high;
+        top = std::clamp(top, plot.top + (upperWillFit ? 15.f : 0.f), plot.top + plot.height - 15);
+        text(plot.scene, plot.left + 2, top, plot.width - 4, 15,
+             limit.first + " " + exact_number(limit.second), 10, amber, Primitive::Align::Right);
+        previousTop = top;
     }
 }
 double percentile(const std::vector<double> &sorted, double q) {
@@ -489,22 +558,22 @@ void components(Frame &frame, const Result &result, const Editor &e) {
         }
     }
     std::vector<std::vector<double>> series;
-    std::vector<std::pair<std::string, std::string>> entries;
+    std::vector<LegendItem> entries;
     const auto palette = colors(e);
     if (!sd.empty()) {
         series.push_back(sd);
         series.push_back(variance);
-        entries.emplace_back("研究变异 %", palette[0]);
-        entries.emplace_back("方差贡献 %", palette[1]);
+        entries.push_back({"研究变异 %", palette[0]});
+        entries.push_back({"方差贡献 %", palette[1]});
     }
     if (tolerance.size() == 4) {
         series.push_back(tolerance);
-        entries.emplace_back("公差占比 %", palette[2]);
+        entries.push_back({"公差占比 %", palette[2]});
     } else if (!tolerance.empty())
         throw ConfigError("公差占比缺少完整的变异分量，请重新分析数据");
     if (process.size() == 4) {
         series.push_back(process);
-        entries.emplace_back("过程占比 %", palette[3]);
+        entries.push_back({"过程占比 %", palette[3]});
     } else if (!process.empty())
         throw ConfigError("历史过程占比缺少完整的变异分量，请重新分析数据");
     if (series.empty()) {
@@ -525,7 +594,7 @@ void components(Frame &frame, const Result &result, const Editor &e) {
     for (int i = 0; i < 4; ++i) {
         for (std::size_t j = 0; j < series.size(); ++j) {
             const double x = i - .36 + j * spacing, value = series[j][i];
-            p.bar(x + spacing * .08, 0, x + spacing * .92, value, entries[j].second);
+            p.bar(x + spacing * .08, 0, x + spacing * .92, value, entries[j].color);
             if (s.width >= 700 && value >= p.low && value <= p.high && p.y(value) - 17 >= p.top)
                 text(s, p.x(x), p.y(value) - 17, p.x(x + spacing) - p.x(x), 16,
                      bar_number(value), series.size() == 4 ? 9.f : 10.f, muted,
@@ -538,6 +607,7 @@ void by_part(Frame &frame, const Result &result, const Data &data, const Editor 
     const auto bounds = measurement_bounds(data, result, e);
     Plot p(frame, e, -.6, data.parts - .4, bounds.first, bounds.second);
     operators_legend(frame, e, data, true);
+    specification_lines(p, result);
     const auto palette = colors(e);
     double previous = 0;
     for (int part = 0; part < data.parts; ++part) {
@@ -550,17 +620,18 @@ void by_part(Frame &frame, const Result &result, const Data &data, const Editor 
             for (int trial = 0; trial < data.repeats; ++trial) {
                 const double offset = (op - (data.operators - 1) / 2.) * .17 +
                                       (trial - (data.repeats - 1) / 2.) * .045;
-                p.point(part + offset, data.cells[op * data.parts + part][trial], palette[op]);
+                p.point(part + offset, data.cells[op * data.parts + part][trial], palette[op],
+                        e.point_radius, series_shape(e, op));
             }
         p.point(part, center, "#FFFFFF", e.point_radius + 2);
-        p.diamond(part, center, ink, e.point_radius + 1);
+        p.point(part, center, ink, e.point_radius + 1, MarkerShape::Diamond);
     }
-    specification_lines(p, result);
 }
 void by_operator(Frame &frame, const Result &result, const Data &data, const Editor &e) {
     const auto bounds = measurement_bounds(data, result, e);
     Plot p(frame, e, -.7, data.operators - .3, bounds.first, bounds.second);
     operators_legend(frame, e, data, true);
+    specification_lines(p, result);
     const auto palette = colors(e);
     for (int op = 0; op < data.operators; ++op) {
         auto values = data.by_operator[op];
@@ -572,7 +643,7 @@ void by_operator(Frame &frame, const Result &result, const Data &data, const Edi
         const double lo = lower == values.end() ? q1 : *lower,
                      hi = upper == values.begin() ? q3 : *std::prev(upper);
         const double box = op - .12;
-        p.bar(box - .14, q1, box + .14, q3, "#F0F4FA");
+        p.bar(box - .14, q1, box + .14, q3, light_fill(palette[op]));
         p.segment(box - .14, q1, box + .14, q1, palette[op]);
         p.segment(box - .14, q3, box + .14, q3, palette[op]);
         p.segment(box - .14, q1, box - .14, q3, palette[op]);
@@ -584,16 +655,16 @@ void by_operator(Frame &frame, const Result &result, const Data &data, const Edi
         p.segment(box - .08, hi, box + .08, hi, palette[op]);
         for (std::size_t j = 0; j < data.by_operator[op].size(); ++j) {
             const double offset = .20 + (double(j % 7) - 3) * .025;
-            p.point(op + offset, data.by_operator[op][j], palette[op], e.point_radius * .65f);
+            p.point(op + offset, data.by_operator[op][j], palette[op], e.point_radius * .75f,
+                    series_shape(e, op));
         }
         if (op)
             p.segment(box - 1, data.operator_mean[op - 1], box, data.operator_mean[op], ink, 1);
         p.point(box, data.operator_mean[op], "#FFFFFF", e.point_radius + 2);
-        p.diamond(box, data.operator_mean[op], ink, e.point_radius + 1);
+        p.point(box, data.operator_mean[op], ink, e.point_radius + 1, MarkerShape::Diamond);
         const float tickWidth = p.x(1) - p.x(0) - 4;
         p.tick(op, operator_label(data.names[op], tickWidth, 11), tickWidth);
     }
-    specification_lines(p, result);
 }
 void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges) {
     auto &s = frame.scene;
@@ -617,11 +688,11 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
         low = std::min(low, lower);
         high = std::max(high, upper);
     }
-    std::vector<std::pair<std::string, std::string>> entries{
-        {ranges ? "子组极差 R" : "子组均值", e.primary_color}};
+    std::vector<LegendItem> entries{
+        {ranges ? "子组极差 R" : "子组均值", e.primary_color, Key::LineMarker, series_shape(e, 0)}};
     if (e.show_limits) {
-        entries.emplace_back("中心线 CL", green);
-        entries.emplace_back("控制限 / 超限点", red);
+        entries.push_back({"中心线 CL", green, Key::Line});
+        entries.push_back({"控制限 / 超限点", red, Key::Dash});
     }
     legend(frame, e, entries);
     if (e.show_limits) {
@@ -636,17 +707,17 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
                                    precision, std::numeric_limits<double>::max_digits10);
         const auto caption = "UCL = " + number(upper, precision) + "    CL = " +
                              number(center, precision) + "    LCL = " + number(lower, precision);
-        const float left = frame.compact ? frame.margin : 72.f;
+        const float left = frame.compact ? frame.margin : frame.plot_left;
         const float width = s.width - left - frame.margin;
         const float size = std::min(frame.compact ? 9.f : 11.f,
                                     width / (.65f * static_cast<float>(caption.size())));
         text(s, left, frame.axis_label_top + 17, width, 17, caption, size, muted);
     }
-    const float gap = 12, available = s.width - 96;
+    const float gap = frame.compact ? 7.f : 13.f, available = frame.plot_right - frame.plot_left;
     const float panelWidth = (available - gap * (data.operators - 1)) / data.operators;
     const int skip = std::max(1, int(std::ceil(data.parts * 21.f / panelWidth)));
     for (int op = 0; op < data.operators; ++op) {
-        const float left = 72 + op * (panelWidth + gap);
+        const float left = frame.plot_left + op * (panelWidth + gap);
         Plot p(frame, e, -.45, data.parts - .55, low, high, ranges, false, left, panelWidth,
                op == 0);
         rect(s, left, p.top - 17, panelWidth, 16, "#F3F6FA");
@@ -663,13 +734,10 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
                 p.segment(part - 1, values[op][part - 1], part, values[op][part], e.primary_color);
             const double value = values[op][part];
             const bool beyond = e.show_limits && (value < lower || value > upper);
-            p.point(part, value, e.primary_color);
-            if (beyond && value >= p.low && value <= p.high) {
-                const float radius = e.point_radius + 1;
-                rect(s, p.x(part) - radius, p.y(value) - radius, 2 * radius, 2 * radius, red);
-            }
-            if (part % skip == 0 || part == data.parts - 1)
-                p.tick(part, std::to_string(part + 1), 22);
+            p.point(part, value, beyond ? red : e.primary_color,
+                    e.point_radius + (beyond ? 1.f : 0.f), series_shape(e, 0));
+            if (part == data.parts - 1 || (part % skip == 0 && part <= data.parts - 1 - skip))
+                p.tick(part, std::to_string(part + 1), 21);
         }
     }
 }
@@ -687,17 +755,18 @@ void interaction(Frame &frame, const Result &result, const Data &data, const Edi
         }
     Plot p(frame, e, -.4, data.parts - .6, low, high);
     operators_legend(frame, e, data);
+    specification_lines(p, result);
     const auto palette = colors(e);
     for (int part = 0; part < data.parts; ++part)
         p.tick(part, std::to_string(part + 1));
     for (int op = 0; op < data.operators; ++op)
-        for (int part = 0; part < data.parts; ++part) {
-            if (part)
-                p.segment(part - 1, data.cell_means[op][part - 1], part, data.cell_means[op][part],
-                          palette[op]);
-            p.point(part, data.cell_means[op][part], palette[op]);
-        }
-    specification_lines(p, result);
+        for (int part = 1; part < data.parts; ++part)
+            p.segment(part - 1, data.cell_means[op][part - 1], part, data.cell_means[op][part],
+                      palette[op]);
+    for (int op = 0; op < data.operators; ++op)
+        for (int part = 0; part < data.parts; ++part)
+            p.point(part, data.cell_means[op][part], palette[op], e.point_radius,
+                    series_shape(e, op));
 }
 void histogram(Frame &frame, const Result &result, const Data &data, const Editor &e) {
     auto &s = frame.scene;
@@ -708,7 +777,9 @@ void histogram(Frame &frame, const Result &result, const Data &data, const Edito
         binLow -= width;
         binHigh += width;
     }
-    const int count = std::clamp(int(std::ceil(std::sqrt(data.all.size()))), 5, 20);
+    const int count = e.histogram_bins
+                          ? e.histogram_bins
+                          : std::clamp(int(std::ceil(std::sqrt(data.all.size()))), 5, 20);
     const double step = (binHigh - binLow) / count;
     if (!(step > 0) || !std::isfinite(step))
         throw ConfigError("直方图分箱范围超出有效数值范围");
@@ -728,29 +799,44 @@ void histogram(Frame &frame, const Result &result, const Data &data, const Edito
         axes.x_label += "（值 = 刻度 + " + exact_number(origin) + "）";
     Plot p(frame, axes, bounds.first, bounds.second, 0,
            *std::max_element(bins.begin(), bins.end()), true, true);
-    std::vector<std::pair<std::string, std::string>> entries{{"测量值频数", e.primary_color}};
+    const auto fill = light_fill(e.primary_color);
+    std::vector<LegendItem> entries{{"测量值频数", fill}};
     if (e.show_limits && !specs(result).empty())
-        entries.emplace_back("规格限", amber);
+        entries.push_back({"规格限", amber, Key::Dash});
     legend(frame, e, entries);
-    for (int i = 0; i < count; ++i)
-        p.bar(binLow + step * (i + .02), 0, binLow + step * (i + .98), bins[i], e.primary_color);
+    for (int i = 0; i < count; ++i) {
+        if (!bins[i])
+            continue;
+        const double left = binLow + step * i;
+        const double right = i == count - 1 ? binHigh : binLow + step * (i + 1);
+        p.bar(left, 0, right, bins[i], fill);
+        const float stroke = e.line_width * .65f;
+        p.segment(left, 0, left, bins[i], e.primary_color, stroke);
+        p.segment(left, bins[i], right, bins[i], e.primary_color, stroke);
+        p.segment(right, bins[i], right, 0, e.primary_color, stroke);
+    }
     const double tickStep = nice_step(bounds.second - bounds.first, s.width < 650 ? 3 : 5);
     const double first = std::ceil((bounds.first - origin) / tickStep) * tickStep;
     for (int i = 0; i < 20; ++i) {
-        const double value = origin + first + tickStep * i;
+        const double tick = first + tickStep * i;
+        const double value = origin + tick;
         if (value > bounds.second + tickStep * 1e-8)
             break;
-        p.tick(value, number(value - origin), 78);
+        p.tick(value, number(std::abs(tick) < tickStep * 1e-9 ? 0 : tick), 78);
     }
-    if (e.show_limits)
+    if (e.show_limits) {
+        float lastRight = -1;
         for (const auto &limit : specs(result)) {
             p.segment(limit.second, p.low, limit.second, p.high, amber, 1, true);
             const auto label = limit.first + " " + exact_number(limit.second);
             const float width = std::min(p.width, std::max(84.f, 7.f * static_cast<float>(label.size())));
-            text(s, std::clamp(p.x(limit.second) - width / 2, p.left, p.left + p.width - width),
-                 p.top + 5, width, 17, label, 10, amber,
+            const float x =
+                std::clamp(p.x(limit.second) - width / 2, p.left, p.left + p.width - width);
+            text(s, x, p.top + (x < lastRight ? 21.f : 4.f), width, 16, label, 10, amber,
                  Primitive::Align::Center);
+            lastRight = x + width;
         }
+    }
 }
 } // namespace
 
@@ -801,6 +887,7 @@ const char *description(Kind kind) {
 }
 Editor default_editor(Kind kind) {
     Editor e;
+    e.show_limits = kind != Kind::Interaction && kind != Kind::Histogram;
     e.title = label(kind);
     e.y_label = kind == Kind::VarianceComponents ? "百分比（%）"
                 : kind == Kind::Histogram        ? "频数"
@@ -824,6 +911,14 @@ Scene make_scene(const Result &result, Kind kind, const Editor &editor, float wi
         editor.line_width < .5f || editor.line_width > 6 || !std::isfinite(editor.point_radius) ||
         editor.point_radius < 1 || editor.point_radius > 8)
         throw ConfigError("图表颜色、线宽或点大小无效");
+    if ((editor.y_tick_intervals != 0 &&
+         (editor.y_tick_intervals < 2 || editor.y_tick_intervals > 10)) ||
+        (editor.histogram_bins != 0 && (editor.histogram_bins < 3 || editor.histogram_bins > 40)))
+        throw ConfigError("纵轴目标间隔数应为 2～10，直方图分箱数应为 3～40，自动均为 0");
+    if ((editor.legend_position != LegendPosition::Top &&
+         editor.legend_position != LegendPosition::Bottom) ||
+        editor.marker_shape < MarkerShape::BySeries || editor.marker_shape > MarkerShape::Triangle)
+        throw ConfigError("图例位置或数据点形状无效");
     if ((editor.y_min && !std::isfinite(*editor.y_min)) ||
         (editor.y_max && !std::isfinite(*editor.y_max)))
         throw ConfigError("纵轴范围必须为有限数字");

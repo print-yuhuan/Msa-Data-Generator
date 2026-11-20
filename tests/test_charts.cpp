@@ -282,7 +282,12 @@ void record_file(const std::filesystem::path &path, const platform::ChartExportO
     require(std::filesystem::file_size(path) > 100, "图表文件为空");
     if (options.format == platform::ChartFormat::Pdf)
         inspect_pdf(path, width, height, options.dpi);
-    else {
+    else if (options.format == platform::ChartFormat::Svg) {
+        const auto svg = bytes(path);
+        require(svg.find("<svg") != std::string::npos && svg.find("<text") != std::string::npos &&
+                    svg.find("<image") == std::string::npos,
+                "SVG 缺少可编辑图形或文字");
+    } else {
         const auto image = inspect_file(path);
         require(image.width == width && image.height == height, "图片尺寸与组合布局不一致");
         require(std::abs(image.dpi - options.dpi) < 1, "图片 DPI 不一致");
@@ -323,8 +328,9 @@ void model_checks() {
                 result.matrix[row][part] = 1e6 + (part - 2) * .01 + (row % 2 ? .01 : -.01);
         result.metrics = msa::calculate(result.matrix, result.config);
         for (auto kind : {Kind::MeanChart, Kind::MeasurementByPart, Kind::Histogram}) {
-            const auto scene = msa::charts::make_scene(
-                result, kind, msa::charts::default_editor(kind), 900, 560);
+            auto editor = msa::charts::default_editor(kind);
+            editor.show_limits = true;
+            const auto scene = msa::charts::make_scene(result, kind, editor, 900, 560);
             if (kind == Kind::MeanChart) {
                 const std::regex limits(R"(UCL = ([^ ]+) +CL = ([^ ]+) +LCL = ([^ ]+))");
                 int found = 0;
@@ -354,6 +360,134 @@ void model_checks() {
             require(std::string(msa::charts::label(kind)).size() &&
                         std::string(msa::charts::description(kind)).size(),
                     "图表说明为空");
+    });
+    check("交互图按系列编码点形，图例可移至轴下并调整纵轴刻度密度", [] {
+        const auto result = study();
+        const auto originalMatrix = result.matrix;
+        const auto metrics = result.metrics, config = result.config;
+        auto e = msa::charts::default_editor(Kind::Interaction);
+        e.y_min = 9;
+        e.y_max = 11;
+        e.y_tick_intervals = 2;
+        const auto original = msa::charts::make_scene(result, Kind::Interaction, e, 840, 480);
+        const auto &primary = e.primary_color;
+        auto countPoints = [](const Scene &s, Primitive::Type type, const std::string &color) {
+            return std::count_if(s.items.begin(), s.items.end(), [&](const Primitive &p) {
+                return p.type == type && p.color == color;
+            });
+        };
+        const auto textY = [](const Scene &s, const std::string &label) {
+            const auto found = std::find_if(s.items.begin(), s.items.end(),
+                                            [&](const Primitive &p) { return p.text == label; });
+            require(found != s.items.end(), "图例或坐标轴说明丢失");
+            return found->y;
+        };
+        const auto ticks = [](const Scene &s) {
+            return std::count_if(s.items.begin(), s.items.end(), [](const Primitive &p) {
+                return p.align == Primitive::Align::Right && p.x < 10;
+            });
+        };
+        require(countPoints(original, Primitive::Type::Rect, primary) == 11 &&
+                    textY(original, "操作员 A") < textY(original, e.y_label),
+                "第一系列方形符号或顶部图例错误");
+        e.marker_shape = msa::charts::MarkerShape::Circle;
+        e.legend_position = msa::charts::LegendPosition::Bottom;
+        e.y_tick_intervals = 10;
+        const auto edited = msa::charts::make_scene(result, Kind::Interaction, e, 840, 480);
+        require(countPoints(edited, Primitive::Type::Circle, primary) == 11 &&
+                    countPoints(edited, Primitive::Type::Rect, primary) == 0 &&
+                    textY(edited, "操作员 A") >= textY(edited, e.x_label) + 18 &&
+                    ticks(edited) > ticks(original),
+                "编辑后图例和数据点形不一致，或纵轴密度及图例布局没有生效");
+        auto compact = msa::charts::make_scene(result, Kind::Interaction, e, 360, 260);
+        require(ticks(compact) < ticks(edited), "最小画布未限制过密的数值标签");
+        auto control = msa::charts::default_editor(Kind::MeanChart);
+        control.show_legend = false;
+        control.marker_shape = msa::charts::MarkerShape::Circle;
+        const auto meanChart = msa::charts::make_scene(result, Kind::MeanChart, control, 840, 480);
+        const auto highlighted =
+            std::count_if(meanChart.items.begin(), meanChart.items.end(), [&](const Primitive &p) {
+                return p.type == Primitive::Type::Circle && p.x2 > control.point_radius &&
+                       p.color != control.primary_color;
+            });
+        require(highlighted > 0, "控制图超限点没有沿用用户选择的点形");
+        require(result.matrix == originalMatrix && result.metrics == metrics &&
+                    result.config == config,
+                "修改图形样式改变了研究数据或统计量");
+    });
+    check("手动分箱的频数守恒、区间相邻且包括样本最大值", [] {
+        auto result = study(2, 2, 6);
+        int value = 0;
+        for (auto &row : result.matrix)
+            for (auto &measurement : row)
+                measurement = value++;
+        result.metrics = msa::calculate(result.matrix, result.config);
+        const auto metrics = result.metrics;
+        const auto originalMatrix = result.matrix;
+        auto e = msa::charts::default_editor(Kind::Histogram);
+        e.show_limits = e.show_legend = false;
+        e.y_min = 0;
+        e.y_max = 10;
+        e.y_tick_intervals = 5;
+        for (int bins : {3, 8}) {
+            e.histogram_bins = bins;
+            const auto scene = msa::charts::make_scene(result, Kind::Histogram, e, 840, 480);
+            std::vector<Primitive> bars;
+            float bottom = 0, top = 0;
+            for (const auto &p : scene.items) {
+                if (p.type == Primitive::Type::Rect && p.color != "#FFFFFF")
+                    bars.push_back(p);
+                if (p.align == Primitive::Align::Right && p.text == "0")
+                    bottom = p.y;
+                if (p.align == Primitive::Align::Right && p.text == "10")
+                    top = p.y;
+            }
+            require(bottom > top && int(bars.size()) == bins, "频数轴或直方图分箱数量错误");
+            float previousRight = bars.front().x;
+            for (const auto &bar : bars) {
+                require(std::abs(bar.x - previousRight) < .01 &&
+                            std::abs(bar.y2 * 10 / (bottom - top) - 24. / bins) < .001,
+                        "相邻直方柱间距或包含最大值的分箱频数错误");
+                previousRight = bar.x + bar.x2;
+            }
+        }
+        require(result.metrics == metrics && result.matrix == originalMatrix,
+                "手动分箱改变了数据或统计结果");
+    });
+    check("交互图和直方图优先显示样本波动，规格线按需扩展坐标范围", [] {
+        const auto result = study();
+        for (auto kind : {Kind::Interaction, Kind::Histogram}) {
+            auto e = msa::charts::default_editor(kind);
+            require(!e.show_limits, "默认应聚焦样本范围");
+            e.show_legend = false;
+            const auto observed = msa::charts::make_scene(result, kind, e, 840, 480);
+            e.show_limits = true;
+            const auto withLimits = msa::charts::make_scene(result, kind, e, 840, 480);
+            const auto extent = [&](const Scene &s) {
+                float first = s.width, last = 0;
+                for (const auto &p : s.items) {
+                    if (p.type != Primitive::Type::Rect || p.color == "#FFFFFF")
+                        continue;
+                    if (kind == Kind::Interaction && p.color != e.primary_color)
+                        continue;
+                    const bool xAxis = kind == Kind::Histogram;
+                    first = std::min(first, xAxis ? p.x : p.y);
+                    last = std::max(last, xAxis ? p.x + p.x2 : p.y + p.y2);
+                }
+                return last - first;
+            };
+            require(extent(observed) > 1.5f * extent(withLimits) && extent(withLimits) > 0,
+                    "关闭规格线时未将绘图区用于呈现样本波动");
+            const auto specCount = [](const Scene &s) {
+                return std::count_if(s.items.begin(), s.items.end(), [](const Primitive &p) {
+                    return p.text.find("LSL ") == 0 || p.text.find("USL ") == 0;
+                });
+            };
+            require(specCount(observed) == 0 && specCount(withLimits) == 2,
+                    "规格线及其数值未与可见性一起更新");
+        }
+        for (auto kind : {Kind::MeanChart, Kind::RangeChart})
+            require(msa::charts::default_editor(kind).show_limits, "控制限应默认可见");
     });
     check("图表按研究顺序标记操作员姓名，兼容旧配置并缩略狭窄标签", [] {
         auto contains = [](const Scene &scene, const std::string &text) {
@@ -520,6 +654,16 @@ void model_checks() {
         editor.primary_color = "red";
         rejects(
             [&] { msa::charts::make_scene(result, Kind::MeasurementByPart, editor, 840, 480); });
+        for (int invalid : {-1, 1, 11}) {
+            editor = msa::charts::default_editor(Kind::RangeChart);
+            editor.y_tick_intervals = invalid;
+            rejects([&] { msa::charts::make_scene(result, Kind::RangeChart, editor, 840, 480); });
+        }
+        for (int invalid : {-1, 2, 41}) {
+            editor = msa::charts::default_editor(Kind::Histogram);
+            editor.histogram_bins = invalid;
+            rejects([&] { msa::charts::make_scene(result, Kind::Histogram, editor, 840, 480); });
+        }
     });
 }
 
@@ -558,14 +702,19 @@ void export_checks(const std::filesystem::path &output) {
                 editor.title = "交叉量具研究：中文长标题验证，包含研究设计、分析方法与测量系统结果";
             scenes.push_back(msa::charts::make_scene(result, kind, editor, 840, 480));
             const auto name = std::string(method) + "_" + std::to_string(++index);
-            check("单图 PNG 可解码：" + name, [&] {
-                const std::vector<Scene> single{scenes.back()};
-                const auto path = platform::export_charts(single, output / (name + ".png"), options,
-                                                          msa::ExistingFile::Replace);
-                record_file(path, options, single);
-            });
+            for (const auto format : {ChartFormat::Png, ChartFormat::Svg}) {
+                options.format = format;
+                check(name + " 单图 " + platform::chart_extension(format), [&] {
+                    const std::vector<Scene> single{scenes.back()};
+                    const auto path = platform::export_charts(
+                        single, output / (name + platform::chart_extension(format)), options,
+                        msa::ExistingFile::Replace);
+                    record_file(path, options, single);
+                });
+            }
         }
-        for (const auto format : {ChartFormat::Png, ChartFormat::Jpeg, ChartFormat::Pdf}) {
+        for (const auto format :
+             {ChartFormat::Png, ChartFormat::Jpeg, ChartFormat::Pdf, ChartFormat::Svg}) {
             options.format = format;
             check(std::string(method) + " 七图组合 " + platform::chart_extension(format), [&] {
                 const auto path =
@@ -832,7 +981,7 @@ void native_reference(const std::filesystem::path &reportPath,
             record_file(path, options, single);
         }
         for (const auto format : {platform::ChartFormat::Png, platform::ChartFormat::Jpeg,
-                                  platform::ChartFormat::Pdf}) {
+                                  platform::ChartFormat::Pdf, platform::ChartFormat::Svg}) {
             options.format = format;
             const auto name = std::string(method) + "_combined" + platform::chart_extension(format);
             const auto path =

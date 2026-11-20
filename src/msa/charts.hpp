@@ -11,11 +11,17 @@ enum class Kind {
     Interaction,
     Histogram
 };
+enum class LegendPosition { Top, Bottom };
+enum class MarkerShape { BySeries, Circle, Square, Diamond, Triangle };
 struct Editor {
-    std::string title, x_label, y_label, primary_color = "#3B65E8";
+    std::string title, x_label, y_label, primary_color = "#2F65A4";
     float line_width = 2, point_radius = 3;
     bool show_grid = true, show_legend = true, show_limits = true;
     std::optional<double> y_min, y_max;
+    LegendPosition legend_position = LegendPosition::Top;
+    MarkerShape marker_shape = MarkerShape::BySeries;
+    // 0 为自动。目标刻度数仍受画布高度及整数频数约束。
+    int y_tick_intervals = 0, histogram_bins = 0;
 };
 // 使用逻辑像素和不透明 RGB 颜色；所有绘制后端共享同一图形场景。
 struct Primitive {

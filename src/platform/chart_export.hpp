@@ -3,7 +3,7 @@
 #include <filesystem>
 
 namespace platform {
-enum class ChartFormat { Png, Jpeg, Pdf };
+enum class ChartFormat { Png, Jpeg, Pdf, Svg };
 struct ChartExportOptions {
     ChartFormat format = ChartFormat::Png;
     int columns = 2;
@@ -13,7 +13,7 @@ struct ChartExportOptions {
     int jpeg_quality = 95;
 };
 const char *chart_extension(ChartFormat format);
-// 多幅图按输入顺序组合为一张图片或一页 PDF；PDF 使用高分辨率图像内容。
+// 多幅图按输入顺序组合为一个文件。SVG 保留矢量图元，PDF 使用高分辨率图像。
 // 未指定扩展名时自动补齐，已有扩展名必须与格式匹配。默认原子写入且不覆盖。
 std::filesystem::path export_charts(const std::vector<msa::charts::Scene> &scenes,
                                     const std::filesystem::path &path,

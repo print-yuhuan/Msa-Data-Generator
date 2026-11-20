@@ -1,5 +1,5 @@
 #include "comparison_report.hpp"
-#include "charts.hpp"
+#include "chart_svg.hpp"
 #include "report_pdf.hpp"
 #include <iomanip>
 #include <locale>
@@ -7,29 +7,6 @@
 
 namespace msa {
 namespace {
-std::string escaped(const std::string &value) {
-    std::string out;
-    for (char c : value) {
-        switch (c) {
-        case '&':
-            out += "&amp;";
-            break;
-        case '<':
-            out += "&lt;";
-            break;
-        case '>':
-            out += "&gt;";
-            break;
-        case '"':
-            out += "&quot;";
-            break;
-        default:
-            out += c;
-        }
-    }
-    return out;
-}
-
 std::string shown(const Json &value) {
     if (value.is_null())
         return "—";
@@ -59,45 +36,11 @@ std::string tolerance_name(const Json &study) {
 }
 
 void chart(std::ostream &out, const Result &result, charts::Kind kind) {
-    using charts::Primitive;
     const auto scene = charts::make_scene(result, kind, charts::default_editor(kind), 720, 425);
     out << "<figure><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " << scene.width << ' '
-        << scene.height << "\" role=\"img\"><title>" << escaped(charts::label(kind))
+        << scene.height << "\" role=\"img\"><title>" << charts::xml_text(charts::label(kind))
         << "</title>\n";
-    for (const auto &p : scene.items) {
-        switch (p.type) {
-        case Primitive::Type::Line:
-            out << "<line x1=\"" << p.x << "\" y1=\"" << p.y << "\" x2=\"" << p.x2 << "\" y2=\""
-                << p.y2 << "\" stroke=\"" << p.color << "\" stroke-width=\"" << p.stroke_width
-                << '"' << (p.dashed ? " stroke-dasharray=\"5 4\"" : "") << "/>";
-            break;
-        case Primitive::Type::Rect:
-            out << "<rect x=\"" << p.x << "\" y=\"" << p.y << "\" width=\"" << p.x2
-                << "\" height=\"" << p.y2 << "\" fill=\"" << p.color << "\"/>";
-            break;
-        case Primitive::Type::Circle:
-            out << "<circle cx=\"" << p.x << "\" cy=\"" << p.y << "\" r=\"" << p.x2 << "\" fill=\""
-                << p.color << "\"/>";
-            break;
-        case Primitive::Type::Text: {
-            float x = p.x;
-            const char *anchor = "start";
-            if (p.align == Primitive::Align::Center) {
-                x += p.x2 / 2;
-                anchor = "middle";
-            }
-            if (p.align == Primitive::Align::Right) {
-                x += p.x2;
-                anchor = "end";
-            }
-            out << "<text x=\"" << x << "\" y=\"" << p.y + (p.y2 + p.font_size * .68f) / 2
-                << "\" text-anchor=\"" << anchor << "\" font-size=\"" << p.font_size << "\" fill=\""
-                << p.color << "\">" << escaped(p.text) << "</text>";
-            break;
-        }
-        }
-        out << '\n';
-    }
+    charts::write_svg_items(out, scene, "chart-" + std::to_string(static_cast<int>(kind)));
     out << "</svg></figure>\n";
 }
 
@@ -142,16 +85,16 @@ void write_comparison_report(const std::filesystem::path &path, const Result &st
     out.imbue(std::locale::classic());
     out << page_start << "<p>" << (source == StudySource::Generated ? "模拟生成" : "数据导入");
     if (!source_name.empty())
-        out << " · " << escaped(source_name);
+        out << " · " << charts::xml_text(source_name);
     if (source == StudySource::Generated)
         out << " · 数据生成种子 " << study.seed;
-    out << " · MSA " << escaped(version) << "</p></header>\n<section><h2>研究设置</h2><p>"
+    out << " · MSA " << charts::xml_text(version) << "</p></header>\n<section><h2>研究设置</h2><p>"
         << design.at("operators") << " 名操作员 × " << design.at("parts") << " 个部件 × "
         << design.at("replicates") << " 次重复测量，共 "
         << study.matrix.size() * design.at("parts").get<int>() << " 个读数。操作员为";
     const auto names = operator_names(design);
     for (int op = 0; op < design.at("operators").get<int>(); ++op)
-        out << (op ? "、" : "") << escaped(names[op]);
+        out << (op ? "、" : "") << charts::xml_text(names[op]);
     out << "。</p><p>规格下限 " << shown(spec.at("lsl")) << "，规格上限 " << shown(spec.at("usl"))
         << "，研究变异倍数 "
         << shown(analysis.at("study_multiplier")) << "，历史过程标准差 "

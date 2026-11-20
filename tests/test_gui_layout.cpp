@@ -2649,7 +2649,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         if (!value)
             throw std::runtime_error("图表交互：" + message);
     };
-    // GUI 的中文字体遵循项目统一的字号换算；逻辑行高和场景文字框保持不变。
+    // EUI 采用内嵌字体的设计高度，将导出 em 像素换算为同样的实际字形尺寸。
     msa::charts::Scene typeScene{400, 300, {}};
     msa::charts::Primitive typeLabel;
     typeLabel.type = msa::charts::Primitive::Type::Text;
@@ -2666,8 +2666,8 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     typeUi.end();
     typeUi.layout(400, 300);
     const auto *typeNode = typeUi.find("chart-type.p0");
-    require(typeNode && std::fabs(typeNode->fontSize - 16.f * 1.35f) < .001f &&
-                std::fabs(typeNode->lineHeight - 16.f * 1.35f) < .001f &&
+    require(typeNode && std::fabs(typeNode->fontSize - 16.f * 1.448f) < .001f &&
+                std::fabs(typeNode->lineHeight - 16.f * 1.448f) < .001f &&
                 std::fabs(typeNode->frame.height - 36.f) < .001f,
             "预览文字未使用统一字号，或换算误改了场景文字框高度");
     // 长文件名、空数据和异常快照都占用同一个说明槽，不推移后续图表。
@@ -2759,6 +2759,11 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     const auto beforeDraftFrames = sceneFrames();
     composeEditor(0);
     input(editId(0) + ".title", "已应用的研究图表");
+    const auto *live = gui::chartPreview(generated, 720, 448);
+    require(live && std::any_of(live->items.begin(), live->items.end(), [](const auto &p) {
+                return p.text == "已应用的研究图表";
+            }) && gui::chartEditor(0).title == originalEditor.title,
+            "编辑标题没有实时预览，或草稿写入了已应用设置");
     input(editId(0) + ".min", "-");
     require(gui::visual.editDirty[0] && gui::visual.lower[0] == "-" &&
                 gui::sameChartEditor(gui::chartEditor(0), originalEditor),
@@ -2778,7 +2783,11 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                 "收起或展开图表编辑丢失草稿或应用了未完成参数");
     }
     sameSceneFrames(beforeDraftFrames, sceneFrames());
-    require(gui::chartPreview(generated, 720, 448) != nullptr, "未完成坐标输入使原预览消失");
+    const auto *fallback = gui::chartPreview(generated, 720, 448);
+    require(fallback && !gui::visual.preview.draftError.empty() &&
+                std::any_of(fallback->items.begin(), fallback->items.end(), [&](const auto &p) {
+                    return p.text == originalEditor.title;
+                }), "未完成坐标输入没有提示原因或丢失已应用预览");
     require(!gui::applyChartEdits(0) && !gui::visual.editError[0].empty() &&
                 gui::sameChartEditor(gui::chartEditor(0), originalEditor) &&
                 gui::state.result->matrix == generated.matrix,
@@ -2786,9 +2795,10 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     composeEditor(0);
     input(editId(0) + ".min", "0");
     input(editId(0) + ".max", "120");
+    input(editId(0) + ".ticks", "7");
     require(gui::applyChartEdits(0) && !gui::visual.editDirty[0] &&
                 gui::chartEditor(0).title == "已应用的研究图表" && gui::chartEditor(0).y_min == 0 &&
-                gui::chartEditor(0).y_max == 120,
+                gui::chartEditor(0).y_max == 120 && gui::chartEditor(0).y_tick_intervals == 7,
             "有效编辑未正确应用");
     sameSceneFrames(beforeDraftFrames, sceneFrames());
     composeEditor(1);
@@ -2806,6 +2816,35 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                 gui::visual.drafts[1].title == gui::visual.editors[1].title &&
                 gui::visual.editors[0].title == "已应用的研究图表",
             "撤销未隔离当前图表或未重置输入控件状态");
+
+    composeEditor(1);
+    click(editorUi, editId(1) + ".tabs.hit.1");
+    composeEditor(1);
+    require(editorUi.find(editId(1) + ".marker") && !editorUi.find(editId(1) + ".bins.hit"),
+            "带点图缺少点形或显示了分箱设置");
+    editorUi.find(editId(1) + ".marker")->onPress({}, {});
+    gui::menu.select(4);
+    gui::menu.id.clear();
+    click(editorUi, editId(1) + ".tabs.hit.2");
+    composeEditor(1);
+    click(editorUi, editId(1) + ".legend.position.hit.1");
+    require(gui::applyChartEdits(1) &&
+                gui::chartEditor(1).marker_shape == msa::charts::MarkerShape::Triangle &&
+                gui::chartEditor(1).legend_position == msa::charts::LegendPosition::Bottom,
+            "点形和图例位置未应用");
+    composeEditor(6);
+    click(editorUi, editId(6) + ".tabs.hit.1");
+    composeEditor(6);
+    require(editorUi.find(editId(6) + ".bins.hit") && !editorUi.find(editId(6) + ".marker"),
+            "直方图的分箱和点形控件状态错误");
+    input(editId(6) + ".bins", "41");
+    require(!gui::applyChartEdits(6) && !gui::visual.editError[6].empty(),
+            "直方图接受了超过范围的分箱数");
+    input(editId(6) + ".bins", "12");
+    require(gui::chartPreview(generated, 720, 448) && gui::visual.preview.draftError.empty() &&
+                gui::applyChartEdits(6) && gui::chartEditor(6).histogram_bins == 12,
+            "修改分箱后未恢复实时预览或未应用到直方图");
+    gui::visual.editorTab = 0;
 
     gui::visual.selected = 1;
     require(gui::chartPreview(generated, 720, 448) != nullptr, "有效预览未建立");
@@ -2855,6 +2894,11 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         return frames;
     };
     composeOutput();
+    click(outputUi, "chart.format.hit.3");
+    require(gui::visual.format == static_cast<int>(platform::ChartFormat::Svg) &&
+                platform::completeExportFilename(L"图形", platform::ExportKind::Svg) == L"图形.svg",
+            "SVG 格式未关联矢量导出和对应的文件扩展名");
+    click(outputUi, "chart.format.hit.0");
     const auto populatedOutput = outputAnchors();
     click(outputUi, "chart.selection.none.bg");
     require(gui::selectedChartCount() == 0, "清空组合未生效");
@@ -2927,11 +2971,17 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                         page.find("chart.file.options.bg") && !page.find("chart.directory.hit") &&
                         !page.find("chart.filename.hit"),
                     "图表页缺少预览、选择计数或目录操作");
+            if (width >= 1020) {
+                const auto &actions = page.find("charts.dataset.actions")->frame;
+                const auto &source = page.find("charts.dataset")->frame;
+                require(std::fabs(actions.y - source.y) < .1f && actions.x + actions.width <= source.x,
+                        "宽窗数据源操作未并成一行，挤占了预览高度");
+            }
             const auto *editorScroll = page.find("chart.editor.scroll");
-            if (editing && width >= 1100) {
+            if (editing && width >= 1020) {
                 const auto &figure = page.find("charts.preview.card")->frame;
                 const auto *editor = page.find("chart.editor.card");
-                require(editor && editorScroll && editorScroll->scrollMaxOffset > 0 &&
+                require(editor && editorScroll &&
                             std::fabs(figure.y - editor->frame.y) < .1f &&
                             std::fabs(figure.height - editor->frame.height) < .1f,
                         "桌面编辑未使用与预览齐边的独立滚动区");

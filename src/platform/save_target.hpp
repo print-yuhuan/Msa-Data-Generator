@@ -3,7 +3,7 @@
 #include <algorithm>
 
 namespace platform {
-enum class ExportKind { Csv, Xlsx, Png, Jpeg, ChartPdf, Html, ReportPdf };
+enum class ExportKind { Csv, Xlsx, Png, Jpeg, ChartPdf, Html, ReportPdf, Svg };
 
 struct SaveTarget {
     std::filesystem::path path;
@@ -28,6 +28,8 @@ inline ExportFileType exportFileType(ExportKind kind) {
         return {L"JPEG 图像 (*.jpg;*.jpeg)", L"*.jpg;*.jpeg", L"jpg"};
     case ExportKind::ChartPdf:
         return {L"PDF 图表 (*.pdf)", L"*.pdf", L"pdf"};
+    case ExportKind::Svg:
+        return {L"SVG 矢量图 (*.svg)", L"*.svg", L"svg"};
     case ExportKind::Html:
         return {L"HTML 方法对比报告 (*.html;*.htm)", L"*.html;*.htm", L"html"};
     case ExportKind::ReportPdf:

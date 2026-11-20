@@ -22,7 +22,7 @@ try {
     foreach($document in 'README.md','THIRD_PARTY_NOTICES.md','dependencies.lock.json'){Copy-Item -LiteralPath (Join-Path $projectRoot $document) -Destination $stage}
     Copy-Item -LiteralPath (Join-Path $info.BuildRoot 'release-version.json') -Destination $stage
     Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs') -Filter *.md | Copy-Item -Destination (Join-Path $stage 'docs')
-    foreach($asset in 'app-icon-preview.png','ui-preview.png'){
+    foreach($asset in 'app-icon-preview.png','ui-preview.png','chart-origin-comparison.png'){
         Copy-Item -LiteralPath (Join-Path $projectRoot "docs\$asset") -Destination (Join-Path $stage 'docs')
     }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'tests\fixtures\minitab_baseline.json') -Destination (Join-Path $stage 'tests\fixtures')

@@ -149,7 +149,8 @@ std::string without_format_suffix(const std::string &name, ExportBasenameKind ki
         const auto ext = ascii_lower(base.substr(dot));
         const bool recognized = ext == ".csv" || ext == ".xlsx" ||
             (kind != ExportBasenameKind::Data && ext == ".pdf") ||
-            (kind == ExportBasenameKind::Chart && (ext == ".png" || ext == ".jpg" || ext == ".jpeg")) ||
+            (kind == ExportBasenameKind::Chart &&
+             (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".svg")) ||
             (kind == ExportBasenameKind::ComparisonReport && (ext == ".html" || ext == ".htm"));
         if (!recognized)
             break;

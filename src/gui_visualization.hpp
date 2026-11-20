@@ -5,18 +5,19 @@ struct VisualPreview {
     msa::charts::Editor editor;
     int selected = -1;
     float width = 0, height = 0;
-    bool attempted = false, imported = false;
-    std::string error;
+    bool attempted = false, imported = false, draft = false;
+    std::array<std::string, 4> draftInputs;
+    std::string error, draftError;
 };
 struct VisualState {
-    int selected = 0, format = 0, scope = 0, columns = 1, resolution = 1;
+    int selected = 0, format = 0, scope = 0, columns = 1, resolution = 1, editorTab = 0;
     float offset = 0, editorOffset = 0;
     bool importedSelected = false, editing = false;
     std::optional<msa::Result> imported;
     std::string importedName, importedSheet;
     std::array<bool, 7> included{true, true, true, true, true, true, false};
     std::array<msa::charts::Editor, 7> editors, drafts;
-    std::array<std::string, 7> lower, upper;
+    std::array<std::string, 7> lower, upper, ticks, bins;
     std::array<bool, 7> editDirty{};
     std::array<std::string, 7> editError;
     std::array<unsigned, 7> editEpoch{};
@@ -310,30 +311,51 @@ void discardChartEdits(int index) {
         visual.editors[index].y_min ? Json(*visual.editors[index].y_min).dump() : "";
     visual.upper[index] =
         visual.editors[index].y_max ? Json(*visual.editors[index].y_max).dump() : "";
+    const auto &editor = visual.editors[index];
+    visual.ticks[index] = editor.y_tick_intervals ? std::to_string(editor.y_tick_intervals) : "";
+    visual.bins[index] = editor.histogram_bins ? std::to_string(editor.histogram_bins) : "";
     visual.editDirty[index] = false;
     visual.editError[index].clear();
     ++visual.editEpoch[index];
     if (visual.errorKind == "edit" && visual.errorChart == index)
         clearVisualError();
 }
+msa::charts::Editor proposedChartEditor(int index) {
+    auto proposed = visual.drafts[index];
+    const auto bound = [](const std::string &value) -> std::optional<double> {
+        if (native_ui::trim(value).empty())
+            return std::nullopt;
+        const double parsed = msa::parse_number(value);
+        if (!std::isfinite(parsed))
+            throw std::runtime_error("纵轴范围需要有限数值，留空可自动设定范围");
+        return parsed;
+    };
+    const auto count = [](const std::string &value, int low, int high, const char *message) {
+        if (native_ui::trim(value).empty())
+            return 0;
+        try {
+            const auto n = msa::parse_integer(native_ui::trim(value));
+            if (n >= low && n <= high)
+                return static_cast<int>(n);
+        } catch (const msa::ConfigError &) {
+        }
+        throw std::runtime_error(message);
+    };
+    proposed.y_min = bound(visual.lower[index]);
+    proposed.y_max = bound(visual.upper[index]);
+    if (proposed.y_min && proposed.y_max && *proposed.y_min >= *proposed.y_max)
+        throw std::runtime_error("纵轴下限必须小于上限");
+    proposed.y_tick_intervals =
+        count(visual.ticks[index], 2, 10, "纵轴刻度间隔数须为 2 至 10 的整数");
+    proposed.histogram_bins = count(visual.bins[index], 3, 40, "直方图分箱数须为 3 至 40 的整数");
+    if (proposed.title.size() > 600 || proposed.x_label.size() > 300 ||
+        proposed.y_label.size() > 300)
+        throw std::runtime_error("图表标题或坐标轴名称过长，请精简后应用");
+    return proposed;
+}
 bool applyChartEdits(int index) {
     try {
-        auto proposed = visual.drafts[index];
-        const auto bound = [](const std::string &value) -> std::optional<double> {
-            if (native_ui::trim(value).empty())
-                return std::nullopt;
-            const double parsed = msa::parse_number(value);
-            if (!std::isfinite(parsed))
-                throw std::runtime_error("纵轴范围需要有限数值，留空可自动设定范围");
-            return parsed;
-        };
-        proposed.y_min = bound(visual.lower[index]);
-        proposed.y_max = bound(visual.upper[index]);
-        if (proposed.y_min && proposed.y_max && *proposed.y_min >= *proposed.y_max)
-            throw std::runtime_error("纵轴下限必须小于上限");
-        if (proposed.title.size() > 600 || proposed.x_label.size() > 300 ||
-            proposed.y_label.size() > 300)
-            throw std::runtime_error("图表标题或坐标轴名称过长，请精简后应用");
+        auto proposed = proposedChartEditor(index);
         if (const auto *result = insightResult())
             (void)msa::charts::make_scene(*result, msa::charts::all_kinds()[index], proposed, 900,
                                           560);
@@ -344,8 +366,7 @@ bool applyChartEdits(int index) {
         return true;
     } catch (const std::exception &e) {
         visual.editError[index] = e.what();
-        visualError("edit", e.what(),
-                    "请修正或撤销草稿，再应用编辑。", index);
+        visualError("edit", e.what(), "请修正或撤销草稿，再应用编辑。", index);
         return false;
     }
 }
@@ -367,7 +388,9 @@ bool sameChartEditor(const msa::charts::Editor &a, const msa::charts::Editor &b)
            a.primary_color == b.primary_color && a.line_width == b.line_width &&
            a.point_radius == b.point_radius && a.show_grid == b.show_grid &&
            a.show_legend == b.show_legend && a.show_limits == b.show_limits && a.y_min == b.y_min &&
-           a.y_max == b.y_max;
+           a.y_max == b.y_max && a.legend_position == b.legend_position &&
+           a.marker_shape == b.marker_shape && a.y_tick_intervals == b.y_tick_intervals &&
+           a.histogram_bins == b.histogram_bins;
 }
 bool sameChartData(const msa::Result &a, const msa::Result &b) {
     // 无效数据中的 NaN 也应命中失败缓存，避免同一渲染错误逐帧写入日志。
@@ -389,10 +412,15 @@ bool sameChartData(const msa::Result &a, const msa::Result &b) {
 }
 const msa::charts::Scene *chartPreview(const msa::Result &result, float width, float height) {
     auto &cache = visual.preview;
-    const auto editor = chartEditor(visual.selected);
+    const int i = visual.selected;
+    const bool draft = visual.editing && visual.editDirty[i];
+    const auto &editor = draft ? visual.drafts[i] : visual.editors[i];
+    const std::array<std::string, 4> inputs{visual.lower[i], visual.upper[i], visual.ticks[i],
+                                            visual.bins[i]};
     const bool sameData = cache.snapshot && sameChartData(*cache.snapshot, result);
     if (cache.attempted && sameData && cache.imported == visual.importedSelected &&
         cache.selected == visual.selected && cache.width == width && cache.height == height &&
+        cache.draft == draft && (!draft || cache.draftInputs == inputs) &&
         sameChartEditor(cache.editor, editor))
         return cache.scene ? &*cache.scene : nullptr;
     // 缓存持有数据副本，不保存 Result 指针；重生成、导入或切换数据源都会重新比较内容。
@@ -400,14 +428,26 @@ const msa::charts::Scene *chartPreview(const msa::Result &result, float width, f
     cache.imported = visual.importedSelected;
     cache.selected = visual.selected;
     cache.editor = editor;
+    cache.draft = draft;
+    cache.draftInputs = inputs;
+    cache.draftError.clear();
     cache.width = width;
     cache.height = height;
     cache.attempted = true;
     cache.error.clear();
     cache.scene.reset();
     try {
-        cache.scene = msa::charts::make_scene(result, msa::charts::all_kinds()[visual.selected],
-                                              editor, width, height);
+        const auto kind = msa::charts::all_kinds()[i];
+        if (draft) {
+            try {
+                cache.scene =
+                    msa::charts::make_scene(result, kind, proposedChartEditor(i), width, height);
+            } catch (const std::exception &e) {
+                cache.draftError = e.what();
+            }
+        }
+        if (!cache.scene)
+            cache.scene = msa::charts::make_scene(result, kind, visual.editors[i], width, height);
         if (visual.errorKind == "render")
             clearVisualError();
     } catch (const std::exception &e) {
@@ -428,8 +468,11 @@ void drawChartScene(Ui &u, const std::string &id, const msa::charts::Scene &scen
             for (const auto &p : scene.items) {
                 const auto key = id + ".p" + std::to_string(n++);
                 if (p.type == P::Type::Text) {
-                    const bool title = n == 2 && p.y == 10;
-                    float size = p.font_size * 1.35f;
+                    const bool title = n == 2;
+                    // EUI 按字体设计高度计量，导出按 em 计量。内嵌 Noto CJK 的
+                    // hhea 上升/下降值为 1160/-288，每 em 为 1000 个字体单位。
+                    constexpr float designHeightPerEm = (1160.f + 288.f) / 1000.f;
+                    float size = p.font_size * designHeightPerEm;
                     const int weight = title ? 600 : 400;
                     // 刻度和规格限显示完整数值。自然语言较长时仍用省略号保留字号。
                     const bool numericLabel = p.align == P::Align::Right;
@@ -450,9 +493,7 @@ void drawChartScene(Ui &u, const std::string &id, const msa::charts::Scene &scen
                             .fontFamily(font())
                             .fontSize(size)
                             .fontWeight(weight)
-                            .color(p.color == "#243247"   ? ink
-                                   : p.color == "#69778A" ? muted
-                                                          : p.color.c_str())
+                            .color(p.color)
                             .horizontalAlign(
                                 p.align == P::Align::Center  ? eui::HorizontalAlign::Center
                                 : p.align == P::Align::Right ? eui::HorizontalAlign::Right
@@ -467,7 +508,7 @@ void drawChartScene(Ui &u, const std::string &id, const msa::charts::Scene &scen
                     u.rect(key)
                         .position(p.x, p.y)
                         .size(p.x2, p.y2)
-                        .color(p.color == "#F3F6FA" ? tableHeader : p.color.c_str())
+                        .color(p.color)
                         .build();
                 } else if (p.type == P::Type::Circle) {
                     u.rect(key)
@@ -490,7 +531,7 @@ void drawChartScene(Ui &u, const std::string &id, const msa::charts::Scene &scen
                         u.polygon(key + "." + std::to_string(j))
                             .position(0, 0)
                             .size(scene.width, scene.height)
-                            .color(p.color == "#E8EDF3" ? line : p.color.c_str())
+                            .color(p.color)
                             .points({{p.x + dx * a + nx, p.y + dy * a + ny},
                                      {p.x + dx * b + nx, p.y + dy * b + ny},
                                      {p.x + dx * b - nx, p.y + dy * b - ny},
@@ -544,9 +585,9 @@ void exportVisuals() {
         const auto initial = directory / std::filesystem::u8path(basename + extension);
         std::optional<platform::SaveTarget> chosen;
         if (!state.draft.silentCharts) {
-            const auto kind = options.format == platform::ChartFormat::Png ? platform::ExportKind::Png
-                            : options.format == platform::ChartFormat::Jpeg ? platform::ExportKind::Jpeg
-                                                                         : platform::ExportKind::ChartPdf;
+            constexpr std::array kinds{platform::ExportKind::Png, platform::ExportKind::Jpeg,
+                                       platform::ExportKind::ChartPdf, platform::ExportKind::Svg};
+            const auto kind = kinds.at(static_cast<std::size_t>(options.format));
             chosen = state.chooseExportPath(initial, kind);
             if (!chosen)
                 return;
@@ -590,145 +631,188 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
     auto &e = visual.drafts[i];
     // 图表索引隔离控件编辑状态；重置版本确保撤销后输入缓冲也恢复为已应用内容。
     const auto id = "chart.edit." + std::to_string(i) + "." + std::to_string(visual.editEpoch[i]);
-    const auto changed = [i] { visual.editDirty[i] = true; };
+    const auto changed = [i] {
+        visual.editDirty[i] = true;
+        visual.editError[i].clear();
+        if (visual.errorKind == "edit" && visual.errorChart == i)
+            clearVisualError();
+    };
+    const auto kind = msa::charts::all_kinds()[i];
+    const bool hasPoints =
+        kind != msa::charts::Kind::Histogram && kind != msa::charts::Kind::VarianceComponents;
     const auto editorContent = [&](Ui &u, float c) {
+        segments(u, id + ".tabs", {"坐标轴", "图形", "图例与线"}, visual.editorTab, c, [](int tab) {
+            visual.editorTab = tab;
+            visual.editorOffset = 0;
+            menu.id.clear();
+        });
         u.column(id + ".fields")
             .width(c)
             .gap(sectionGap)
             .content([&] {
-                subheading(u, id + ".axes.heading", "标题与坐标轴", "", c);
-                localField(u, id + ".title", "图表标题", e.title, c, "", changed);
-                u.row(id + ".axis.names")
-                    .width(c)
-                    .gap(12)
-                    .content([&] {
-                        localField(u, id + ".x", "横轴名称", e.x_label, (c - 12) / 2, "", changed);
-                        localField(u, id + ".y", "纵轴名称", e.y_label, (c - 12) / 2, "", changed);
-                    })
-                    .build();
-                u.row(id + ".range")
-                    .width(c)
-                    .gap(12)
-                    .content([&] {
-                        localField(u, id + ".min", "纵轴下限", visual.lower[i], (c - 12) / 2,
-                                   "自动", changed);
-                        localField(u, id + ".max", "纵轴上限", visual.upper[i], (c - 12) / 2,
-                                   "自动", changed);
-                    })
-                    .build();
-                u.rect(id + ".appearance.rule").size(c, 1).color(line).build();
-                subheading(u, id + ".appearance.heading", "图形样式", "", c);
-                const std::vector<std::string> colors{"#3B65E8", "#16866B", "#7B51C2", "#D47B20",
-                                                      "#CB4A5B"};
-                int color = 0;
-                for (int k = 0; k < int(colors.size()); ++k)
-                    if (e.primary_color == colors[k])
-                        color = k;
-                u.row(id + ".color.row")
-                    .width(c)
-                    .gap(12)
-                    .alignItems(eui::Align::CENTER)
-                    .content([&] {
-                        text(u, id + ".color.label", "主色", 42, 28, 13);
-                        u.rect(id + ".color.sample")
-                            .size(20, 20)
-                            .radius(5)
-                            .color(e.primary_color)
-                            .build();
-                        combo(u, id + ".color", {"靛蓝", "青绿", "紫色", "琥珀", "玫红"}, color,
-                              c - 86, [i, colors](int k) {
-                                  visual.drafts[i].primary_color = colors[k];
-                                  visual.editDirty[i] = true;
-                              });
-                    })
-                    .build();
-                const auto weight = [&](float width) {
-                    u.column(id + ".weight.field")
-                        .width(width)
-                        .gap(5)
-                        .content([&] {
-                            text(u, id + ".weight.label", "线条粗细", width, 21, 13);
-                            segments(u, id + ".weight", {"细线", "标准", "加粗"},
-                                     std::clamp(int(e.line_width) - 1, 0, 2), width, [i](int k) {
-                                         visual.drafts[i].line_width = float(k + 1);
-                                         visual.editDirty[i] = true;
-                                     });
-                        })
-                        .build();
-                };
-                const auto points = [&](float width) {
-                    u.column(id + ".points.field")
-                        .width(width)
-                        .gap(5)
-                        .content([&] {
-                            text(u, id + ".points.label", "数据点大小", width, 21, 13);
-                            segments(u, id + ".points", {"小", "标准", "大"},
-                                     std::clamp(int(e.point_radius) - 2, 0, 2), width, [i](int k) {
-                                         visual.drafts[i].point_radius = float(k + 2);
-                                         visual.editDirty[i] = true;
-                                     });
-                        })
-                        .build();
-                };
-                if (c >= 460)
-                    u.row(id + ".marks.row")
+                if (visual.editorTab == 0) {
+                    localField(u, id + ".title", "图表标题", e.title, c, "", changed);
+                    u.row(id + ".axis.names")
                         .width(c)
                         .gap(12)
                         .content([&] {
-                            weight((c - 12) / 2);
-                            points((c - 12) / 2);
+                            localField(u, id + ".x", "横轴名称", e.x_label, (c - 12) / 2, "",
+                                       changed);
+                            localField(u, id + ".y", "纵轴名称", e.y_label, (c - 12) / 2, "",
+                                       changed);
                         })
                         .build();
-                else {
-                    weight(c);
-                    points(c);
+                    u.row(id + ".range")
+                        .width(c)
+                        .gap(12)
+                        .content([&] {
+                            localField(u, id + ".min", "纵轴下限", visual.lower[i], (c - 12) / 2,
+                                       "自动", changed);
+                            localField(u, id + ".max", "纵轴上限", visual.upper[i], (c - 12) / 2,
+                                       "自动", changed);
+                        })
+                        .build();
+                    localField(u, id + ".ticks", "纵轴主刻度目标间隔数", visual.ticks[i], c,
+                               "自动（可填 2 至 10）", changed);
+                } else if (visual.editorTab == 1) {
+                    const std::vector<std::string> colors{"#2F65A4", "#16866B", "#7B51C2",
+                                                          "#D47B20", "#CB4A5B"};
+                    int color = 0;
+                    for (int k = 0; k < int(colors.size()); ++k)
+                        if (e.primary_color == colors[k])
+                            color = k;
+                    u.row(id + ".color.row")
+                        .width(c)
+                        .gap(12)
+                        .alignItems(eui::Align::CENTER)
+                        .content([&] {
+                            text(u, id + ".color.label", "主色", 42, 28, 13);
+                            u.rect(id + ".color.sample")
+                                .size(20, 20)
+                                .radius(5)
+                                .color(e.primary_color)
+                                .build();
+                            combo(u, id + ".color", {"蓝色", "青绿", "紫色", "琥珀", "玫红"}, color,
+                                  c - 86, [i, colors, changed](int k) {
+                                      visual.drafts[i].primary_color = colors[k];
+                                      changed();
+                                  });
+                        })
+                        .build();
+                    const auto weight = [&](float width) {
+                        u.column(id + ".weight.field")
+                            .width(width)
+                            .gap(5)
+                            .content([&] {
+                                text(u, id + ".weight.label", "线条粗细", width, 21, 13);
+                                segments(u, id + ".weight", {"细线", "标准", "加粗"},
+                                         std::clamp(int(e.line_width) - 1, 0, 2), width,
+                                         [i, changed](int k) {
+                                             visual.drafts[i].line_width = float(k + 1);
+                                             changed();
+                                         });
+                            })
+                            .build();
+                    };
+                    const auto points = [&](float width) {
+                        u.column(id + ".points.field")
+                            .width(width)
+                            .gap(5)
+                            .content([&] {
+                                text(u, id + ".points.label", "数据点大小", width, 21, 13);
+                                segments(u, id + ".points", {"小", "标准", "大"},
+                                         std::clamp(int(e.point_radius) - 2, 0, 2), width,
+                                         [i, changed](int k) {
+                                             visual.drafts[i].point_radius = float(k + 2);
+                                             changed();
+                                         });
+                            })
+                            .build();
+                    };
+                    if (c >= 460 && hasPoints)
+                        u.row(id + ".marks.row")
+                            .width(c)
+                            .gap(12)
+                            .content([&] {
+                                weight((c - 12) / 2);
+                                points((c - 12) / 2);
+                            })
+                            .build();
+                    else {
+                        if (kind != msa::charts::Kind::VarianceComponents)
+                            weight(c);
+                        if (hasPoints)
+                            points(c);
+                    }
+                    if (hasPoints) {
+                        text(u, id + ".marker.label", "数据点形状", c, 21, 13);
+                        combo(u, id + ".marker", {"按系列区分", "圆形", "方形", "菱形", "三角形"},
+                              static_cast<int>(e.marker_shape), c, [i, changed](int k) {
+                                  visual.drafts[i].marker_shape =
+                                      static_cast<msa::charts::MarkerShape>(k);
+                                  changed();
+                              });
+                    }
+                    if (kind == msa::charts::Kind::Histogram)
+                        localField(u, id + ".bins", "直方图分箱数", visual.bins[i], c,
+                                   "自动（可填 3 至 40）", changed);
+                } else {
+                    u.row(id + ".display.row")
+                        .width(c)
+                        .gap(12)
+                        .content([&] {
+                            checkOption(u, id + ".grid", "网格", e.show_grid, (c - 12) / 2,
+                                        [i, changed](bool value) {
+                                            visual.drafts[i].show_grid = value;
+                                            changed();
+                                        });
+                            checkOption(u, id + ".legend", "图例", e.show_legend, (c - 12) / 2,
+                                        [i, changed](bool value) {
+                                            visual.drafts[i].show_legend = value;
+                                            changed();
+                                        });
+                        })
+                        .build();
+                    if (e.show_legend) {
+                        text(u, id + ".legend.position.label", "图例位置", c, 21, 13);
+                        segments(u, id + ".legend.position", {"绘图区上方", "绘图区下方"},
+                                 static_cast<int>(e.legend_position), c, [i, changed](int k) {
+                                     visual.drafts[i].legend_position =
+                                         static_cast<msa::charts::LegendPosition>(k);
+                                     changed();
+                                 });
+                    }
+                    const bool control = kind == msa::charts::Kind::RangeChart ||
+                                         kind == msa::charts::Kind::MeanChart;
+                    const bool noLimits = kind == msa::charts::Kind::VarianceComponents;
+                    checkOption(
+                        u, id + ".limits",
+                        control    ? "中心线与控制限"
+                        : noLimits ? "规格参考线（本图不适用）"
+                                   : "规格参考线",
+                        e.show_limits, c,
+                        [i, changed](bool value) {
+                            visual.drafts[i].show_limits = value;
+                            changed();
+                        },
+                        noLimits);
                 }
-                u.rect(id + ".references.rule").size(c, 1).color(line).build();
-                subheading(u, id + ".references.heading", "显示内容", "", c);
-                u.row(id + ".display.row")
-                    .width(c)
-                    .gap(12)
-                    .content([&] {
-                        checkOption(u, id + ".grid", "网格", e.show_grid, (c - 12) / 2,
-                                    [i](bool value) {
-                                        visual.drafts[i].show_grid = value;
-                                        visual.editDirty[i] = true;
-                                    });
-                        checkOption(u, id + ".legend", "图例", e.show_legend, (c - 12) / 2,
-                                    [i](bool value) {
-                                        visual.drafts[i].show_legend = value;
-                                        visual.editDirty[i] = true;
-                                    });
-                    })
-                    .build();
-                const auto kind = msa::charts::all_kinds()[i];
-                const bool control =
-                    kind == msa::charts::Kind::RangeChart || kind == msa::charts::Kind::MeanChart;
-                const bool noLimits = kind == msa::charts::Kind::VarianceComponents;
-                checkOption(
-                    u, id + ".limits",
-                    control    ? "中心线与控制限"
-                    : noLimits ? "规格参考线（本图不适用）"
-                               : "规格参考线",
-                    e.show_limits, c,
-                    [i](bool value) {
-                        visual.drafts[i].show_limits = value;
-                        visual.editDirty[i] = true;
-                    },
-                    noLimits);
             })
             .build();
         // 错误和草稿状态共用固定槽位，应用失败不推移编辑操作。
+        const bool invalidPreview = visual.editDirty[i] && visual.preview.selected == i &&
+                                    visual.preview.draft && !visual.preview.draftError.empty();
         u.text(id + ".status")
             .size(c, 44)
             .text(!visual.editError[i].empty() ? visual.editError[i]
-                  : visual.editDirty[i]        ? "应用编辑后更新预览。"
-                                               : "编辑仅在本次运行期间保留。")
+                  : invalidPreview             ? visual.preview.draftError
+                  : visual.editDirty[i]        ? "正在预览草稿，应用后可导出。"
+                                               : "图表外观保留在本次运行期间。")
             .fontSize(16)
             .lineHeight(22)
-            .color(!visual.editError[i].empty() ? levelColor(Level::Error)
-                   : visual.editDirty[i]        ? levelColor(Level::Warning)
-                                                : muted)
+            .color(!visual.editError[i].empty() || invalidPreview ? levelColor(Level::Error)
+                   : visual.editDirty[i]                          ? levelColor(Level::Warning)
+                                                                  : muted)
             .wrap()
             .maxWidth(c)
             .verticalAlign(eui::VerticalAlign::Center)
@@ -888,7 +972,7 @@ void chartExportSettings(Ui &u, float w) {
                 .gap(5)
                 .content([&] {
                     text(u, "chart.format.label", "文件格式", width, 21, 13);
-                    segments(u, "chart.format", {"PNG", "JPEG", "PDF"}, visual.format, width,
+                    segments(u, "chart.format", {"PNG", "JPEG", "PDF", "SVG"}, visual.format, width,
                              [](int i) { visual.format = i; });
                 })
                 .build();
@@ -1026,7 +1110,8 @@ void chartExportSettings(Ui &u, float w) {
             .size(c, 44)
             .text(std::string(state.draft.silentCharts ? "静默保存，同名文件会追加序号。\n"
                                                        : "另存为时可选择目录和文件名。\n") +
-                  (visual.format == 2 ? "PDF 保存为单页图像。"
+                  (visual.format == 3 ? "SVG 保留矢量线条、数据点和文字。"
+                   : visual.format == 2 ? "PDF 保存为单页图像。"
                    : combination      ? "所选图表保存为一张合成图片。"
                                       : "目录留空时，图片保存在 Windows 桌面。"))
             .fontSize(16)
@@ -1065,6 +1150,35 @@ void chartSourceCard(Ui &u, float w) {
                 })
                 .build();
         };
+        const auto actions = [&](float width) {
+            u.row("charts.dataset.actions")
+                .width(width)
+                .gap(12)
+                .content([&] {
+                    const float bw = std::min(188.f, (width - 12) / 2);
+                    button(u, "charts.dataset.reanalyze", "按当前设置重算", bw, reanalyzeInsightData,
+                           false, state.busy() || !visual.importedSelected || !visual.imported);
+                    button(u, "charts.dataset.report",
+                           visual.busy() && visual.exportingReport ? "报告导出中…" : "导出方法对比报告",
+                           bw, exportComparisonReport, false,
+                           visual.busy() || state.busy() || !insightResult());
+                })
+                .build();
+        };
+        if (c >= 910) {
+            constexpr float actionWidth = 328, controlWidth = 340, gap = 16;
+            u.row("charts.source.toolbar")
+                .width(c)
+                .gap(gap)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    summary(c - actionWidth - controlWidth - 2 * gap);
+                    actions(actionWidth);
+                    insightSourceControls(u, "charts.dataset", controlWidth);
+                })
+                .build();
+            return;
+        }
         if (c >= 500) {
             const float controlWidth = std::clamp(c * .34f, 284.f, 380.f);
             u.row("charts.source.toolbar")
@@ -1080,19 +1194,7 @@ void chartSourceCard(Ui &u, float w) {
             summary(c);
             insightSourceControls(u, "charts.dataset", c);
         }
-        u.row("charts.dataset.actions")
-            .width(c)
-            .gap(12)
-            .content([&] {
-                const float bw = std::min(188.f, (c - 12) / 2);
-                button(u, "charts.dataset.reanalyze", "按当前设置重算", bw, reanalyzeInsightData,
-                       false, state.busy() || !visual.importedSelected || !visual.imported);
-                button(u, "charts.dataset.report",
-                       visual.busy() && visual.exportingReport ? "报告导出中…" : "导出方法对比报告",
-                       bw, exportComparisonReport,
-                       false, visual.busy() || state.busy() || !insightResult());
-            })
-            .build();
+        actions(c);
     });
 }
 constexpr float chartToolbarHeight = 44;
@@ -1138,7 +1240,9 @@ void chartPreviewToolbar(Ui &u, float w) {
                 w - draftWidth - gap - (inlineControls ? controlsWidth + gap : 0.f);
             chartSectionHeading(u, "charts.preview.heading", "图表预览", headingWidth);
             if (visual.editDirty[visual.selected])
-                badge(u, "charts.preview.state", "草稿待应用", draftWidth,
+                badge(u, "charts.preview.state",
+                      !visual.editing ? "草稿待应用"
+                      : !visual.preview.draftError.empty() ? "显示已应用" : "草稿预览", draftWidth,
                       levelColor(Level::Warning), levelSurface(Level::Warning));
             else if (inlineControls)
                 u.rect("charts.preview.spacer").size(draftWidth, 1).color("#00000000").build();
@@ -1250,15 +1354,17 @@ void chartsPage(Ui &u, float w, float h) {
                         visualRecovery(v, cw);
                     const float plotHeight = std::clamp(h - 226.f, 304.f, 528.f);
                     const auto *result = insightResult();
+                    const bool sideBySide = visual.editing && cw >= 950 && result;
                     auto preview = [&](float width) {
                         section(v, "charts.preview", "", width, [&](float c) {
+                            const auto *scene = result ? chartPreview(*result, c, plotHeight) : nullptr;
                             chartPreviewToolbar(v, c);
                             if (result) {
-                                if (const auto *scene = chartPreview(*result, c, plotHeight))
+                                if (scene)
                                     drawChartScene(
                                         v, "charts.scene." + std::to_string(visual.selected),
                                         *scene);
-                                else if (visual.editing && cw >= 1100)
+                                else if (sideBySide)
                                     v.column("charts.invalid.panel")
                                         .size(c, plotHeight)
                                         .content([&] {
@@ -1275,7 +1381,7 @@ void chartsPage(Ui &u, float w, float h) {
                                 chartEmptyState(v, c);
                         });
                     };
-                    if (visual.editing && cw >= 1100 && result)
+                    if (sideBySide)
                         v.row("charts.layout")
                             .width(cw)
                             .gap(sectionGap)

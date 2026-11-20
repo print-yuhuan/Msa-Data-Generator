@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(MsaNative VERSION 1.0.6 LANGUAGES C CXX)
+project(MsaNative VERSION 1.0.7 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -27,7 +27,7 @@ add_library(msa_core STATIC
   src/msa/config.cpp src/msa/numeric.cpp src/msa/anova.cpp src/msa/analysis_options.cpp
   src/msa/confidence.cpp src/msa/search.cpp src/msa/io.cpp src/msa/task.cpp
   src/msa/filename.cpp src/msa/csv_export.cpp src/msa/csv_read.cpp src/msa/sha256.cpp
-  src/msa/charts.cpp src/msa/comparison_report.cpp src/msa/report_pdf.cpp)
+  src/msa/charts.cpp src/msa/chart_svg.cpp src/msa/comparison_report.cpp src/msa/report_pdf.cpp)
 target_include_directories(msa_core PUBLIC src third_party "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_sources(msa_core PRIVATE src/msa/xlsx.cpp src/msa/xlsx_package.cpp)
 target_link_libraries(msa_core PUBLIC Threads::Threads)

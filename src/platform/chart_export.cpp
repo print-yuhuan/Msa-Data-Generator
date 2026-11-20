@@ -1,4 +1,5 @@
 #include "chart_export.hpp"
+#include "msa/chart_svg.hpp"
 #include "embedded_resources_win.hpp"
 // clang-format off: GDI+ 的头文件依赖 Windows 和 COM 类型定义。
 #include <objidl.h>
@@ -481,6 +482,8 @@ const char *chart_extension(ChartFormat format) {
         return ".jpg";
     case ChartFormat::Pdf:
         return ".pdf";
+    case ChartFormat::Svg:
+        return ".svg";
     }
     throw std::invalid_argument("未知图表导出格式");
 }
@@ -534,6 +537,28 @@ std::filesystem::path export_charts(const std::vector<Scene> &scenes,
     const int height = rows * panelHeight + (rows + 1) * margin;
     if (width > 16384 || height > 16384 || std::int64_t(width) * height > maxPixels)
         throw std::invalid_argument("组合图片过大，请降低单图宽度、增加列数或减少图表数量");
+    const auto panelX = [&](std::size_t i) { return margin + int(i % columns) * (options.panel_width + margin); };
+    const auto panelY = [&](std::size_t i) { return margin + int(i / columns) * (panelHeight + margin); };
+    if (options.format == ChartFormat::Svg) {
+        std::ostringstream svg;
+        svg.imbue(std::locale::classic());
+        svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << width << "\" height=\""
+            << height << "\" viewBox=\"0 0 " << width << ' ' << height << "\">\n"
+            << "<title>MSA 研究图表</title><rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n";
+        for (std::size_t i = 0; i < scenes.size(); ++i) {
+            const auto &scene = scenes[i];
+            svg << "<svg x=\"" << panelX(i) << "\" y=\"" << panelY(i)
+                << "\" width=\"" << options.panel_width << "\" height=\""
+                << double(scene.height) / scene.width * options.panel_width
+                << "\" viewBox=\"0 0 " << scene.width << ' ' << scene.height << "\">\n";
+            msa::charts::write_svg_items(svg, scene, "panel-" + std::to_string(i + 1));
+            svg << "</svg>\n";
+        }
+        svg << "</svg>\n";
+        msa::atomic_text(path, svg.str(), policy);
+        return path;
+    }
     GraphicsSession session;
     FontRasterizer font;
     Gdiplus::Bitmap bitmap(width, height, PixelFormat32bppARGB);
@@ -549,9 +574,8 @@ std::filesystem::path export_charts(const std::vector<Scene> &scenes,
                 "无法设置图像采样");
         require(graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf), "无法设置像素对齐");
         for (std::size_t i = 0; i < scenes.size(); ++i) {
-            const float x = float(margin + int(i % columns) * (options.panel_width + margin));
-            const float y = float(margin + int(i / columns) * (panelHeight + margin));
-            draw_scene(graphics, font, scenes[i], x, y, options.panel_width / scenes[i].width);
+            draw_scene(graphics, font, scenes[i], float(panelX(i)), float(panelY(i)),
+                       options.panel_width / scenes[i].width);
         }
     }
     auto bytes = encode_image(bitmap, options.format != ChartFormat::Png, options.jpeg_quality);

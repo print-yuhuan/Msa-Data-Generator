@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+from xml.etree import ElementTree
 
 import fitz
 from PIL import Image, ImageChops
@@ -20,6 +21,7 @@ def main():
     manifest = json.loads((args.directory / "chart-regression.json").read_text(encoding="utf-8-sig"))
     checks = []
     pdf_count = 0
+    svg_panels = []
     for item in manifest["files"]:
         path = Path(item["path"])
         try:
@@ -45,6 +47,30 @@ def main():
                         require(pixel[0] > 220 and pixel[1] < 50 and pixel[2] < 50, "PDF 内容方向或位置错误")
                     render_path = path.with_name(path.stem + "_pdf_preview.png")
                     image.save(render_path)
+            elif item["format"] == ".svg":
+                root = ElementTree.parse(path).getroot()
+                ns = "{http://www.w3.org/2000/svg}"
+                require(root.tag == ns + "svg", "缺少 SVG 根节点")
+                size = tuple(int(root.get(key)) for key in ("width", "height"))
+                require(size == expected_size, "SVG 尺寸错误")
+                panels = root.findall(ns + "svg")
+                require(len(panels) == item["panels"], "组合 SVG 的面板数错误")
+                require(len({(p.get("x"), p.get("y")) for p in panels}) == len(panels),
+                        "SVG 面板互相覆盖")
+                ids = [elem.attrib["id"] for elem in root.iter() if "id" in elem.attrib]
+                require(len(set(ids)) == len(ids), "SVG 出现重复的裁剪路径名称")
+                require(root.find(".//" + ns + "image") is None, "SVG 意外使用了位图")
+                for panel in panels:
+                    require(panel.find(".//" + ns + "line") is not None or
+                            panel.find(".//" + ns + "rect") is not None,
+                            "面板缺少矢量图元")
+                if len(panels) > 1:
+                    require(all(list(panel.iter(ns + "text")) for panel in panels),
+                            "组合图未保留可编辑文字")
+                with fitz.open(path) as document:
+                    pixmap = document[0].get_pixmap(alpha=False)
+                    image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+                svg_panels.append(len(panels))
             else:
                 with Image.open(path) as source:
                     source.load()
@@ -61,6 +87,8 @@ def main():
         except Exception as error:
             checks.append({"name": path.name, "passed": False, "error": str(error)})
     checks.append({"name": "已验证单图与两种分析方法的组合 PDF", "passed": pdf_count >= 3})
+    checks.append({"name": "已验证单图与两种分析方法的七图组合 SVG",
+                   "passed": 1 in svg_panels and svg_panels.count(7) >= 2})
     failed = sum(not item["passed"] for item in checks)
     report = {"passed": failed == 0, "count": len(checks), "failed": failed, "checks": checks,
               "pdf_decoder": "PyMuPDF", "image_decoder": "Pillow", "real_network": False}

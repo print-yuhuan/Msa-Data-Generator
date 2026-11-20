@@ -1011,6 +1011,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         result.metrics["GRR_pct"] = -2; // The selected matrix is authoritative.
         const auto generated = StudySource::Generated, imported = StudySource::ImportedData;
         const auto chart = ExportBasenameKind::Chart, report = ExportBasenameKind::ComparisonReport;
+        require(normalize_export_basename("交互图_[SEED].SVG", chart, ".png") == "交互图_[SEED]");
         const std::string pattern = "[[检]]_[时间戳]_[MS]_[随机种子]_[GRR实际值]";
         const std::string prefix = "[检]_1700000000_037_";
         for (auto kind : {ExportBasenameKind::Data, chart, report}) {
