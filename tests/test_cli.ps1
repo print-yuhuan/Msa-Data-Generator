@@ -182,7 +182,8 @@ $overrideData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $overrideCon
 $overrideHash=(Get-FileHash -LiteralPath $overrideConfig).Hash
 $overrideDirectory=Join-Path $runRoot '业务参数 导出'
 $overrideReport=Join-Path $runRoot 'override-report.json'
-$business=@('--operators=2','--replicates','3','--trials','2','--parts','10','--parts','5',
+$business=@('--operators=2','--operator-a','B','--operator-b','张 敏','--operator-c','陈琳',
+    '--replicates','3','--trials','2','--parts','10','--parts','5',
     '--study-multiplier','5.15','--lsl','null','--usl','null','--compliance','relaxed',
     '--center','12.5','--priority','indicators','--scale-mode','reference_tv_sd',
     '--reference-tv-sd','0.2','--decimal-places','6','--seed','-123','--max-attempts','50',
@@ -195,12 +196,15 @@ $overridden=Run-Cli ($business+@('--config',$overrideConfig,'--report',$override
 Check ($overridden.exit -eq 0) 'all GUI business overrides generate successfully before or after --config'
 $effective=(Get-Content -LiteralPath $overrideReport -Raw -Encoding UTF8 | ConvertFrom-Json).config
 Check ($effective.design.operators -eq 2 -and $effective.design.replicates -eq 2 -and $effective.design.parts -eq 5) 'design overrides and repeated aliases use last value'
+Check (($effective.design.operator_names -join '|') -ceq 'B|张 敏|陈琳') 'operator names override an older config and retain the inactive third slot'
 Check ($effective.analysis.study_multiplier -eq 5.15 -and $null -eq $effective.specification.lsl -and $null -eq $effective.specification.usl -and $effective.specification.compliance -eq 'relaxed') 'analysis and nullable specification overrides'
 Check ($effective.generation.center -eq 12.5 -and $effective.generation.priority -eq 'indicators' -and $effective.generation.scale_mode -eq 'reference_tv_sd' -and $effective.generation.reference_tv_sd -eq 0.2 -and $effective.generation.decimal_places -eq 6 -and $effective.generation.seed -eq -123 -and $effective.generation.max_attempts -eq 50 -and $effective.generation.timeout_seconds -eq 5) 'all generation and search overrides'
 Check ($effective.target_defaults.percentage_tolerance_pp -eq 1 -and $effective.target_defaults.ndc_tolerance -eq 2) 'default target tolerance overrides'
 Check ($effective.targets.EV_pct.mode -eq 'target' -and $effective.targets.EV_pct.value -eq 10 -and $effective.targets.EV_pct.tolerance_pp -eq 1 -and $effective.targets.AV_pct.mode -eq 'between' -and $effective.targets.AV_pct.min -eq 0 -and $effective.targets.AV_pct.max -eq 20 -and $effective.targets.GRR_pct.mode -eq 'at_most' -and $effective.targets.GRR_pct.value -eq 30 -and $null -eq $effective.targets.PT_pct -and $effective.targets.ndc.mode -eq 'at_least' -and $effective.targets.ndc.value -eq 1) 'all five metric overrides replace complete target objects'
 Check ($effective.output.directory -eq $overrideDirectory -and $effective.output.filename -eq '命令行_[OPERATORS]_[SEED]' -and $effective.output.existing_file -eq 'number' -and $effective.output.format -eq 'minitab' -and $effective.output.run_order.mode -eq 'within_operator' -and $effective.output.run_order.randomize_operators -and $effective.output.run_order.seed -eq 321 -and $effective.output.run_order.store_standard_order) 'all output and run-order overrides'
 $overrideCsv=($overridden.stdout | ConvertFrom-Json).output
+$exportedNames = @((Import-Csv -LiteralPath $overrideCsv -Encoding UTF8).Operator | Sort-Object -Unique)
+Check ($exportedNames.Count -eq 2 -and $exportedNames -ccontains 'B' -and $exportedNames -ccontains '张 敏') 'only the two active operator names appear in the exported data'
 Check ([IO.Path]::GetFileName($overrideCsv) -eq '命令行_2_-123.csv' -and @(Import-Csv -LiteralPath $overrideCsv).Count -eq 20) 'overridden filename variables and study dimensions reach actual CSV'
 $again=Run-Cli ($business+@('--config',$overrideConfig,'--csv-format','jmp19')) $true
 $againCsv=($again.stdout | ConvertFrom-Json).output
@@ -210,7 +214,7 @@ Check ((Get-FileHash -LiteralPath $overrideConfig).Hash -eq $overrideHash) 'busi
 $savedEffective=Join-Path $runRoot 'effective.json'
 $effective | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $savedEffective -Encoding UTF8
 $clearReport=Join-Path $runRoot 'clear-report.json'
-$cleared=Run-Cli @('--config',$savedEffective,'--seed','null','--center','null','--reference-tv-sd','null',
+$cleared=Run-Cli @('--config',$savedEffective,'--operator-a=','--seed','null','--center','null','--reference-tv-sd','null',
     '--scale-mode','auto','--lsl','9','--usl','11','--compliance','strict','--priority','center',
     '--ev','none','--av','none','--grr','none','--pt','at_least:0','--ndc','none',
     '--run-seed','null','--randomize-operators','false','--store-standard-order','false',
@@ -218,6 +222,7 @@ $cleared=Run-Cli @('--config',$savedEffective,'--seed','null','--center','null',
     '--output',(Join-Path $runRoot 'cleared.csv'),'--report',$clearReport) $true
 Check ($cleared.exit -eq 0) 'nullable and boolean overrides can clear saved GUI settings'
 $clearedConfig=(Get-Content -LiteralPath $clearReport -Raw -Encoding UTF8 | ConvertFrom-Json).config
+Check ($clearedConfig.design.operator_names[0] -ceq '' -and $clearedConfig.design.operator_names[1] -ceq '张 敏' -and (Get-Content -LiteralPath (Join-Path $runRoot 'cleared.csv') -Encoding UTF8)[1].StartsWith('A,')) 'clearing one operator restores its default independently'
 Check ($null -eq $clearedConfig.generation.seed -and $null -eq $clearedConfig.generation.center -and $null -eq $clearedConfig.generation.reference_tv_sd -and $null -eq $clearedConfig.output.run_order.seed -and -not $clearedConfig.output.run_order.randomize_operators -and -not $clearedConfig.output.run_order.store_standard_order) 'explicit null and false survive defaults and saved configuration'
 
 $omittedReport=Join-Path $runRoot 'omitted-tolerance.json'
@@ -281,7 +286,7 @@ foreach ($arguments in @(@('--existing-file','invalid'), @('--filename','[UNKNOW
     $badArgs = Run-Cli (@('--no-config')+$arguments) $true
     Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0) "configured CSV export validates active CLI option: $($arguments[0])"
 }
-$helpFlags=@('--operators','--replicates','--trials','--parts','--study-multiplier','--lsl','--usl',
+$helpFlags=@('--operators','--operator-a','--operator-b','--operator-c','--replicates','--trials','--parts','--study-multiplier','--lsl','--usl',
     '--compliance','--center','--priority','--scale-mode','--reference-tv-sd','--decimal-places',
     '--seed','--max-attempts','--timeout-seconds','--percentage-tolerance-pp','--ndc-tolerance',
     '--ev','--av','--grr','--pt','--ndc','--output-directory','--filename','--file-type','--existing-file',

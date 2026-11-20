@@ -49,7 +49,9 @@ template <class F> void test(const std::string &name, F fn) {
 }
 Json example(int o = 3, int r = 3, int p = 10) {
     auto c = default_config();
-    c["design"] = {{"operators", o}, {"replicates", r}, {"parts", p}};
+    c["design"]["operators"] = o;
+    c["design"]["replicates"] = r;
+    c["design"]["parts"] = p;
     c["specification"]["lsl"] = 9;
     c["specification"]["usl"] = 11;
     c["generation"]["seed"] = 123;

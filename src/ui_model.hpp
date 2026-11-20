@@ -41,6 +41,7 @@ inline constexpr std::array<const char *, 3> interaction_modes{"auto", "include"
 struct Draft {
     std::string operators = "3", replicates = "3", parts = "10", lsl, usl, multiplier = "6",
                 reference, minimumPartSpanPct;
+    std::array<std::string, 3> operatorNames{};
     std::string center, decimals = "4", percentError = "0.1", ndcError = "0", seed,
                         attempts = "5000", timeout = "30", directory, filename = "msa_data";
     int priority = 0, compliance = 0, scale = 0, existingFile = 0, csvFormat = 0, runMode = 0;
@@ -160,6 +161,7 @@ enum class ConfigUse { Full, Generation, Analysis };
 inline msa::Json to_config(const Draft &d, ConfigUse use = ConfigUse::Full) {
     auto c = msa::default_config();
     c["design"] = {{"operators", numeric(d.operators, "操作员数", true)},
+                   {"operator_names", d.operatorNames},
                    {"replicates", numeric(d.replicates, "重复测量次数", true)},
                    {"parts", numeric(d.parts, "部件数", true)}};
     c["analysis"]["study_multiplier"] = numeric(d.multiplier, "研究变异倍数");
@@ -242,6 +244,7 @@ inline Draft from_config(const msa::Json &raw) {
     Draft d;
     auto text = [](const msa::Json &v) { return v.is_null() ? std::string{} : v.dump(); };
     d.operators = text(c["design"]["operators"]);
+    d.operatorNames = c["design"]["operator_names"].get<decltype(d.operatorNames)>();
     d.replicates = text(c["design"]["replicates"]);
     d.parts = text(c["design"]["parts"]);
     d.lsl = text(c["specification"]["lsl"]);

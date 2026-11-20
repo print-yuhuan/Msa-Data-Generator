@@ -62,7 +62,7 @@ Operator,Part,Trial,Measurement
 StdOrder,Operator,Part,Trial,Measurement
 ```
 
-Operator 为 A/B/C 等人员标记，Part 从 1 开始，Trial 为原始重复测量编号。CSV 行序就是实际运行顺序，导入时无需为统计计算再次排序。
+Operator 为研究设计中的操作员名称，默认使用 A/B/C，Part 从 1 开始，Trial 为原始重复测量编号。CSV 行序就是实际运行顺序，导入时无需为统计计算再次排序。
 
 | 模式 | 规则 |
 |---|---|
@@ -74,10 +74,10 @@ Operator 为 A/B/C 等人员标记，Part 从 1 开始，Trial 为原始重复�
 
 ```text
 StdOrder = ((Trial−1)×件数 + Part−1)×人数 + 人员编号
-A=1，B=2，C=3
+按研究设计中的人员顺序编号，默认 A=1，B=2，C=3
 ```
 
-例如 3 人×3 次×10 件时，StdOrder=62 始终对应 B、Part1、Trial3，即使移到 CSV 第 2 行，Trial 仍是 3。随机化只移动整条记录，Measurement、Trial 及字段绑定关系保持不变。
+例如 3 人×3 次×10 件时，StdOrder=62 始终对应第 2 位操作员（默认 B）、Part1、Trial3，即使移到 CSV 第 2 行，Trial 仍是 3。随机化只移动整条记录，Measurement、Trial 及字段绑定关系保持不变。
 
 “默认”格式为带列号和人员标记的宽表，不能完整表达逐条运行顺序，相关选项禁用。用于上述列映射时请选择任一长表格式；已有宽表需先堆叠成对应测量记录。五种软件格式共用相同长表与排序实现，其名称表示排版预设；其他软件应用的实际导入不在 Minitab 对标验证范围内。
 

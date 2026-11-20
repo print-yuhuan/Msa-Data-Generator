@@ -205,7 +205,8 @@ struct State {
         const std::string alpha = draft.interactionAlpha;
         const auto previous = draft;
         draft = Draft{};
-        // 示例只替换研究参数；用户的导出路径、格式和运行顺序保持不变。
+        // 示例使用当前操作员名称和导出偏好。
+        draft.operatorNames = previous.operatorNames;
         draft.directory = previous.directory;
         draft.filename = previous.filename;
         draft.existingFile = previous.existingFile;
@@ -992,9 +993,11 @@ void input(Ui &u, const std::string &id, std::string &value, float w, const std:
     });
 }
 void field(Ui &u, const std::string &id, const std::string &label, std::string &v, float w,
-           const std::string &hint = "", bool exportOnly = false) {
+           const std::string &hint = "", bool exportOnly = false, bool disabled = false) {
     u.column(id + ".field")
         .width(w)
+        .disabled(disabled)
+        .opacity(disabled ? .5f : 1.f)
         .gap(5)
         .content([&] {
             text(u, id + ".label", label, w, 21, 13);
@@ -1473,10 +1476,29 @@ void resultEmpty(Ui &u, const std::string &id, float w, const std::string &hint)
 }
 struct PreviewColumns {
     int first = 0, count = 0, pages = 0;
+    float labelWidth = 0;
 };
-float previewLabelWidth(bool fixedPanel) { return fixedPanel ? 96.f : 106.f; }
+std::string labelThatFits(const std::string &label, float width, float size, int weight = 400) {
+    const auto metrics = core::TextPrimitive::measureTextMetrics(label, font(), size, weight);
+    if (metrics.width <= width)
+        return label;
+    const float space = width - core::TextPrimitive::measureTextWidth("…", font(), size, weight);
+    const auto end = std::upper_bound(metrics.caretX.begin(), metrics.caretX.end(), space);
+    const auto length = end == metrics.caretX.begin()
+                            ? 0
+                            : metrics.byteIndices[std::distance(metrics.caretX.begin(), end) - 1];
+    return label.substr(0, length) + "…";
+}
 PreviewColumns previewColumns(const msa::Result &res, float w, bool fixedPanel) {
-    const int parts = res.config["design"]["parts"];
+    const auto &design = res.config.at("design");
+    const int parts = design.at("parts");
+    const auto names = msa::operator_names(design);
+    float labelWidth = fixedPanel ? 96.f : 106.f;
+    for (int i = 0; i < design.at("operators").get<int>(); ++i) {
+        const float natural = core::TextPrimitive::measureTextWidth(
+            names[i] + " / " + design.at("replicates").dump(), font(), tableLabelFont) + 16;
+        labelWidth = std::max(labelWidth, std::min(w * .38f, natural));
+    }
     std::size_t maxDigits = 1;
     for (const auto &row : res.matrix)
         for (double v : row)
@@ -1485,11 +1507,11 @@ PreviewColumns previewColumns(const msa::Result &res, float w, bool fixedPanel) 
     const float numericWidth =
         core::TextPrimitive::measureTextWidth(std::string(maxDigits, '0'), {}, 17.5f, 400);
     const int cols = std::clamp(
-        int((w - previewLabelWidth(fixedPanel)) / std::max(58.f, numericWidth + 10.f)), 1, parts);
+        int((w - labelWidth) / std::max(58.f, numericWidth + 10.f)), 1, parts);
     const int pages = (parts + cols - 1) / cols;
     state.previewPage = std::clamp(state.previewPage, 0, pages - 1);
     const int first = state.previewPage * cols;
-    return {first, std::min(cols, parts - first), pages};
+    return {first, std::min(cols, parts - first), pages, labelWidth};
 }
 void preview(Ui &u, float w, const PreviewColumns &columns, float availableHeight) {
     if (!state.displayedResult()) {
@@ -1499,7 +1521,8 @@ void preview(Ui &u, float w, const PreviewColumns &columns, float availableHeigh
     const auto &res = *state.result;
     const int reps = res.config["design"]["replicates"];
     const bool fixedPanel = availableHeight > 0;
-    const float labelWidth = previewLabelWidth(fixedPanel);
+    const auto names = msa::operator_names(res.config.at("design"));
+    const float labelWidth = columns.labelWidth;
     const float cell = (w - labelWidth) / columns.count;
     const int rows = int(res.matrix.size());
     const float minimumRowHeight = fixedPanel ? 26.f : 34.f;
@@ -1524,15 +1547,22 @@ void preview(Ui &u, float w, const PreviewColumns &columns, float availableHeigh
                 u.row(id)
                     .size(w, rowHeight)
                     .content([&] {
+                        std::string label = "操作员 / 次";
+                        if (r >= 0) {
+                            const auto trial = " / " + std::to_string(r % reps + 1);
+                            const float suffixWidth =
+                                core::TextPrimitive::measureTextWidth(trial, font(), tableLabelFont);
+                            label = labelThatFits(names[r / reps], labelWidth - 16 - suffixWidth,
+                                                  tableLabelFont) + trial;
+                        }
                         u.text("rowlabel" + std::to_string(r))
                             .size(labelWidth - 8, rowHeight)
                             .margin(8, 0, 0, 0)
-                            .text(r < 0 ? "操作员 / 次"
-                                        : std::string(1, char('A' + r / reps)) + " / " +
-                                              std::to_string(r % reps + 1))
+                            .text(label)
                             .fontSize(tableLabelFont)
                             .color(muted)
                             .verticalAlign(eui::VerticalAlign::Center)
+                            .clip()
                             .build();
                         for (int c = 0; c < columns.count; ++c)
                             u.text("cell" + std::to_string(r) + "_" + std::to_string(c))
@@ -1987,6 +2017,7 @@ void saveSettings() {
         auto cfg = native_ui::to_config(state.draft);
         const auto path = msa::config_path();
         msa::save_config(cfg, path);
+        state.draft.operatorNames = cfg.at("design").at("operator_names").get<decltype(state.draft.operatorNames)>();
         state.draft.importFilename = cfg.at("input").at("filename");
         const auto &output = cfg.at("output");
         state.draft.filename = output.at("filename");
@@ -2142,6 +2173,26 @@ void designSettings(Ui &u, float w) {
                 paragraph(u, "design.note", "每位操作员按相同次数测量所有部件。", c - 148,
                           muted, 17.5f);
                 badge(u, "design.records", "共 " + std::to_string(records) + " 次测量", 136);
+            })
+            .build();
+        u.column("operator.names")
+            .width(c)
+            .gap(6)
+            .content([&] {
+                text(u, "operator.names.title", "默认操作员", c, 22, 15);
+                u.row("operator.names.row")
+                    .width(c)
+                    .gap(12)
+                    .content([&] {
+                        for (int i = 0; i < 3; ++i) {
+                            const auto number = std::to_string(i + 1);
+                            field(u, "operator.name." + number, "操作员 " + number,
+                                  state.draft.operatorNames[i], f, std::string(1, char('A' + i)),
+                                  false, i == 2 && state.draft.operators == "2");
+                        }
+                    })
+                    .build();
+                text(u, "operator.names.hint", "名称留空时，依次使用 A、B、C。", c, 22, 13, muted);
             })
             .build();
     });
@@ -3797,7 +3848,9 @@ void helpQuickStart(Ui &v, float cw) {
                 .build();
         };
         step("help.step1", "1", "设置研究设计",
-             "在「选项 → 研究」设置操作员数、重复测量次数和部件数。在「选项 → 分析」选择分析方法。");
+             "在「选项 → 研究 → 研究设计」设置操作员数、重复测量次数和部件数。默认操作员名称"
+             "留空时依次使用 A、B、C；选择 2 人时，第三个名称保留，切回 3 人后可继续编辑。"
+             "在「选项 → 分析」选择分析方法。");
         step("help.step2", "2", "填写生成条件",
              "在「数据」页填写规格限和指标约束，数据中心可留空。「规格内生成」需要至少一侧规格限，"
              "「随机取样」和「最低部件跨度」都需要上下规格限。");
@@ -4042,7 +4095,8 @@ void helpCsv(Ui &v, float cw) {
                  c);
         helpItem(v, "help.runorder.identity", "手工核对序号",
                  "StdOrder 等于 ((Trial − 1) × 部件数 + Part − 1) × 操作员数 + "
-                 "操作员编号。A、B、C 对应 1、2、3。总记录数为操作员数 × 重复测量次数 × 部件数。",
+                 "操作员编号。编号 1、2、3 对应「研究设计」中从左到右的操作员，默认名称为 A、B、C。"
+                 "总记录数为操作员数 × 重复测量次数 × 部件数。",
                  c);
     });
     section(v, "help.minitab", "导入 Minitab 并核对结果", cw, [&](float c) {
@@ -4122,7 +4176,8 @@ void helpCli(Ui &v, float cw) {
                  c);
         helpItem(v, "help.cli.syntax", "常用参数写法",
                  "含空格的路径用引号括起。用 null 清空可选数值，布尔选项填写 true 或 "
-                 "false。同一参数写多次时，以最后一次为准。",
+                 "false。同一参数写多次时，以最后一次为准。用 --operator-a、--operator-b、"
+                 "--operator-c 分别指定三位操作员的名称，例如 --operator-a 张工。",
                  c);
     });
     section(v, "help.cli.generate", "生成并导出数据", cw, [&](float c) {
@@ -4179,7 +4234,8 @@ void helpCharts(Ui &v, float cw) {
                  "研究配置与统计结果。",
                  c);
         helpItem(v, "help.charts.source.import", "导入数据",
-                 "先在「选项」按文件设置操作员数、重复测量次数、部件数及分析方法。再到「图表」"
+                 "先在「选项」按文件设置操作员数、重复测量次数、部件数及分析方法。文件使用自定义"
+                 "操作员名称时，在「研究设计」按对应位置填写名称。再到「图表」"
                  "点击「导入数据」，选择包含完整宽表或长表测量记录的 CSV 文件或 XLSX 工作簿。"
                  "CSV 和只有一张数据工作表的 XLSX 会直接导入。若有多张，弹窗按工作簿顺序列出数据工作表，"
                  "也可选择隐藏的数据工作表。选中一张后点击「导入」或按回车。取消会保留原数据和图表。"
@@ -4187,7 +4243,7 @@ void helpCharts(Ui &v, float cw) {
                  c);
         helpText(v, "help.charts.source.switch",
                  "导入成功后可在「当前结果」和「已导入数据」之间切换。修改分析选项后，点击"
-                 "「按当前设置重算」重新分析原始记录。「导出方法对比报告」可将当前数据源的"
+                 "「按当前设置重算」重新分析原始记录，保留导入时的操作员名称。「导出方法对比报告」可将当前数据源的"
                  " Xbar-R 与 ANOVA 结果保存为 PDF 或 HTML，默认选中 PDF。「选项 → 文件」中可设置"
                  "报告目录、文件名、默认格式和静默保存开关。",
                  c);

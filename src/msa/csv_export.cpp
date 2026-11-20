@@ -1,10 +1,22 @@
 #include "core.hpp"
+#include "csv_fields.hpp"
 #include <algorithm>
 #include <mutex>
 #include <numeric>
 #include <random>
 
 namespace msa {
+std::string csv_cell(const std::string &s) {
+    if (s.find_first_of(",\"\r\n") == std::string::npos)
+        return s;
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '"')
+            out += '"';
+        out += c;
+    }
+    return out + '"';
+}
 struct ExportStudyState {
     std::once_flag once;
     std::uint64_t seed = 0;
@@ -100,6 +112,9 @@ std::string export_csv_text(const Result &result, const Json &raw) {
     const auto cfg = normalize_config(result.config), output = normalize_output(raw);
     const Design d(cfg);
     d.check(result.matrix);
+    auto labels = operator_names(cfg["design"]);
+    for (auto &label : labels)
+        label = csv_cell(label);
     const int dp = cfg["generation"]["decimal_places"];
     if (output["format"] == "default") {
         std::string text("\xef\xbb\xbf");
@@ -108,7 +123,7 @@ std::string export_csv_text(const Result &result, const Json &raw) {
         text += "\r\n";
         for (int op = 1; op <= d.operators; ++op)
             for (int trial = 1; trial <= d.trials; ++trial) {
-                text += char('A' + op - 1);
+                text += labels[op - 1];
                 for (const double value : result.matrix[d.index(op, trial)])
                     text += ',' + fixed(value, dp);
                 text += "\r\n";
@@ -121,7 +136,7 @@ std::string export_csv_text(const Result &result, const Json &raw) {
     for (const auto &record : export_records(result, output)) {
         if (standard)
             text += std::to_string(record.standard_order) + ',';
-        text += char('A' + record.operator_number - 1);
+        text += labels[record.operator_number - 1];
         text += ',' + std::to_string(record.part) + ',' + std::to_string(record.trial) + ',';
         text += fixed(record.measurement, dp) + "\r\n";
     }

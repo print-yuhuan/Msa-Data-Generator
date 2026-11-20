@@ -148,8 +148,12 @@ void write_comparison_report(const std::filesystem::path &path, const Result &st
     out << " · MSA " << escaped(version) << "</p></header>\n<section><h2>研究设置</h2><p>"
         << design.at("operators") << " 名操作员 × " << design.at("parts") << " 个部件 × "
         << design.at("replicates") << " 次重复测量，共 "
-        << study.matrix.size() * design.at("parts").get<int>() << " 个读数。</p><p>规格下限 "
-        << shown(spec.at("lsl")) << "，规格上限 " << shown(spec.at("usl")) << "，研究变异倍数 "
+        << study.matrix.size() * design.at("parts").get<int>() << " 个读数。操作员为";
+    const auto names = operator_names(design);
+    for (int op = 0; op < design.at("operators").get<int>(); ++op)
+        out << (op ? "、" : "") << escaped(names[op]);
+    out << "。</p><p>规格下限 " << shown(spec.at("lsl")) << "，规格上限 " << shown(spec.at("usl"))
+        << "，研究变异倍数 "
         << shown(analysis.at("study_multiplier")) << "，历史过程标准差 "
         << shown(analysis.at("historical_sd")) << "。</p>";
     if (source == StudySource::Generated &&

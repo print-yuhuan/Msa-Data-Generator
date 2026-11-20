@@ -13,7 +13,8 @@ Json default_config() {
         targets[key] = nullptr;
     return {{"schema_version", 2},
             {"input", {{"directory", ""}, {"filename", ""}}},
-            {"design", {{"operators", 3}, {"replicates", 3}, {"parts", 10}}},
+            {"design", {{"operators", 3}, {"replicates", 3}, {"parts", 10},
+                        {"operator_names", {"", "", ""}}}},
             {"analysis",
              {{"method", "crossed_xbarr"},
               {"percentage_basis", "sd_over_tv"},
@@ -92,6 +93,23 @@ bool one_of(const Json &value, std::initializer_list<const char *> values) {
     return false;
 }
 } // namespace
+std::array<std::string, 3> operator_names(const Json &design) {
+    std::array<std::string, 3> names{"A", "B", "C"};
+    if (design.contains("operator_names")) {
+        const auto &configured = design.at("operator_names");
+        if (!configured.is_array() || configured.size() != names.size())
+            throw ConfigError("操作员名称须包含三个文本项，留空时使用 A/B/C");
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (!configured[i].is_string())
+                throw ConfigError("操作员名称必须是文本");
+            const auto &name = configured[i].get_ref<const std::string &>();
+            const auto first = name.find_first_not_of(" \t");
+            if (first != std::string::npos)
+                names[i] = name.substr(first, name.find_last_not_of(" \t") - first + 1);
+        }
+    }
+    return names;
+}
 Json normalize_config(const Json &raw) {
     auto c = merge(default_config(), raw);
     if (!c["schema_version"].is_number_integer() ||
@@ -117,6 +135,21 @@ Json normalize_config(const Json &raw) {
     auto &d = c["design"], &a = c["analysis"], &s = c["specification"], &g = c["generation"],
          &t = c["target_defaults"], &out = c["output"];
     number(d["operators"], "人员数", 2, 3, true);
+    const auto names = operator_names(d);
+    std::set<std::string> active_names;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const auto &name = names[i];
+        if (std::any_of(name.begin(), name.end(), [](unsigned char c) { return c < 32; }) ||
+            name.find("\xef\xbf\xbe") != name.npos || name.find("\xef\xbf\xbf") != name.npos)
+            throw ConfigError("操作员名称不能包含换行或其他控制字符");
+        if (i < d["operators"].get<std::size_t>() && !active_names.insert(name).second)
+            throw ConfigError("启用的操作员名称不能重复：" + name);
+        auto &stored = d["operator_names"][i];
+        if (stored.get_ref<const std::string &>().find_first_not_of(" \t") == std::string::npos)
+            stored = "";
+        else
+            stored = name;
+    }
     number(d["replicates"], "测量次数", 2, 3, true);
     number(d["parts"], "产品数", 5, 10, true);
     if (!one_of(a["method"], {"crossed_xbarr", "crossed_anova"}) ||

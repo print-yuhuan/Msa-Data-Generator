@@ -45,6 +45,7 @@ struct FileExistsError : std::runtime_error {
 };
 enum class ExistingFile { Replace, Preserve };
 Json default_config();
+std::array<std::string, 3> operator_names(const Json &design);
 Json normalize_config(const Json &raw);
 Json validate_request(const Json &raw);
 Bounds acceptance(const Json &cfg, const std::string &key);

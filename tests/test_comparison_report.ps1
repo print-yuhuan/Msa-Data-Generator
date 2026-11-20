@@ -17,7 +17,8 @@ function Check([bool]$Condition, [string]$Message) {
 $csv = Join-Path $run '研究&A.csv'
 $created = Join-Path $run 'generated.html'
 $imported = Join-Path $run 'imported.html'
-$parameters = @('--lsl','9','--usl','11','--historical-sd','1','--interaction','include')
+$parameters = @('--lsl','9','--usl','11','--historical-sd','1','--interaction','include',
+                '--operator-a','赵<&明','--operator-c','王丽')
 $null = Invoke-Study (@('--seed','123','--output',$csv,'--comparison-report',$created) + $parameters)
 $xbar = Invoke-Study (@('--input',$csv,'--method','crossed_xbarr','--comparison-report',$imported) + $parameters)
 $anova = Invoke-Study (@('--input',$csv,'--method','crossed_anova') + $parameters)
@@ -33,6 +34,10 @@ foreach ($content in @($fromFile, $fromGenerator)) {
     }
     Check ($content.Contains('强制保留') -and $content.Contains('双侧规格宽度') -and $content.Contains('历史标准差')) '方法或容差来源缺失'
     Check (([regex]::Matches($content, '<svg ').Count -eq 2) -and $content.Contains('@media print')) '报告缺少控制图或打印布局'
+    Check ($content.Contains('操作员为赵&lt;&amp;明、B、王丽') -and
+           ([regex]::Matches($content, '>操作员 赵&lt;&amp;明</text>').Count -eq 2) -and
+           ([regex]::Matches($content, '>操作员 B</text>').Count -eq 2) -and
+           ([regex]::Matches($content, '>操作员 王丽</text>').Count -eq 2)) '报告名单和两张控制图应显示已转义的姓名及回退名称'
 }
 Check ($fromGenerator.Contains('模拟生成') -and $fromGenerator.Contains('数据生成种子 123')) '模拟研究来源缺失'
 Check ($fromFile.Contains('数据导入') -and $fromFile.Contains('研究&amp;A.csv') -and -not $fromFile.Contains('数据生成种子')) '导入文件名转义或种子不正确'
@@ -72,8 +77,10 @@ if ($browser) {
 
 $constant = Join-Path $run 'constant.csv'
 $zeroReport = Join-Path $run 'constant.html'
+$longName = '精密测量实验室质量工程组第一工位白班轮值测量操作员'
 [IO.File]::WriteAllLines($constant, [string[]](@('1,1,1,1,1') * 4))
-$null = Invoke-Study @('--input',$constant,'--operators','2','--replicates','2','--parts','5','--comparison-report',$zeroReport)
+$null = Invoke-Study @('--input',$constant,'--operators','2','--operator-a',$longName,'--operator-c','备用姓名','--replicates','2','--parts','5','--comparison-report',$zeroReport)
 $zero = Read-Report $zeroReport
 Check ($zero.Contains('data-value="null">—') -and $zero.Contains('未定义')) '退化研究应清楚表示缺失的指标或容差'
+Check ($zero.Contains("操作员为${longName}、B。") -and -not $zero.Contains('备用姓名')) '两人研究应保留完整长名且只显示前两位操作员'
 Write-Output 'Generated, imported and constant comparison studies passed'

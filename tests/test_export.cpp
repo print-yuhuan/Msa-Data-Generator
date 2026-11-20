@@ -119,8 +119,78 @@ void wide_checks(const Result &s, const std::string &bytes) {
           "labeled wide roundtrip");
     check(parse_csv(csv_text(s.matrix, dp)) == s.matrix, "legacy numeric wide reader");
 }
+void operator_name_checks(const std::filesystem::path &out) {
+    auto sample = study(3, 2, 5);
+    auto &design = sample.config["design"];
+    design.erase("operator_names");
+    check(operator_names(design) == std::array<std::string, 3>{"A", "B", "C"} &&
+              normalize_config(sample.config)["design"]["operator_names"] == Json({"", "", ""}),
+          "legacy operator defaults");
+    design["operator_names"] = {"  张, \"伟\" <&>  ", "  ", "001"};
+    auto normalized = normalize_config(sample.config);
+    check(normalized["design"]["operator_names"] == Json({"张, \"伟\" <&>", "", "001"}) &&
+              operator_names(normalized["design"])[1] == "B", "operator names not normalized");
+    for (const char *format : {"default", "minitab"}) {
+        auto settings = sample.config["output"];
+        settings["format"] = format;
+        settings["run_order"]["mode"] = "all";
+        settings["run_order"]["seed"] = 123;
+        settings["run_order"]["store_standard_order"] = true;
+        const auto csv = export_csv_text(sample, settings);
+        check(csv.find("\"张, \"\"伟\"\" <&>\"") != std::string::npos &&
+                  csv.find("001,") != std::string::npos &&
+                  parse_export_csv(csv, sample.config) == sample.matrix,
+              "quoted operator names in CSV");
+        if (settings["format"] == "default")
+            check(parse_csv(csv) == sample.matrix, "generic wide reader lost named groups");
+        for (const char *ext : {".xlsx", ".csv"}) {
+            const auto file = out / (std::string("operator-") + format + ext);
+            Json receipt;
+            export_data(sample, file, settings, ExistingFile::Replace, &receipt);
+            check(read_data(file, normalized) == sample.matrix, "named data file did not roundtrip");
+            if (data_file_type(file) == "xlsx")
+                check(csv_from_xlsx(read_text(file)).find("\"张, \"\"伟\"\" <&>\"") != std::string::npos,
+                      "workbook changed the operator label");
+            auto report = sample.as_json();
+            report["export"] = receipt;
+            const auto replay = out / (std::string("operator-replay") + ext);
+            replay_data(report, replay, ExistingFile::Replace);
+            check(read_text(replay) == read_text(file), "named report replay changed the export");
+        }
+    }
+    design["operator_names"] = {"B", "", "003"};
+    rejects([&] { normalize_config(sample.config); }); // Explicit B collides with the fallback.
+    design["operators"] = 2;
+    design["operator_names"] = {"B", "甲", "甲"};
+    check(normalize_config(sample.config)["design"]["operator_names"][2] == "甲",
+          "inactive third name was lost or rejected");
+    design["operators"] = 3;
+    rejects([&] { normalize_config(sample.config); });
+
+    const auto old = study(2, 2, 5);
+    auto renamed = old;
+    for (const auto &names : {Json({"B", "甲", ""}), Json({"B", "A", ""})}) {
+        renamed.config["design"]["operator_names"] = names;
+        for (const char *format : {"default", "minitab"}) {
+            auto settings = old.config["output"];
+            settings["format"] = format;
+            settings["run_order"]["mode"] = "all";
+            settings["run_order"]["seed"] = 7;
+            for (bool standard_order : {false, true}) {
+                settings["run_order"]["store_standard_order"] = standard_order;
+                const auto custom_csv = export_csv_text(renamed, settings);
+                check(parse_export_csv(custom_csv, renamed.config) == old.matrix,
+                      "custom labels confused with legacy letters");
+                if (settings["format"] == "default" || standard_order || names[1] != "A")
+                    check(parse_export_csv(export_csv_text(old, settings), renamed.config) == old.matrix,
+                          "legacy identities changed when custom labels overlap legacy letters");
+            }
+        }
+    }
+}
 int run(const std::filesystem::path &fixtures, const std::filesystem::path &out) {
     std::filesystem::create_directories(out);
+    operator_name_checks(out);
     auto reference = default_reference(fixtures / std::filesystem::u8path("默认.csv"));
     auto refCfg = config(3, 3, 10);
     const std::vector<std::string> referenceFiles{"Minitab.csv", "SPSS.csv", "JMP 19.csv",
@@ -171,6 +241,7 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
                       receipt["data_path"] == xlsx.u8string() && receipt["sha256"] == sha256(bytes),
                   "workbook receipt does not describe the saved bytes");
             auto report = sample.as_json();
+            report["config"]["design"].erase("operator_names");
             report["config"]["schema_version"] = 1;
             report["config"]["input"]["filename"] = "[DATE].csv";
             report["export"] = receipt;

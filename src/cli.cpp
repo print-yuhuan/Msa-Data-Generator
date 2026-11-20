@@ -16,7 +16,7 @@
 namespace {
 std::atomic<bool> cancelled{false};
 void on_signal(int) { cancelled = true; }
-enum class ValueType { Integer, Number, NullableInteger, NullableNumber, Boolean, Text, Target };
+enum class ValueType { Integer, Number, NullableInteger, NullableNumber, Boolean, Text, OperatorName, Target };
 struct Option {
     const char *name, *path;
     ValueType type;
@@ -24,6 +24,9 @@ struct Option {
 };
 const Option options[]{
     {"--operators", "/design/operators", ValueType::Integer, "操作员人数：2 或 3，默认 3"},
+    {"--operator-a", "/design/operator_names/0", ValueType::OperatorName, "第一位操作员名称，留空使用 A"},
+    {"--operator-b", "/design/operator_names/1", ValueType::OperatorName, "第二位操作员名称，留空使用 B"},
+    {"--operator-c", "/design/operator_names/2", ValueType::OperatorName, "第三位操作员名称，3 人时使用，留空使用 C"},
     {"--replicates", "/design/replicates", ValueType::Integer,
      "每位操作员对每件部件的重复测量次数：2 或 3，默认 3；别名 --trials"},
     {"--parts", "/design/parts", ValueType::Integer, "部件数量：5～10，默认 10"},
@@ -216,7 +219,7 @@ void help() {
   within_operator：逐 Trial、逐操作员，每个 Trial+Operator 内独立打乱部件。
   --randomize-operators true：仅 within_operator 生效；每项研究确定一次操作员顺序，各 Trial 沿用。
   --store-standard-order true：长表首列增加 StdOrder；行序为实际运行顺序，Trial 永不重编号。
-  StdOrder = ((Trial-1)*部件数量+Part-1)*操作员人数+操作员编号，A=1、B=2、C=3。
+  StdOrder = ((Trial-1)*部件数量+Part-1)*操作员人数+操作员编号，编号按研究设计中的位置从 1 开始。
   StdOrder 为完整的 1～总记录数排列；Trial 是原始重复测量编号，不是随机化后的行号。
   --seed 控制测量数据生成，--run-seed 独立控制排序；相同数据、运行配置和排序种子可复现排列。
   随机化时最终 JSON 报告的 export.effective_run_seed 保存实际排序种子；可跨进程重放。
@@ -372,6 +375,9 @@ msa::Json option_value(const Option &option, const std::string &text) {
         case ValueType::Text:
             value = text;
             break;
+        case ValueType::OperatorName:
+            // Names are validated together with the final operator count and other names.
+            return text;
         case ValueType::Target:
             value = target_value(text, std::string(option.path) == "/targets/ndc");
             break;
@@ -588,8 +594,12 @@ int run(const std::vector<std::string> &args) {
         if (!c.is_object())
             throw msa::ConfigError("配置必须是 JSON 对象");
         // Pointer assignment replaces complete constraints and preserves explicit nulls.
-        for (const auto &[path, value] : overrides)
+        const msa::Json::json_pointer names("/design/operator_names");
+        for (const auto &[path, value] : overrides) {
+            if (path.parent_pointer() == names && !c.contains(names))
+                c[names] = msa::default_config().at(names);
             c[path] = value;
+        }
         default_invalid_unused_output_fields(c, outputUse);
         if (outputUse == OutputUse::Explicit)
             c["output"]["file_type"] = msa::data_file_type(output);

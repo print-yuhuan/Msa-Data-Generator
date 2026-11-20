@@ -35,7 +35,22 @@ std::string bar_number(double value) {
         std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general, 3);
     return converted.ec == std::errc{} ? std::string(buffer, converted.ptr) : number(value);
 }
-std::string operator_name(int i) { return std::string(1, char('A' + i)); }
+// 仅在标签框放不下时缩略，切点始终位于 UTF-8 字符边界。
+std::string operator_label(const std::string &name, float width, float size) {
+    float used = 0;
+    std::size_t cut = 0;
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        const auto byte = static_cast<unsigned char>(name[i]);
+        if ((byte & 0xc0) == 0x80)
+            continue;
+        if (used + size <= width)
+            cut = i;
+        used += size * (byte < 128 && byte != 'W' && byte != 'M' ? .7f : 1.f);
+        if (used > width)
+            return name.substr(0, cut) + "…";
+    }
+    return name;
+}
 double mean(const std::vector<double> &values) {
     if (values.empty())
         throw ConfigError("图表数据不能为空");
@@ -167,11 +182,13 @@ struct Frame {
 };
 struct Data {
     int operators, repeats, parts;
+    std::array<std::string, 3> names;
     std::vector<double> all;
     std::vector<std::vector<double>> by_part, by_operator, cells, cell_means, cell_ranges;
     std::vector<double> operator_mean, operator_range;
     explicit Data(const Result &result) {
         const auto &design = result.config.at("design");
+        names = operator_names(design);
         operators = design.at("operators").get<int>();
         repeats = design.at("replicates").get<int>();
         parts = design.at("parts").get<int>();
@@ -349,7 +366,8 @@ struct Plot {
     }
 };
 void legend(Frame &frame, const Editor &e,
-            const std::vector<std::pair<std::string, std::string>> &items) {
+            const std::vector<std::pair<std::string, std::string>> &items,
+            bool withOperators = false) {
     if (!e.show_legend || items.empty())
         return;
     auto &s = frame.scene;
@@ -357,8 +375,10 @@ void legend(Frame &frame, const Editor &e,
     for (std::size_t i = 0; i < items.size(); ++i) {
         const float x = frame.margin + i * cell;
         line(s, x, frame.legend_top + 8, x + 13, frame.legend_top + 8, items[i].second, 2);
-        text(s, x + 18, frame.legend_top, cell - 20, 18, items[i].first,
-             frame.compact ? 10.f : 11.f, muted);
+        const float size = frame.compact ? 10.f : 11.f;
+        const auto &label = items[i].first;
+        text(s, x + 18, frame.legend_top, cell - 20, 18,
+             withOperators ? operator_label(label, cell - 20, size) : label, size, muted);
     }
 }
 std::vector<std::string> colors(const Editor &e) {
@@ -391,14 +411,14 @@ std::vector<std::string> colors(const Editor &e) {
     }
     return palette;
 }
-void operators_legend(Frame &frame, const Editor &e, int count, bool averages = false) {
+void operators_legend(Frame &frame, const Editor &e, const Data &data, bool averages = false) {
     std::vector<std::pair<std::string, std::string>> items;
     const auto palette = colors(e);
-    for (int i = 0; i < count; ++i)
-        items.emplace_back("操作员 " + operator_name(i), palette[i]);
+    for (int i = 0; i < data.operators; ++i)
+        items.emplace_back("操作员 " + data.names[i], palette[i]);
     if (averages)
         items.emplace_back("均值", ink);
-    legend(frame, e, items);
+    legend(frame, e, items, true);
 }
 std::vector<std::pair<std::string, double>> specs(const Result &r) {
     std::vector<std::pair<std::string, double>> out;
@@ -517,7 +537,7 @@ void components(Frame &frame, const Result &result, const Editor &e) {
 void by_part(Frame &frame, const Result &result, const Data &data, const Editor &e) {
     const auto bounds = measurement_bounds(data, result, e);
     Plot p(frame, e, -.6, data.parts - .4, bounds.first, bounds.second);
-    operators_legend(frame, e, data.operators, true);
+    operators_legend(frame, e, data, true);
     const auto palette = colors(e);
     double previous = 0;
     for (int part = 0; part < data.parts; ++part) {
@@ -540,7 +560,7 @@ void by_part(Frame &frame, const Result &result, const Data &data, const Editor 
 void by_operator(Frame &frame, const Result &result, const Data &data, const Editor &e) {
     const auto bounds = measurement_bounds(data, result, e);
     Plot p(frame, e, -.7, data.operators - .3, bounds.first, bounds.second);
-    operators_legend(frame, e, data.operators, true);
+    operators_legend(frame, e, data, true);
     const auto palette = colors(e);
     for (int op = 0; op < data.operators; ++op) {
         auto values = data.by_operator[op];
@@ -570,7 +590,8 @@ void by_operator(Frame &frame, const Result &result, const Data &data, const Edi
             p.segment(box - 1, data.operator_mean[op - 1], box, data.operator_mean[op], ink, 1);
         p.point(box, data.operator_mean[op], "#FFFFFF", e.point_radius + 2);
         p.diamond(box, data.operator_mean[op], ink, e.point_radius + 1);
-        p.tick(op, operator_name(op));
+        const float tickWidth = p.x(1) - p.x(0) - 4;
+        p.tick(op, operator_label(data.names[op], tickWidth, 11), tickWidth);
     }
     specification_lines(p, result);
 }
@@ -629,7 +650,8 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
         Plot p(frame, e, -.45, data.parts - .55, low, high, ranges, false, left, panelWidth,
                op == 0);
         rect(s, left, p.top - 17, panelWidth, 16, "#F3F6FA");
-        text(s, left, p.top - 16, panelWidth, 16, "操作员 " + operator_name(op), 10.5f, ink,
+        text(s, left, p.top - 16, panelWidth, 16,
+             operator_label("操作员 " + data.names[op], panelWidth - 4, 10.5f), 10.5f, ink,
              Primitive::Align::Center);
         if (e.show_limits) {
             p.segment(p.xlow, center, p.xhigh, center, green, 1.2f);
@@ -664,7 +686,7 @@ void interaction(Frame &frame, const Result &result, const Data &data, const Edi
             high = std::max(high, limit.second);
         }
     Plot p(frame, e, -.4, data.parts - .6, low, high);
-    operators_legend(frame, e, data.operators);
+    operators_legend(frame, e, data);
     const auto palette = colors(e);
     for (int part = 0; part < data.parts; ++part)
         p.tick(part, std::to_string(part + 1));

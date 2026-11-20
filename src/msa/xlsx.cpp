@@ -1,6 +1,7 @@
 #include "xlsx.hpp"
 #include "xlsx_package.hpp"
 #include "core.hpp"
+#include "csv_fields.hpp"
 #include <algorithm>
 #include <charconv>
 #include <set>
@@ -39,32 +40,17 @@ std::string column_name(std::size_t col) {
     }
     return std::string(name.rbegin(), name.rend());
 }
-Rows canonical_rows(std::string_view csv) {
+Rows canonical_rows(const std::string &csv) {
     if (csv.size() > csv_read_limit)
         throw ConfigError("待导出的表格过大");
-    if (csv.substr(0, 3) == "\xef\xbb\xbf")
-        csv.remove_prefix(3);
     Rows rows;
-    // The canonical exporter emits only numbers, operator codes and fixed headers.
-    while (!csv.empty()) {
-        const auto end = csv.find('\n');
-        auto line = csv.substr(0, end);
-        if (!line.empty() && line.back() == '\r')
-            line.remove_suffix(1);
-        auto &row = rows.emplace_back();
-        for (;;) {
-            const auto comma = line.find(',');
-            row.emplace_back(line.substr(0, comma));
-            if (comma == line.npos)
-                break;
-            line.remove_prefix(comma + 1);
-        }
-        if (row.size() > max_columns || rows.size() > max_rows ||
-            row.size() != rows.front().size() || rows.size() * row.size() > max_cells)
+    CsvReader reader(csv);
+    while (reader.next()) {
+        const auto width = reader.cells.size();
+        if (width > max_columns || rows.size() >= max_rows ||
+            (!rows.empty() && width != rows.front().size()) || (rows.size() + 1) * width > max_cells)
             throw ConfigError("待导出的工作表尺寸无效");
-        if (end == csv.npos)
-            break;
-        csv.remove_prefix(end + 1);
+        rows.push_back(std::move(reader.cells));
     }
     if (rows.empty())
         throw ConfigError("待导出的工作表为空");
@@ -140,17 +126,6 @@ std::vector<std::string> shared_strings(const std::string &xml) {
             strings.back() += n.text;
     });
     return strings;
-}
-std::string csv_cell(const std::string &s) {
-    if (s.find_first_of(",\"\r\n") == std::string::npos)
-        return s;
-    std::string out = "\"";
-    for (char c : s) {
-        if (c == '"')
-            out += '"';
-        out += c;
-    }
-    return out + '"';
 }
 std::pair<unsigned, unsigned> address(const std::string &ref) {
     std::size_t split = 0;

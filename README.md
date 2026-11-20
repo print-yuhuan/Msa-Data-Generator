@@ -1,9 +1,9 @@
 <div align="center">
   <h1>MSA 数据生成器</h1>
   <p>生成交叉量具 R&amp;R 模拟数据，复核统计指标，导出测量记录。</p>
-  <p><strong>Windows x64</strong> · v1.0.3 · <a href="LICENSE">MIT 许可证</a></p>
+  <p><strong>Windows x64</strong> · v1.0.4 · <a href="LICENSE">MIT 许可证</a></p>
   <p>
-    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.3/MSA_Data_Generator_v1.0.3_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
+    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.4/MSA_Data_Generator_v1.0.4_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
     · <a href="#快速开始">快速开始</a>
     · <a href="docs/README.md">文档中心</a>
   </p>
@@ -39,6 +39,11 @@
 | 数据文件 | 可导入和导出 CSV 或 Excel 工作簿（XLSX）。提供默认宽表及 Minitab、SPSS、JMP、Origin、MATLAB 五种长表预设。可设置运行顺序、独立排序种子、`StdOrder` 和文件名模板。 |
 
 数据生成、统计分析、图表绘制和文件导出均在本机完成。桌面程序和 CLI 共用统计内核与配置规则。统计口径及外部软件的参数差异见 [Minitab 导入与对标](docs/Minitab导入与对标.md)和 [ANOVA 对标记录](docs/ANOVA设计与五软件对标.md)。
+
+## v1.0.4 更新
+
+- 在「选项 → 研究 → 研究设计」底部可填写三位操作员的默认名称。每个位置可单独留空，依次使用 A、B、C。选择两人时第三个输入框变暗，切回三人即可继续使用原先填写的名称。
+- 数据预览、CSV/XLSX、图表和方法对比报告均使用本次研究的操作员名称。命令行也可通过 `--operator-a`、`--operator-b`、`--operator-c` 指定名称。
 
 ## v1.0.3 更新
 
@@ -100,6 +105,6 @@ ctest --test-dir build -C Release --output-on-failure
 
 欢迎提交可复现的问题。反馈时可附上软件版本、研究设置、操作步骤和预期结果。[GitHub Issues](https://github.com/print-yuhuan/Msa-Data-Generator/issues)
 
-[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.3
-[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.3/MSA_Data_Generator_v1.0.3_Windows_x64.zip
-[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.3/MSA_Data_Generator_v1.0.3_Windows_x64.zip.sha256
+[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.0.4
+[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.4/MSA_Data_Generator_v1.0.4_Windows_x64.zip
+[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.4/MSA_Data_Generator_v1.0.4_Windows_x64.zip.sha256

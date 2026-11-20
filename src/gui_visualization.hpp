@@ -174,10 +174,14 @@ bool reanalyzeInsightData() {
     if (!visual.importedSelected || !visual.imported || state.busy())
         return false;
     try {
-        auto config = native_ui::to_config(state.draft, native_ui::ConfigUse::Analysis);
         const auto &original = visual.imported->config.at("design");
+        auto draft = state.draft;
+        draft.operatorNames = original.value("operator_names", decltype(draft.operatorNames){});
+        auto config = native_ui::to_config(draft, native_ui::ConfigUse::Analysis);
         const auto &requested = config.at("design");
-        if (original != requested) {
+        if (original.at("operators") != requested.at("operators") ||
+            original.at("replicates") != requested.at("replicates") ||
+            original.at("parts") != requested.at("parts")) {
             const auto design = [](const Json &d) {
                 return d.at("operators").dump() + " 人 × " + d.at("replicates").dump() +
                        " 次 × " + d.at("parts").dump() + " 件";
@@ -185,6 +189,7 @@ bool reanalyzeInsightData() {
             throw msa::ConfigError("导入数据的设计为 " + design(original) + "，当前设置为 " +
                                    design(requested) + "。请恢复与导入数据相同的研究设计。");
         }
+        config["design"] = original;
         auto metrics = msa::calculate(visual.imported->matrix, config);
         visual.imported->config = std::move(config);
         visual.imported->metrics = std::move(metrics);
@@ -268,17 +273,6 @@ void insightSourceControls(Ui &u, const std::string &id, float w) {
         button(u, id + ".import", "导入数据", w, importInsightData, false, state.busy());
     }
 }
-std::string chartLabelThatFits(const std::string &label, float width, float size, int weight = 400) {
-    const auto metrics = core::TextPrimitive::measureTextMetrics(label, font(), size, weight);
-    if (metrics.width <= width)
-        return label;
-    const float space = width - core::TextPrimitive::measureTextWidth("…", font(), size, weight);
-    const auto end = std::upper_bound(metrics.caretX.begin(), metrics.caretX.end(), space);
-    const auto length = end == metrics.caretX.begin()
-                            ? 0
-                            : metrics.byteIndices[std::distance(metrics.caretX.begin(), end) - 1];
-    return label.substr(0, length) + "…";
-}
 void insightSourceSummary(Ui &u, const std::string &id, float w) {
     std::string summary = visual.importedSelected ? "尚未导入数据"
                           : state.busy()          ? "正在生成测量数据…"
@@ -297,7 +291,7 @@ void insightSourceSummary(Ui &u, const std::string &id, float w) {
             if (visual.importedSelected) {
                 const auto label = visual.importedSheet.empty() ? visual.importedName
                     : visual.importedSheet + " · " + visual.importedName;
-                summary = chartLabelThatFits(label, w, 16) + "\n" + summary;
+                summary = labelThatFits(label, w, 16) + "\n" + summary;
             }
         } catch (const std::exception &) {
             summary = "数据快照的研究信息不完整，请重新生成或导入。";
@@ -460,7 +454,7 @@ void drawChartScene(Ui &u, const std::string &id, const msa::charts::Scene &scen
                             .size(p.x2, p.y2)
                             .text(numericLabel || multiline
                                       ? p.text
-                                      : chartLabelThatFits(p.text, p.x2, size, weight))
+                                      : labelThatFits(p.text, p.x2, size, weight))
                             .fontFamily(font())
                             .fontSize(size)
                             .fontWeight(weight)

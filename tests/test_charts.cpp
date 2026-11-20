@@ -355,6 +355,44 @@ void model_checks() {
                         std::string(msa::charts::description(kind)).size(),
                     "图表说明为空");
     });
+    check("图表按研究顺序标记操作员姓名，兼容旧配置并缩略狭窄标签", [] {
+        auto contains = [](const Scene &scene, const std::string &text) {
+            return std::any_of(scene.items.begin(), scene.items.end(),
+                               [&](const Primitive &item) { return item.text == text; });
+        };
+        for (int count : {2, 3}) {
+            auto result = study(count);
+            result.config["design"]["operator_names"] = {"赵<&一", "", "周明"};
+            for (auto kind : {Kind::MeasurementByPart, Kind::MeasurementByOperator,
+                              Kind::RangeChart, Kind::MeanChart, Kind::Interaction}) {
+                const auto scene = msa::charts::make_scene(
+                    result, kind, msa::charts::default_editor(kind), 840, 480);
+                require(contains(scene, "操作员 赵<&一") && contains(scene, "操作员 B") &&
+                            contains(scene, "操作员 周明") == (count == 3),
+                        "图例或分面未按启用人数显示有效名称");
+                if (kind == Kind::MeasurementByOperator)
+                    require(contains(scene, "赵<&一") && contains(scene, "B") &&
+                                contains(scene, "周明") == (count == 3),
+                            "操作员分布刻度与图例不匹配");
+            }
+        }
+        auto result = study(3);
+        const auto kind = Kind::MeanChart;
+        const auto editor = msa::charts::default_editor(kind);
+        result.config["design"].erase("operator_names");
+        const auto legacy = msa::charts::make_scene(result, kind, editor, 360, 260);
+        require(contains(legacy, "操作员 A") && contains(legacy, "操作员 B") &&
+                    contains(legacy, "操作员 C"),
+                "旧研究缺少名称时应仍显示 A/B/C");
+        result.config["design"]["operator_names"] = {"质量实验室第一测量工位", "", ""};
+        const auto compact = msa::charts::make_scene(result, kind, editor, 360, 260);
+        require(std::any_of(compact.items.begin(), compact.items.end(), [](const Primitive &item) {
+                    return item.text.find("操作员 质") == 0 &&
+                           item.text.find("…") != std::string::npos;
+                }),
+                "最小图表尺寸下长名称应带省略号");
+        (void)snapshot(compact).dump(); // 序列化也会检查截断后的 UTF-8。
+    });
     for (const auto *method : {"crossed_xbarr", "crossed_anova"})
         for (int operators : {2, 3})
             for (int repeats : {2, 3})

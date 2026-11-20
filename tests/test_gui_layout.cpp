@@ -251,7 +251,13 @@ void options_grouping(const eui::Ui &ui, int tab) {
          ui.find("part.sampling") || ui.find("part.span.hit")))
         throw std::runtime_error("生成规则控件出现在非研究选项中");
     if (tab == 0) {
-        group("design.card", {"operators", "replicates", "parts"});
+        group("design.card", {"operators", "replicates", "parts", "operator.name.1",
+                              "operator.name.2", "operator.name.3"});
+        aligned("operator.name.1", "operator.name.2");
+        aligned("operator.name.2", "operator.name.3");
+        const auto &summary = node("design.summary").frame;
+        if (node("operator.names").frame.y < summary.y + summary.height)
+            throw std::runtime_error("默认操作员设置覆盖了研究设计记录数");
         group("generation.rules.card", {"priority", "compliance.hit", "normality.hit",
                                         "normality.note", "part.sampling", "part.sampling.note"});
         aligned("priority", "compliance.hit");
@@ -558,6 +564,19 @@ void result_table_layout(const msa::Result &generated) {
     if (gui::state.previewPage != 0 || !wide.find("cell-1_4") || wide.find("preview.pagination") ||
         wide.find("prevcols.bg") || wide.find("nextcols.bg"))
         throw std::runtime_error("部件可一次显示时仍在数据预览中占用分页空间");
+    gui::state.result->config["design"]["operator_names"] = {
+        "检测一班", "操作员的长名称需要截断以便显示所有测量轮次和数据列", ""};
+    const int reps = gui::state.result->config["design"]["replicates"];
+    eui::Ui named;
+    named.begin("named-preview");
+    gui::preview(named, 320, gui::previewColumns(*gui::state.result, 320, false), 0);
+    named.end();
+    named.layout(320, 500);
+    const auto &shortName = named.find("rowlabel0")->text;
+    const auto &longName = named.find("rowlabel" + std::to_string(reps))->text;
+    if (shortName != "检测一班 / 1" || longName.find("… / 1") == std::string::npos ||
+        !named.find("cell0_0"))
+        throw std::runtime_error("预览中的操作员名称或轮次显示不完整：" + shortName + "、" + longName);
     gui::state.result = oldResult;
     gui::state.resultRevision = oldResultRevision;
     gui::state.status = oldStatus;
@@ -744,6 +763,47 @@ void regrouped_settings_state(const msa::Result &generated) {
         text.text = value;
         node->onTextInput(text);
     };
+    {
+        reset(0);
+        gui::state.draft.operators = "3";
+        gui::state.draft.operatorNames = {};
+        const auto compose = [](eui::Ui &ui) {
+            ui.begin("operator-names");
+            gui::designSettings(ui, 580);
+            ui.end();
+            ui.layout(580, 440);
+        };
+        eui::Ui initial;
+        compose(initial);
+        for (int i = 0; i < 3; ++i) {
+            const auto id = "operator.name." + std::to_string(i + 1);
+            if (initial.find(id + ".field")->disabled ||
+                initial.find(id + ".text")->text != std::string(1, char('A' + i)))
+                throw std::runtime_error("三人研究应开放全部名称并显示默认占位符");
+        }
+        input(initial, "operator.name.3", "陈师傅");
+        if (!staleResult())
+            throw std::runtime_error("编辑默认操作员没有标记研究设置已修改");
+        click(initial, "operators.hit.0");
+        eui::Ui two;
+        compose(two);
+        const auto *inactive = two.find("operator.name.3.field");
+        if (!inactive->disabled || inactive->opacity >= 1 ||
+            two.find("operator.name.1.field")->disabled || two.find("operator.name.2.field")->disabled)
+            throw std::runtime_error("两人研究应仅灰显并禁用第三个名称");
+        input(two, "operator.name.1", "张工");
+        const auto saved = native_ui::to_config(gui::state.draft);
+        gui::state.draft = native_ui::from_config(saved);
+        if (gui::state.draft.operators != "2" || gui::state.draft.operatorNames[0] != "张工" ||
+            gui::state.draft.operatorNames[2] != "陈师傅" || msa::operator_names(saved["design"])[1] != "B")
+            throw std::runtime_error("配置重载应保留停用名称与留空的默认值");
+        click(two, "operators.hit.1");
+        eui::Ui three;
+        compose(three);
+        if (three.find("operator.name.3.field")->disabled ||
+            three.find("operator.name.3.text")->text != "陈师傅")
+            throw std::runtime_error("切回三人研究没有恢复第三个操作员");
+    }
     for (const auto &field : fields) {
         reset(field.tab);
         const std::string value = gui::state.draft.*field.member == field.value ? "3" : field.value;
@@ -2937,6 +2997,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     require(gui::loadInsightData(csv), "切回 CSV 数据源失败");
     const auto importedConfig = gui::visual.imported->config;
     gui::state.draft.analysisMethod = gui::state.draft.analysisMethod ? 0 : 1;
+    gui::state.draft.operatorNames = {"新操作员", "", ""};
     require(gui::insightResult()->config == importedConfig, "选项变化悄悄改变了已导入快照");
     auto heldCsv = folder / "源文件暂时移开.csv";
     std::filesystem::rename(csv, heldCsv);
@@ -2950,6 +3011,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
             "当前数据源缺少可用的方法报告入口");
     click(sourceUi, "charts.dataset.reanalyze.bg");
     require(gui::visual.imported->matrix == generated.matrix &&
+                gui::visual.imported->config["design"] == importedConfig["design"] &&
                 gui::visual.imported->config["analysis"]["method"] != importedConfig["analysis"]["method"] &&
                 gui::visual.imported->metrics == msa::calculate(generated.matrix,
                                                                 gui::visual.imported->config),
@@ -3205,6 +3267,7 @@ int wmain(int argc, wchar_t **argv) {
     try {
         const auto font = std::filesystem::path(argv[1]).u8string();
         core::TextPrimitive::setDefaultFontFiles(font, font);
+        gui::initializeFont();
         const auto cfg = msa::load_config(std::filesystem::path(argv[2]));
         const auto generated = msa::generate(cfg);
         gui::state.draft = native_ui::from_config(cfg);
