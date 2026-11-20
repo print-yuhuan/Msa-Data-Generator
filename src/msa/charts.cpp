@@ -1,4 +1,5 @@
 #include "charts.hpp"
+#include "msa/brand.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -7,8 +8,46 @@
 
 namespace msa::charts {
 namespace {
-constexpr const char *ink = "#263543", *muted = "#576675", *grid = "#E4E9EE", *axis = "#536271",
-                     *green = "#18785C", *red = "#B13E48", *amber = "#9A6016";
+struct Palette {
+    const char *primary;
+    const char *ink, *muted, *grid, *axis, *border, *facet;
+    const char *center, *limit, *specification;
+    std::array<const char *, 7> series;
+};
+constexpr Palette appPalette{
+    msa::brand_blue,
+    "#182C45",
+    "#52647A",
+    "#E3EAF5",
+    "#657996",
+    "#C6D2E5",
+    "#EDF2FE",
+    "#176C52",
+    "#AC3934",
+    "#875B14",
+    {"#087F75", "#AD426F", "#AE731B", msa::brand_blue, "#6950A1", "#597740", "#5F748B"}};
+constexpr Palette originPalette{
+    "#2F65A4",
+    "#263543",
+    "#576675",
+    "#E4E9EE",
+    "#536271",
+    "#A8B4BF",
+    "#F3F6FA",
+    "#18785C",
+    "#B13E48",
+    "#9A6016",
+    {"#C85F22", "#10857D", "#795991", "#2F65A4", "#9C433B", "#BB9134", "#415346"}};
+
+const Palette &palette_for(Style style) {
+    switch (style) {
+    case Style::Default:
+        return appPalette;
+    case Style::Origin:
+        return originPalette;
+    }
+    throw ConfigError("未知图表风格");
+}
 
 std::string number(double value, int precision = 6) {
     if (!std::isfinite(value))
@@ -110,8 +149,8 @@ void rect(Scene &s, float x, float y, float w, float h, const std::string &color
     p.color = color;
     s.items.push_back(std::move(p));
 }
-void text(Scene &s, float x, float y, float w, float h, const std::string &value, float size = 12,
-          const std::string &color = ink, Primitive::Align align = Primitive::Align::Left) {
+void text(Scene &s, float x, float y, float w, float h, const std::string &value, float size,
+          const std::string &color, Primitive::Align align = Primitive::Align::Left) {
     Primitive p;
     p.type = Primitive::Type::Text;
     p.x = x;
@@ -154,19 +193,21 @@ void marker(Scene &s, MarkerShape shape, float x, float y, float r, const std::s
 }
 struct Frame {
     Scene &scene;
+    const Palette &palette;
     float margin, plot_left, plot_right, legend_top, axis_label_top, plot_top, plot_bottom,
         x_label_top, note_top;
     bool compact;
-    Frame(Scene &s, const Result &result, const Editor &editor, Kind kind, int operators,
-          int parts, int repeats)
-        : scene(s), margin(s.width < 600 ? 14.f : 24.f), compact(s.height < 360 || s.width < 500) {
+    Frame(Scene &s, const Result &result, const Editor &editor, Kind kind, int operators, int parts,
+          int repeats)
+        : scene(s), palette(palette_for(editor.style)), margin(s.width < 600 ? 14.f : 24.f),
+          compact(s.height < 360 || s.width < 500) {
         const bool anova = result.config.at("analysis").at("method") == "crossed_anova";
         plot_left = compact ? 58.f : 76.f;
         plot_right = s.width - margin;
         const float titleSize = compact ? 16.f : 21.f;
         const float inner = s.width - 2 * margin;
         text(s, margin, compact ? 4.f : 10.f, inner, titleSize + 8,
-             operator_label(editor.title, inner, titleSize), titleSize, ink,
+             operator_label(editor.title, inner, titleSize), titleSize, palette.ink,
              Primitive::Align::Center);
         const std::string design = std::to_string(operators) + " 名操作员 × " +
                                    std::to_string(parts) + " 部件 × " +
@@ -175,8 +216,8 @@ struct Frame {
         const std::string method = anova ? "ANOVA（方差分析法）" : "Xbar-R（均值极差法）";
         float y = compact ? 27.f : 41.f;
         const std::string methodLabel = s.width < 600 ? (anova ? "ANOVA" : "Xbar-R") : method;
-        text(s, margin, y, inner, 17, methodLabel + "  ·  " + design, compact ? 10.f : 12.f, muted,
-             Primitive::Align::Center);
+        text(s, margin, y, inner, 17, methodLabel + "  ·  " + design, compact ? 10.f : 12.f,
+             palette.muted, Primitive::Align::Center);
         y += compact ? 17 : 21;
         if (anova) {
             const auto &model = result.metrics.at("anova");
@@ -194,8 +235,8 @@ struct Frame {
                     : std::string("最终模型：") +
                           (included ? "保留交互项" : "交互项合并到误差") +
                           " · 完整模型交互 P = " + p;
-            text(s, margin, y, s.width - 2 * margin, 17, modelNote, compact ? 10.f : 11.f, muted,
-                 Primitive::Align::Center);
+            text(s, margin, y, s.width - 2 * margin, 17, modelNote, compact ? 10.f : 11.f,
+                 palette.muted, Primitive::Align::Center);
             y += compact ? 15 : 18;
         }
         const float legendHeight = editor.show_legend ? (compact ? 19.f : 23.f) : 0.f;
@@ -333,41 +374,43 @@ struct Plot {
                 break;
             const float yy = y(value);
             if (e.show_grid)
-                line(scene, left, yy, left + width, yy, grid);
+                line(scene, left, yy, left + width, yy, frame.palette.grid);
             if (showY) {
-                line(scene, left - 4, yy, left, yy, axis);
+                line(scene, left - 4, yy, left, yy, frame.palette.axis);
                 const double shown = std::abs(offset) < step * 1e-9 ? 0 : offset;
-                text(scene, 2, yy - 8, left - 10, 17, number(shown), 11, ink,
+                text(scene, 2, yy - 8, left - 10, 17, number(shown), 11, frame.palette.ink,
                      Primitive::Align::Right);
             }
             if (!integer && showY && y(value) - y(value + step) >= 35 && value + step / 2 <= high) {
                 const float minor = y(value + step / 2);
-                line(scene, left - 2, minor, left, minor, axis);
+                line(scene, left - 2, minor, left, minor, frame.palette.axis);
             }
         }
-        line(scene, left, top, left + width, top, "#A8B4BF");
-        line(scene, left + width, top, left + width, top + height, "#A8B4BF");
-        line(scene, left, top, left, top + height, showY ? axis : grid);
-        line(scene, left, top + height, left + width, top + height, axis);
+        line(scene, left, top, left + width, top, frame.palette.border);
+        line(scene, left + width, top, left + width, top + height, frame.palette.border);
+        line(scene, left, top, left, top + height, showY ? frame.palette.axis : frame.palette.grid);
+        line(scene, left, top + height, left + width, top + height, frame.palette.axis);
         if (showY) {
             const float available = f.plot_right - f.plot_left;
             const auto ylabel =
                 e.y_label + (origin ? "（值 = 刻度 + " + exact_number(origin) + "）" : "");
             text(scene, f.plot_left, f.axis_label_top, available, 18,
-                 operator_label(ylabel, available, 12), 12, ink);
+                 operator_label(ylabel, available, 12), 12, frame.palette.ink);
             text(scene, f.plot_left, f.x_label_top, available, 19,
-                 operator_label(e.x_label, available, 12), 12, ink, Primitive::Align::Center);
+                 operator_label(e.x_label, available, 12), 12, frame.palette.ink,
+                 Primitive::Align::Center);
         }
     }
     float x(double value) const { return left + float((value - xlow) / (xhigh - xlow)) * width; }
     float y(double value) const { return top + float((high - value) / (high - low)) * height; }
     void tick(double value, const std::string &label, float box = 56) {
         const float xx = x(value);
-        line(scene, xx, top + height, xx, top + height + 4, axis);
+        line(scene, xx, top + height, xx, top + height + 4, frame.palette.axis);
         if (std::all_of(label.begin(), label.end(), [](unsigned char c) { return c < 128; }))
             box = std::min(box, 8.f * label.size() + 4.f);
         const float labelX = std::clamp(xx - box / 2, 0.f, scene.width - box);
-        text(scene, labelX, top + height + 4, box, 16, label, 11, ink, Primitive::Align::Center);
+        text(scene, labelX, top + height + 4, box, 16, label, 11, frame.palette.ink,
+             Primitive::Align::Center);
     }
     // 裁剪数据线段而不是夹紧端点，避免用户缩窄坐标轴后伪造边界平台。
     void segment(double a, double b, double c, double d, const std::string &color,
@@ -438,7 +481,7 @@ void legend(Frame &frame, const Editor &e, const std::vector<LegendItem> &items)
         if (item.key == Key::Marker || item.key == Key::LineMarker)
             marker(s, item.shape, x + 10, y, std::min(e.point_radius + .5f, 6.f), item.color);
         text(s, x + 24, frame.legend_top, cells[i] - 27, 17,
-             operator_label(item.label, cells[i] - 27, size), size, ink);
+             operator_label(item.label, cells[i] - 27, size), size, frame.palette.ink);
         x += cells[i];
     }
 }
@@ -456,29 +499,14 @@ std::string light_fill(const std::string &color) {
     }
     return tint;
 }
-std::vector<std::string> colors(const Editor &e) {
-    std::vector<std::string> palette{e.primary_color};
-    const auto primary = rgb(e.primary_color);
-    // 使用固定的色序，在自选主色接近候选色时跳过该色。
-    for (const char *candidate :
-         {"#C85F22", "#10857D", "#795991", "#2F65A4", "#9C433B", "#BB9134", "#415346"}) {
-        const auto c = rgb(candidate);
-        const int dr = c[0] - primary[0], dg = c[1] - primary[1], db = c[2] - primary[2];
-        if (dr * dr + dg * dg + db * db > 56 * 56)
-            palette.emplace_back(candidate);
-        if (palette.size() == 4)
-            break;
-    }
-    return palette;
-}
 void operators_legend(Frame &frame, const Editor &e, const Data &data, bool averages = false) {
     std::vector<LegendItem> items;
-    const auto palette = colors(e);
+    const auto palette = series_colors(e);
     for (int i = 0; i < data.operators; ++i)
         items.push_back({"操作员 " + data.names[i], palette[i],
                          averages ? Key::Marker : Key::LineMarker, series_shape(e, i)});
     if (averages)
-        items.push_back({"均值", ink, Key::LineMarker, MarkerShape::Diamond});
+        items.push_back({"均值", frame.palette.ink, Key::LineMarker, MarkerShape::Diamond});
     legend(frame, e, items);
 }
 std::vector<std::pair<std::string, double>> specs(const Result &r) {
@@ -508,7 +536,8 @@ void specification_lines(Plot &plot, const Result &result) {
     auto limits = specs(result);
     float previousTop = plot.top + plot.height + 16;
     for (const auto &limit : limits) {
-        plot.segment(plot.xlow, limit.second, plot.xhigh, limit.second, amber, 1, true);
+        plot.segment(plot.xlow, limit.second, plot.xhigh, limit.second,
+                     plot.frame.palette.specification, 1, true);
         if (limit.second < plot.low || limit.second > plot.high)
             continue;
         float top = std::min(plot.y(limit.second) - 15, previousTop - 15);
@@ -516,7 +545,8 @@ void specification_lines(Plot &plot, const Result &result) {
             limits.size() == 2 && limit.first == "LSL" && limits.back().second <= plot.high;
         top = std::clamp(top, plot.top + (upperWillFit ? 15.f : 0.f), plot.top + plot.height - 15);
         text(plot.scene, plot.left + 2, top, plot.width - 4, 15,
-             limit.first + " " + exact_number(limit.second), 10, amber, Primitive::Align::Right);
+             limit.first + " " + exact_number(limit.second), 10, plot.frame.palette.specification,
+             Primitive::Align::Right);
         previousTop = top;
     }
 }
@@ -559,7 +589,7 @@ void components(Frame &frame, const Result &result, const Editor &e) {
     }
     std::vector<std::vector<double>> series;
     std::vector<LegendItem> entries;
-    const auto palette = colors(e);
+    const auto palette = series_colors(e);
     if (!sd.empty()) {
         series.push_back(sd);
         series.push_back(variance);
@@ -579,7 +609,7 @@ void components(Frame &frame, const Result &result, const Editor &e) {
     if (series.empty()) {
         text(s, frame.margin, frame.plot_top, s.width - 2 * frame.margin, 50,
              "总变异为零，研究变异百分比与方差贡献率不可计算；当前无有效公差或历史过程占比。", 13,
-             muted);
+             frame.palette.muted);
         return;
     }
     double ymax = sd.empty() ? 0 : 100;
@@ -596,8 +626,8 @@ void components(Frame &frame, const Result &result, const Editor &e) {
             const double x = i - .36 + j * spacing, value = series[j][i];
             p.bar(x + spacing * .08, 0, x + spacing * .92, value, entries[j].color);
             if (s.width >= 700 && value >= p.low && value <= p.high && p.y(value) - 17 >= p.top)
-                text(s, p.x(x), p.y(value) - 17, p.x(x + spacing) - p.x(x), 16,
-                     bar_number(value), series.size() == 4 ? 9.f : 10.f, muted,
+                text(s, p.x(x), p.y(value) - 17, p.x(x + spacing) - p.x(x), 16, bar_number(value),
+                     series.size() == 4 ? 9.f : 10.f, frame.palette.muted,
                      Primitive::Align::Center);
         }
         p.tick(i, keys[i]);
@@ -608,13 +638,13 @@ void by_part(Frame &frame, const Result &result, const Data &data, const Editor 
     Plot p(frame, e, -.6, data.parts - .4, bounds.first, bounds.second);
     operators_legend(frame, e, data, true);
     specification_lines(p, result);
-    const auto palette = colors(e);
+    const auto palette = series_colors(e);
     double previous = 0;
     for (int part = 0; part < data.parts; ++part) {
         p.tick(part, std::to_string(part + 1));
         const double center = mean(data.by_part[part]);
         if (part)
-            p.segment(part - 1, previous, part, center, ink, 1.2f);
+            p.segment(part - 1, previous, part, center, frame.palette.ink, 1.2f);
         previous = center;
         for (int op = 0; op < data.operators; ++op)
             for (int trial = 0; trial < data.repeats; ++trial) {
@@ -624,7 +654,7 @@ void by_part(Frame &frame, const Result &result, const Data &data, const Editor 
                         e.point_radius, series_shape(e, op));
             }
         p.point(part, center, "#FFFFFF", e.point_radius + 2);
-        p.point(part, center, ink, e.point_radius + 1, MarkerShape::Diamond);
+        p.point(part, center, frame.palette.ink, e.point_radius + 1, MarkerShape::Diamond);
     }
 }
 void by_operator(Frame &frame, const Result &result, const Data &data, const Editor &e) {
@@ -632,7 +662,7 @@ void by_operator(Frame &frame, const Result &result, const Data &data, const Edi
     Plot p(frame, e, -.7, data.operators - .3, bounds.first, bounds.second);
     operators_legend(frame, e, data, true);
     specification_lines(p, result);
-    const auto palette = colors(e);
+    const auto palette = series_colors(e);
     for (int op = 0; op < data.operators; ++op) {
         auto values = data.by_operator[op];
         std::sort(values.begin(), values.end());
@@ -659,9 +689,11 @@ void by_operator(Frame &frame, const Result &result, const Data &data, const Edi
                     series_shape(e, op));
         }
         if (op)
-            p.segment(box - 1, data.operator_mean[op - 1], box, data.operator_mean[op], ink, 1);
+            p.segment(box - 1, data.operator_mean[op - 1], box, data.operator_mean[op],
+                      frame.palette.ink, 1);
         p.point(box, data.operator_mean[op], "#FFFFFF", e.point_radius + 2);
-        p.point(box, data.operator_mean[op], ink, e.point_radius + 1, MarkerShape::Diamond);
+        p.point(box, data.operator_mean[op], frame.palette.ink, e.point_radius + 1,
+                MarkerShape::Diamond);
         const float tickWidth = p.x(1) - p.x(0) - 4;
         p.tick(op, operator_label(data.names[op], tickWidth, 11), tickWidth);
     }
@@ -691,8 +723,8 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
     std::vector<LegendItem> entries{
         {ranges ? "子组极差 R" : "子组均值", e.primary_color, Key::LineMarker, series_shape(e, 0)}};
     if (e.show_limits) {
-        entries.push_back({"中心线 CL", green, Key::Line});
-        entries.push_back({"控制限 / 超限点", red, Key::Dash});
+        entries.push_back({"中心线 CL", frame.palette.center, Key::Line});
+        entries.push_back({"控制限 / 超限点", frame.palette.limit, Key::Dash});
     }
     legend(frame, e, entries);
     if (e.show_limits) {
@@ -711,7 +743,7 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
         const float width = s.width - left - frame.margin;
         const float size = std::min(frame.compact ? 9.f : 11.f,
                                     width / (.65f * static_cast<float>(caption.size())));
-        text(s, left, frame.axis_label_top + 17, width, 17, caption, size, muted);
+        text(s, left, frame.axis_label_top + 17, width, 17, caption, size, frame.palette.muted);
     }
     const float gap = frame.compact ? 7.f : 13.f, available = frame.plot_right - frame.plot_left;
     const float panelWidth = (available - gap * (data.operators - 1)) / data.operators;
@@ -720,21 +752,21 @@ void control_chart(Frame &frame, const Data &data, const Editor &e, bool ranges)
         const float left = frame.plot_left + op * (panelWidth + gap);
         Plot p(frame, e, -.45, data.parts - .55, low, high, ranges, false, left, panelWidth,
                op == 0);
-        rect(s, left, p.top - 17, panelWidth, 16, "#F3F6FA");
+        rect(s, left, p.top - 17, panelWidth, 16, frame.palette.facet);
         text(s, left, p.top - 16, panelWidth, 16,
-             operator_label("操作员 " + data.names[op], panelWidth - 4, 10.5f), 10.5f, ink,
-             Primitive::Align::Center);
+             operator_label("操作员 " + data.names[op], panelWidth - 4, 10.5f), 10.5f,
+             frame.palette.ink, Primitive::Align::Center);
         if (e.show_limits) {
-            p.segment(p.xlow, center, p.xhigh, center, green, 1.2f);
-            p.segment(p.xlow, lower, p.xhigh, lower, red, 1, true);
-            p.segment(p.xlow, upper, p.xhigh, upper, red, 1, true);
+            p.segment(p.xlow, center, p.xhigh, center, frame.palette.center, 1.2f);
+            p.segment(p.xlow, lower, p.xhigh, lower, frame.palette.limit, 1, true);
+            p.segment(p.xlow, upper, p.xhigh, upper, frame.palette.limit, 1, true);
         }
         for (int part = 0; part < data.parts; ++part) {
             if (part)
                 p.segment(part - 1, values[op][part - 1], part, values[op][part], e.primary_color);
             const double value = values[op][part];
             const bool beyond = e.show_limits && (value < lower || value > upper);
-            p.point(part, value, beyond ? red : e.primary_color,
+            p.point(part, value, beyond ? frame.palette.limit : e.primary_color,
                     e.point_radius + (beyond ? 1.f : 0.f), series_shape(e, 0));
             if (part == data.parts - 1 || (part % skip == 0 && part <= data.parts - 1 - skip))
                 p.tick(part, std::to_string(part + 1), 21);
@@ -756,7 +788,7 @@ void interaction(Frame &frame, const Result &result, const Data &data, const Edi
     Plot p(frame, e, -.4, data.parts - .6, low, high);
     operators_legend(frame, e, data);
     specification_lines(p, result);
-    const auto palette = colors(e);
+    const auto palette = series_colors(e);
     for (int part = 0; part < data.parts; ++part)
         p.tick(part, std::to_string(part + 1));
     for (int op = 0; op < data.operators; ++op)
@@ -802,7 +834,7 @@ void histogram(Frame &frame, const Result &result, const Data &data, const Edito
     const auto fill = light_fill(e.primary_color);
     std::vector<LegendItem> entries{{"测量值频数", fill}};
     if (e.show_limits && !specs(result).empty())
-        entries.push_back({"规格限", amber, Key::Dash});
+        entries.push_back({"规格限", frame.palette.specification, Key::Dash});
     legend(frame, e, entries);
     for (int i = 0; i < count; ++i) {
         if (!bins[i])
@@ -827,13 +859,14 @@ void histogram(Frame &frame, const Result &result, const Data &data, const Edito
     if (e.show_limits) {
         float lastRight = -1;
         for (const auto &limit : specs(result)) {
-            p.segment(limit.second, p.low, limit.second, p.high, amber, 1, true);
+            p.segment(limit.second, p.low, limit.second, p.high, frame.palette.specification, 1,
+                      true);
             const auto label = limit.first + " " + exact_number(limit.second);
             const float width = std::min(p.width, std::max(84.f, 7.f * static_cast<float>(label.size())));
             const float x =
                 std::clamp(p.x(limit.second) - width / 2, p.left, p.left + p.width - width);
-            text(s, x, p.top + (x < lastRight ? 21.f : 4.f), width, 16, label, 10, amber,
-                 Primitive::Align::Center);
+            text(s, x, p.top + (x < lastRight ? 21.f : 4.f), width, 16, label, 10,
+                 frame.palette.specification, Primitive::Align::Center);
             lastRight = x + width;
         }
     }
@@ -885,8 +918,29 @@ const char *description(Kind kind) {
     }
     throw ConfigError("未知图表类型");
 }
-Editor default_editor(Kind kind) {
+const char *default_primary_color(Style style) { return palette_for(style).primary; }
+
+std::vector<std::string> series_colors(const Editor &e) {
+    if (!valid_color(e.primary_color))
+        throw ConfigError("图表主色须为 #RRGGBB");
+    std::vector<std::string> palette{e.primary_color};
+    const auto primary = rgb(e.primary_color);
+    // 使用固定的色序，在自选主色接近候选色时跳过该色。
+    for (const char *candidate : palette_for(e.style).series) {
+        const auto c = rgb(candidate);
+        const int dr = c[0] - primary[0], dg = c[1] - primary[1], db = c[2] - primary[2];
+        if (dr * dr + dg * dg + db * db > 56 * 56)
+            palette.emplace_back(candidate);
+        if (palette.size() == 4)
+            break;
+    }
+    return palette;
+}
+
+Editor default_editor(Kind kind, Style style) {
     Editor e;
+    e.style = style;
+    e.primary_color = default_primary_color(style);
     e.show_limits = kind != Kind::Interaction && kind != Kind::Histogram;
     e.title = label(kind);
     e.y_label = kind == Kind::VarianceComponents ? "百分比（%）"
@@ -943,7 +997,7 @@ Scene make_scene(const Result &result, Kind kind, const Editor &editor, float wi
             : kind == Kind::Histogram ? "样本范围等宽分箱；未拟合分布或评估过程能力"
                                       : "彩色点为测量值；菱形和连线为部件均值";
         text(scene, frame.margin, frame.note_top, width - 2 * frame.margin, 18, note,
-             frame.compact ? 9.f : 10.f, muted);
+             frame.compact ? 9.f : 10.f, frame.palette.muted);
         switch (kind) {
         case Kind::VarianceComponents:
             components(frame, result, editor);

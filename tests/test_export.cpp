@@ -611,14 +611,21 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
               upgraded["silent"] == Json{{"csv", false}, {"charts", false}, {"comparison_report", false}} &&
               upgraded["comparison_report"] == Json{{"format", "pdf"}, {"directory", ""},
                                                     {"filename", "MSA_Comparison"}} &&
-              upgraded["charts"] == Json{{"directory", ""}, {"filename", "MSA_Charts"}},
+              upgraded["charts"] ==
+                  Json{{"directory", ""}, {"filename", "MSA_Charts"}, {"style", "default"},
+                       {"format", "png"}, {"scope", "current"}, {"columns", 2}, {"panel_width", 1800},
+                       {"included", {"variance_components", "measurement_by_part",
+                                     "measurement_by_operator", "range_chart", "mean_chart", "interaction"}}},
           "legacy output settings changed export behavior");
     auto oldStudy = s.config;
     oldStudy.erase("input");
     oldStudy["output"] = legacy;
+    oldStudy["output"]["charts"] = {{"filename", "历史曲线"}, {"directory", "以往图表"}};
     const auto oldDraft = native_ui::from_config(oldStudy);
     check(oldDraft.importDirectory.empty() && oldDraft.importFilename.empty() &&
-              oldDraft.chartFilename == "MSA_Charts" && oldDraft.reportFilename == "MSA_Comparison",
+              oldDraft.chartFilename == "历史曲线" && oldDraft.chartDirectory == "以往图表" &&
+              oldDraft.reportFilename == "MSA_Comparison" && oldDraft.charts.style == 0 &&
+              oldDraft.charts.included == ChartPreferences{}.included,
           "old study lost default filenames or directory");
     legacy["silent"] = {{"charts", true}};
     legacy["comparison_report"] = {{"format", "html"}};
@@ -640,6 +647,21 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     bad = output;
     bad["comparison_report"]["format"] = "png";
     rejects([&] { normalize_output(bad); });
+    for (const Json patch : {Json{{"style", "unknown"}}, Json{{"format", "html"}},
+                             Json{{"scope", 1}}, Json{{"columns", 3}}, Json{{"columns", 1.0}},
+                             Json{{"panel_width", "1200"}}, Json{{"panel_width", 640}},
+                             Json{{"included", "histogram"}}, Json{{"included", {"unknown"}}},
+                             Json{{"included", {"interaction", "interaction"}}}}) {
+        bad = output;
+        bad["charts"] = patch;
+        rejects([&] { normalize_output(bad); });
+    }
+    auto emptyCombination = oldDraft;
+    emptyCombination.charts.scope = 1;
+    emptyCombination.charts.included.fill(false);
+    check(native_ui::from_config(native_ui::to_config(emptyCombination)).charts.included ==
+              emptyCombination.charts.included,
+          "empty combination was not preserved");
     bad = output;
     bad["comparison_report"]["directory"] = nullptr;
     rejects([&] { normalize_output(bad); });
@@ -665,7 +687,9 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     rejects([&] { normalize_config(Json{{"input", {{"directory", false}}}}); });
     output["silent"] = {{"csv", false}, {"charts", true}, {"comparison_report", true}};
     output["file_type"] = "xlsx";
-    output["charts"] = {{"directory", "质量部/图表"}, {"filename", "极差图.v2.JPG"}};
+    output["charts"] = {{"directory", "质量部/图表"}, {"filename", "极差图.v2.JPG"},
+                        {"style", "origin"}, {"format", "svg"}, {"scope", "combined"},
+                        {"columns", 1}, {"panel_width", 2400}, {"included", {"histogram", "range_chart"}}};
     output["comparison_report"] = {{"format", "pdf"}, {"directory", "质量部/对照报告"},
                                    {"filename", " 研究对照.v2.HTML "}};
     auto saved = s.config;
@@ -681,7 +705,11 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
               restored.reportFormat == 0 && restored.dataFileType == 1 && restored.reportDirectory == "质量部/对照报告" &&
               restored.reportFilename == "研究对照.v2" && restored.chartDirectory == "质量部/图表" &&
               restored.chartFilename == "极差图.v2" && restored.importDirectory == "质量部/原始记录" &&
-              restored.importFilename == "来料" &&
+              restored.importFilename == "来料" && restored.charts.style == 1 &&
+              restored.charts.format == 3 && restored.charts.scope == 1 &&
+              restored.charts.columns == 0 && restored.charts.resolution == 2 &&
+              restored.charts.included == std::array<bool, 7>{false, false, false, true, false, false, true} &&
+              saved["output"]["charts"]["included"] == Json::array({"range_chart", "histogram"}) &&
               native_ui::to_config(restored) == normalize_config(saved),
           "saved GUI export preferences were lost");
     auto invalidReport = restored;

@@ -89,6 +89,13 @@ std::string normalize_export_basename(const std::string &name, ExportBasenameKin
 std::string normalize_import_filename(const std::string &name);
 inline constexpr char default_chart_basename[] = "MSA_Charts";
 inline constexpr char default_report_basename[] = "MSA_Comparison";
+struct ChartPreferences {
+    int style = 0, format = 0, scope = 0, columns = 1, resolution = 1;
+    std::array<bool, 7> included{true, true, true, true, true, true, false};
+    // GUI choices use zero-based indices. Config files use stable keys, column counts and pixels.
+    void write_to(Json &charts) const;
+    static ChartPreferences read(const Json &charts);
+};
 Json normalize_output(const Json &output);
 std::string render_filename(const std::string &name, const Result &result,
                             std::chrono::system_clock::time_point when);

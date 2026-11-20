@@ -1,4 +1,5 @@
 #include "msa/charts.hpp"
+#include "msa/brand.hpp"
 #include "platform/chart_export.hpp"
 #include "platform/save_target.hpp"
 #include "platform/embedded_resources_win.hpp"
@@ -23,6 +24,7 @@ using msa::charts::Editor;
 using msa::charts::Kind;
 using msa::charts::Primitive;
 using msa::charts::Scene;
+using msa::charts::Style;
 Json checks = Json::array(), files = Json::array();
 
 void require(bool value, const std::string &message) {
@@ -360,6 +362,53 @@ void model_checks() {
             require(std::string(msa::charts::label(kind)).size() &&
                         std::string(msa::charts::description(kind)).size(),
                     "图表说明为空");
+    });
+    check("两种预设在七类图使用各自配色，保留相同几何、标签与编辑能力", [] {
+        const auto result = study();
+        const auto hasColor = [](const Scene &scene, const std::string &color) {
+            return std::any_of(scene.items.begin(), scene.items.end(),
+                               [&](const Primitive &item) { return item.color == color; });
+        };
+        for (const auto kind : msa::charts::all_kinds()) {
+            auto app = msa::charts::default_editor(kind);
+            auto origin = msa::charts::default_editor(kind, Style::Origin);
+            require(app.style == Style::Default && origin.style == Style::Origin &&
+                        app.primary_color == msa::brand_blue && origin.primary_color == "#2F65A4",
+                    "默认风格未采用程序蓝或 Origin 首色不兼容");
+            const auto a = msa::charts::make_scene(result, kind, app, 840, 480);
+            auto b = msa::charts::make_scene(result, kind, origin, 840, 480);
+            require(hasColor(a, app.primary_color) && hasColor(b, origin.primary_color) &&
+                        hasColor(a, "#182C45") && hasColor(b, "#263543") &&
+                        hasColor(a, "#E3EAF5") && hasColor(b, "#E4E9EE"),
+                    "图表系列、文字或网格未采用所选预设");
+            if (kind == Kind::Interaction)
+                require(hasColor(a, "#087F75") && hasColor(a, "#AD426F") &&
+                            hasColor(b, "#C85F22") && hasColor(b, "#10857D"),
+                        "交互图完整系列未跟随风格");
+            if (kind == Kind::MeanChart || kind == Kind::RangeChart)
+                require(hasColor(a, "#176C52") && hasColor(a, "#AC3934") &&
+                            hasColor(b, "#18785C") && hasColor(b, "#B13E48"),
+                        "中心线与控制限未跟随风格");
+            require(a.items.size() == b.items.size(), "切换风格改变了图元数量");
+            for (std::size_t i = 0; i < a.items.size(); ++i)
+                b.items[i].color = a.items[i].color;
+            require(snapshot(a) == snapshot(b), "切换配色改变了几何坐标或统计文字");
+            for (auto e : {app, origin}) {
+                e.title = "样式独立编辑";
+                e.primary_color = "#087F75";
+                e.marker_shape = msa::charts::MarkerShape::Diamond;
+                const auto palette = msa::charts::series_colors(e);
+                require(palette.size() == 4 && palette.front() == e.primary_color &&
+                            std::count(palette.begin(), palette.end(), e.primary_color) == 1,
+                        "编辑主色后色序与预览不一致或出现同色系列");
+                const auto edited = msa::charts::make_scene(result, kind, e, 840, 480);
+                require(hasColor(edited, e.primary_color) &&
+                            std::any_of(edited.items.begin(), edited.items.end(),
+                                        [&](const Primitive &p) { return p.text == e.title; }),
+                        "预设未应用自定义颜色或标题");
+            }
+        }
+        rejects([] { msa::charts::default_editor(Kind::Histogram, static_cast<Style>(-1)); });
     });
     check("交互图按系列编码点形，图例可移至轴下并调整纵轴刻度密度", [] {
         const auto result = study();
@@ -970,9 +1019,12 @@ void native_reference(const std::filesystem::path &reportPath,
         result.config["analysis"]["method"] = method;
         result.metrics = msa::calculate(result.matrix, result.config);
         std::vector<Scene> scenes;
+        std::vector<Scene> defaultScenes;
         int index = 0;
         for (const auto kind : msa::charts::all_kinds()) {
-            scenes.push_back(
+            scenes.push_back(msa::charts::make_scene(
+                result, kind, msa::charts::default_editor(kind, Style::Origin), 840, 480));
+            defaultScenes.push_back(
                 msa::charts::make_scene(result, kind, msa::charts::default_editor(kind), 840, 480));
             const auto name = std::string(method) + "_" + std::to_string(++index) + ".png";
             const std::vector<Scene> single{scenes.back()};
@@ -987,6 +1039,13 @@ void native_reference(const std::filesystem::path &reportPath,
             const auto path =
                 platform::export_charts(scenes, folder / name, options, msa::ExistingFile::Replace);
             record_file(path, options, scenes);
+            if (format == platform::ChartFormat::Png || format == platform::ChartFormat::Svg) {
+                const auto appName =
+                    std::string(method) + "_default" + platform::chart_extension(format);
+                const auto appPath = platform::export_charts(defaultScenes, folder / appName,
+                                                             options, msa::ExistingFile::Replace);
+                record_file(appPath, options, defaultScenes);
+            }
         }
         options.format = platform::ChartFormat::Png;
         require(result.matrix == matrix, "参考图表改变了共同测量数据");

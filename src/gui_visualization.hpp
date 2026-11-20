@@ -9,18 +9,27 @@ struct VisualPreview {
     std::array<std::string, 4> draftInputs;
     std::string error, draftError;
 };
-struct VisualState {
-    int selected = 0, format = 0, scope = 0, columns = 1, resolution = 1, editorTab = 0;
-    float offset = 0, editorOffset = 0;
-    bool importedSelected = false, editing = false;
-    std::optional<msa::Result> imported;
-    std::string importedName, importedSheet;
-    std::array<bool, 7> included{true, true, true, true, true, true, false};
+struct ChartEdits {
     std::array<msa::charts::Editor, 7> editors, drafts;
     std::array<std::string, 7> lower, upper, ticks, bins;
     std::array<bool, 7> editDirty{};
     std::array<std::string, 7> editError;
     std::array<unsigned, 7> editEpoch{};
+
+    explicit ChartEdits(msa::charts::Style style) {
+        for (std::size_t i = 0; i < editors.size(); ++i)
+            editors[i] = drafts[i] =
+                msa::charts::default_editor(msa::charts::all_kinds()[i], style);
+    }
+};
+struct VisualState {
+    int selected = 0, editorTab = 0;
+    float offset = 0, editorOffset = 0;
+    bool importedSelected = false, editing = false;
+    std::optional<msa::Result> imported;
+    std::string importedName, importedSheet;
+    std::array<ChartEdits, 2> styles{ChartEdits(msa::charts::Style::Default),
+                                     ChartEdits(msa::charts::Style::Origin)};
     std::string errorKind, errorText, recovery;
     std::filesystem::path importedPath;
     std::filesystem::path lastExportPath;
@@ -28,12 +37,17 @@ struct VisualState {
     bool exportingReport = false;
     VisualPreview preview;
     std::future<std::filesystem::path> exporting;
-    VisualState() {
-        for (int i = 0; i < 7; ++i)
-            editors[i] = drafts[i] = msa::charts::default_editor(msa::charts::all_kinds()[i]);
-    }
     bool busy() const { return exporting.valid(); }
 } visual;
+
+msa::charts::Style activeChartStyle() {
+    return static_cast<msa::charts::Style>(state.draft.charts.style);
+}
+ChartEdits &chartEdits() { return visual.styles.at(state.draft.charts.style); }
+std::string chartEditId(int index) {
+    return "chart.edit." + std::to_string(state.draft.charts.style) + "." + std::to_string(index) +
+           "." + std::to_string(chartEdits().editEpoch[index]);
+}
 
 // 图表编辑使用相同的表单样式，并保留独立的变更回调。
 void localField(Ui &u, const std::string &id, const std::string &label, std::string &value, float w,
@@ -119,19 +133,20 @@ void startVisualExport(bool report, int chartCount, Writer write) {
     visual.exportingCount = chartCount;
 }
 int selectedChartCount() {
-    return visual.scope == 0
+    return state.draft.charts.scope == 0
                ? 1
-               : int(std::count(visual.included.begin(), visual.included.end(), true));
+               : int(std::count(state.draft.charts.included.begin(), state.draft.charts.included.end(), true));
 }
 bool chartSelectedForExport(int index) {
-    return visual.scope == 0 ? index == visual.selected : visual.included[index];
+    return state.draft.charts.scope == 0 ? index == visual.selected : state.draft.charts.included[index];
 }
 std::optional<int> pendingChartExportEdit() {
-    for (int i = 0; i < int(visual.editDirty.size()); ++i)
-        if (chartSelectedForExport(i) && visual.editDirty[i])
+    for (int i = 0; i < int(chartEdits().editDirty.size()); ++i)
+        if (chartSelectedForExport(i) && chartEdits().editDirty[i])
             return i;
     return {};
 }
+const std::vector<std::string> chartFormatLabels{"PNG", "JPEG", "PDF", "SVG"};
 std::string chartFooterSummary() {
     if (visual.busy())
         return visual.exportingReport ? "正在导出方法对比报告…"
@@ -141,10 +156,13 @@ std::string chartFooterSummary() {
     if (!insightResult())
         return "请先生成数据或导入数据";
     if (pendingChartExportEdit())
-        return visual.scope == 0 ? "当前图表有待应用的编辑" : "待导出的组合含未应用的编辑";
-    if (visual.scope == 0)
-        return std::string(msa::charts::label(msa::charts::all_kinds()[visual.selected]));
-    return "已选 " + std::to_string(selectedChartCount()) + " / 7 张图表";
+        return state.draft.charts.scope == 0 ? "当前图表有待应用的编辑" : "待导出的组合含未应用的编辑";
+    const auto &format = chartFormatLabels.at(state.draft.charts.format);
+    if (state.draft.charts.scope == 0)
+        return format + " · " + msa::charts::label(msa::charts::all_kinds()[visual.selected]);
+    const auto count = selectedChartCount();
+    return count ? format + " · 已选 " + std::to_string(count) + " / 7 张图表"
+                 : "请在图表选项中勾选要导出的图表";
 }
 bool loadInsightData(const std::filesystem::path &path) {
     try {
@@ -214,9 +232,9 @@ void exportComparisonReport() {
             protectExportSources(chosen->path);
         }
         const std::string name = visual.importedSelected ? importedSourceName() : "";
-        startVisualExport(true, 0, [initial, chosen, snapshot = *result, source, name] {
+        startVisualExport(true, 0, [initial, chosen, snapshot = *result, source, name, style = activeChartStyle()] {
             return writeVisualExport(initial, chosen, [&](const auto &path, auto policy) {
-                msa::write_comparison_report(path, snapshot, source, name, policy);
+                msa::write_comparison_report(path, snapshot, source, name, policy, style);
             });
         });
         if (visual.errorKind == "report")
@@ -304,24 +322,24 @@ void insightSourceSummary(Ui &u, const std::string &id, float w) {
         .clip()
         .build();
 }
-msa::charts::Editor chartEditor(int index) { return visual.editors.at(index); }
+msa::charts::Editor chartEditor(int index) { return chartEdits().editors.at(index); }
 void discardChartEdits(int index) {
-    visual.drafts[index] = visual.editors[index];
-    visual.lower[index] =
-        visual.editors[index].y_min ? Json(*visual.editors[index].y_min).dump() : "";
-    visual.upper[index] =
-        visual.editors[index].y_max ? Json(*visual.editors[index].y_max).dump() : "";
-    const auto &editor = visual.editors[index];
-    visual.ticks[index] = editor.y_tick_intervals ? std::to_string(editor.y_tick_intervals) : "";
-    visual.bins[index] = editor.histogram_bins ? std::to_string(editor.histogram_bins) : "";
-    visual.editDirty[index] = false;
-    visual.editError[index].clear();
-    ++visual.editEpoch[index];
+    auto &edits = chartEdits();
+    const auto &editor = edits.editors[index];
+    edits.drafts[index] = editor;
+    edits.lower[index] = editor.y_min ? Json(*editor.y_min).dump() : "";
+    edits.upper[index] = editor.y_max ? Json(*editor.y_max).dump() : "";
+    edits.ticks[index] = editor.y_tick_intervals ? std::to_string(editor.y_tick_intervals) : "";
+    edits.bins[index] = editor.histogram_bins ? std::to_string(editor.histogram_bins) : "";
+    edits.editDirty[index] = false;
+    edits.editError[index].clear();
+    ++edits.editEpoch[index];
     if (visual.errorKind == "edit" && visual.errorChart == index)
         clearVisualError();
 }
 msa::charts::Editor proposedChartEditor(int index) {
-    auto proposed = visual.drafts[index];
+    const auto &edits = chartEdits();
+    auto proposed = edits.drafts[index];
     const auto bound = [](const std::string &value) -> std::optional<double> {
         if (native_ui::trim(value).empty())
             return std::nullopt;
@@ -341,13 +359,13 @@ msa::charts::Editor proposedChartEditor(int index) {
         }
         throw std::runtime_error(message);
     };
-    proposed.y_min = bound(visual.lower[index]);
-    proposed.y_max = bound(visual.upper[index]);
+    proposed.y_min = bound(edits.lower[index]);
+    proposed.y_max = bound(edits.upper[index]);
     if (proposed.y_min && proposed.y_max && *proposed.y_min >= *proposed.y_max)
         throw std::runtime_error("纵轴下限必须小于上限");
     proposed.y_tick_intervals =
-        count(visual.ticks[index], 2, 10, "纵轴刻度间隔数须为 2 至 10 的整数");
-    proposed.histogram_bins = count(visual.bins[index], 3, 40, "直方图分箱数须为 3 至 40 的整数");
+        count(edits.ticks[index], 2, 10, "纵轴刻度间隔数须为 2 至 10 的整数");
+    proposed.histogram_bins = count(edits.bins[index], 3, 40, "直方图分箱数须为 3 至 40 的整数");
     if (proposed.title.size() > 600 || proposed.x_label.size() > 300 ||
         proposed.y_label.size() > 300)
         throw std::runtime_error("图表标题或坐标轴名称过长，请精简后应用");
@@ -359,19 +377,19 @@ bool applyChartEdits(int index) {
         if (const auto *result = insightResult())
             (void)msa::charts::make_scene(*result, msa::charts::all_kinds()[index], proposed, 900,
                                           560);
-        visual.editors[index] = std::move(proposed);
+        chartEdits().editors[index] = std::move(proposed);
         discardChartEdits(index);
         visual.preview.attempted = false;
         state.hint("图表编辑已应用");
         return true;
     } catch (const std::exception &e) {
-        visual.editError[index] = e.what();
+        chartEdits().editError[index] = e.what();
         visualError("edit", e.what(), "请修正或撤销草稿，再应用编辑。", index);
         return false;
     }
 }
 void resetChart(int index) {
-    visual.editors[index] = msa::charts::default_editor(msa::charts::all_kinds()[index]);
+    chartEdits().editors[index] = msa::charts::default_editor(msa::charts::all_kinds()[index], activeChartStyle());
     discardChartEdits(index);
     visual.preview.attempted = false;
     if (visual.errorKind == "render" && visual.errorChart == index)
@@ -384,7 +402,7 @@ void resetAllCharts() {
     state.hint("全部图表已恢复默认外观");
 }
 bool sameChartEditor(const msa::charts::Editor &a, const msa::charts::Editor &b) {
-    return a.title == b.title && a.x_label == b.x_label && a.y_label == b.y_label &&
+    return a.style == b.style && a.title == b.title && a.x_label == b.x_label && a.y_label == b.y_label &&
            a.primary_color == b.primary_color && a.line_width == b.line_width &&
            a.point_radius == b.point_radius && a.show_grid == b.show_grid &&
            a.show_legend == b.show_legend && a.show_limits == b.show_limits && a.y_min == b.y_min &&
@@ -411,12 +429,13 @@ bool sameChartData(const msa::Result &a, const msa::Result &b) {
     return sameJson(a.config, b.config) && sameJson(a.metrics, b.metrics);
 }
 const msa::charts::Scene *chartPreview(const msa::Result &result, float width, float height) {
+    const auto &edits = chartEdits();
     auto &cache = visual.preview;
     const int i = visual.selected;
-    const bool draft = visual.editing && visual.editDirty[i];
-    const auto &editor = draft ? visual.drafts[i] : visual.editors[i];
-    const std::array<std::string, 4> inputs{visual.lower[i], visual.upper[i], visual.ticks[i],
-                                            visual.bins[i]};
+    const bool draft = visual.editing && edits.editDirty[i];
+    const auto &editor = draft ? edits.drafts[i] : edits.editors[i];
+    const std::array<std::string, 4> inputs{edits.lower[i], edits.upper[i], edits.ticks[i],
+                                            edits.bins[i]};
     const bool sameData = cache.snapshot && sameChartData(*cache.snapshot, result);
     if (cache.attempted && sameData && cache.imported == visual.importedSelected &&
         cache.selected == visual.selected && cache.width == width && cache.height == height &&
@@ -447,7 +466,7 @@ const msa::charts::Scene *chartPreview(const msa::Result &result, float width, f
             }
         }
         if (!cache.scene)
-            cache.scene = msa::charts::make_scene(result, kind, visual.editors[i], width, height);
+            cache.scene = msa::charts::make_scene(result, kind, edits.editors[i], width, height);
         if (visual.errorKind == "render")
             clearVisualError();
     } catch (const std::exception &e) {
@@ -574,10 +593,10 @@ void exportVisuals() {
             throw std::runtime_error("请至少选择一张组合图表");
         const auto directory = msa::resolve_output_directory(native_ui::trim(state.draft.chartDirectory));
         platform::ChartExportOptions options;
-        options.format = static_cast<platform::ChartFormat>(visual.format);
-        options.columns = visual.scope == 0 ? 1 : visual.columns + 1;
-        options.panel_width = 1200 + visual.resolution * 600;
-        options.dpi = 144 + visual.resolution * 72;
+        options.format = static_cast<platform::ChartFormat>(state.draft.charts.format);
+        options.columns = state.draft.charts.scope == 0 ? 1 : state.draft.charts.columns + 1;
+        options.panel_width = 1200 + state.draft.charts.resolution * 600;
+        options.dpi = 144 + state.draft.charts.resolution * 72;
         const int count = int(scenes.size());
         const auto extension = platform::chart_extension(options.format);
         const auto basename = msa::render_study_basename(state.draft.chartFilename,
@@ -628,12 +647,12 @@ void stopVisuals() {
 }
 void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
     const int i = visual.selected;
-    auto &e = visual.drafts[i];
+    auto &e = chartEdits().drafts[i];
     // 图表索引隔离控件编辑状态；重置版本确保撤销后输入缓冲也恢复为已应用内容。
-    const auto id = "chart.edit." + std::to_string(i) + "." + std::to_string(visual.editEpoch[i]);
+    const auto id = chartEditId(i);
     const auto changed = [i] {
-        visual.editDirty[i] = true;
-        visual.editError[i].clear();
+        chartEdits().editDirty[i] = true;
+        chartEdits().editError[i].clear();
         if (visual.errorKind == "edit" && visual.errorChart == i)
             clearVisualError();
     };
@@ -666,16 +685,16 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                         .width(c)
                         .gap(12)
                         .content([&] {
-                            localField(u, id + ".min", "纵轴下限", visual.lower[i], (c - 12) / 2,
+                            localField(u, id + ".min", "纵轴下限", chartEdits().lower[i], (c - 12) / 2,
                                        "自动", changed);
-                            localField(u, id + ".max", "纵轴上限", visual.upper[i], (c - 12) / 2,
+                            localField(u, id + ".max", "纵轴上限", chartEdits().upper[i], (c - 12) / 2,
                                        "自动", changed);
                         })
                         .build();
-                    localField(u, id + ".ticks", "纵轴主刻度目标间隔数", visual.ticks[i], c,
+                    localField(u, id + ".ticks", "纵轴主刻度目标间隔数", chartEdits().ticks[i], c,
                                "自动（可填 2 至 10）", changed);
                 } else if (visual.editorTab == 1) {
-                    const std::vector<std::string> colors{"#2F65A4", "#16866B", "#7B51C2",
+                    const std::vector<std::string> colors{msa::charts::default_primary_color(e.style), "#16866B", "#7B51C2",
                                                           "#D47B20", "#CB4A5B"};
                     int color = 0;
                     for (int k = 0; k < int(colors.size()); ++k)
@@ -694,7 +713,7 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                                 .build();
                             combo(u, id + ".color", {"蓝色", "青绿", "紫色", "琥珀", "玫红"}, color,
                                   c - 86, [i, colors, changed](int k) {
-                                      visual.drafts[i].primary_color = colors[k];
+                                      chartEdits().drafts[i].primary_color = colors[k];
                                       changed();
                                   });
                         })
@@ -708,7 +727,7 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                                 segments(u, id + ".weight", {"细线", "标准", "加粗"},
                                          std::clamp(int(e.line_width) - 1, 0, 2), width,
                                          [i, changed](int k) {
-                                             visual.drafts[i].line_width = float(k + 1);
+                                             chartEdits().drafts[i].line_width = float(k + 1);
                                              changed();
                                          });
                             })
@@ -723,7 +742,7 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                                 segments(u, id + ".points", {"小", "标准", "大"},
                                          std::clamp(int(e.point_radius) - 2, 0, 2), width,
                                          [i, changed](int k) {
-                                             visual.drafts[i].point_radius = float(k + 2);
+                                             chartEdits().drafts[i].point_radius = float(k + 2);
                                              changed();
                                          });
                             })
@@ -748,13 +767,13 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                         text(u, id + ".marker.label", "数据点形状", c, 21, 13);
                         combo(u, id + ".marker", {"按系列区分", "圆形", "方形", "菱形", "三角形"},
                               static_cast<int>(e.marker_shape), c, [i, changed](int k) {
-                                  visual.drafts[i].marker_shape =
+                                  chartEdits().drafts[i].marker_shape =
                                       static_cast<msa::charts::MarkerShape>(k);
                                   changed();
                               });
                     }
                     if (kind == msa::charts::Kind::Histogram)
-                        localField(u, id + ".bins", "直方图分箱数", visual.bins[i], c,
+                        localField(u, id + ".bins", "直方图分箱数", chartEdits().bins[i], c,
                                    "自动（可填 3 至 40）", changed);
                 } else {
                     u.row(id + ".display.row")
@@ -763,12 +782,12 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                         .content([&] {
                             checkOption(u, id + ".grid", "网格", e.show_grid, (c - 12) / 2,
                                         [i, changed](bool value) {
-                                            visual.drafts[i].show_grid = value;
+                                            chartEdits().drafts[i].show_grid = value;
                                             changed();
                                         });
                             checkOption(u, id + ".legend", "图例", e.show_legend, (c - 12) / 2,
                                         [i, changed](bool value) {
-                                            visual.drafts[i].show_legend = value;
+                                            chartEdits().drafts[i].show_legend = value;
                                             changed();
                                         });
                         })
@@ -777,7 +796,7 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                         text(u, id + ".legend.position.label", "图例位置", c, 21, 13);
                         segments(u, id + ".legend.position", {"绘图区上方", "绘图区下方"},
                                  static_cast<int>(e.legend_position), c, [i, changed](int k) {
-                                     visual.drafts[i].legend_position =
+                                     chartEdits().drafts[i].legend_position =
                                          static_cast<msa::charts::LegendPosition>(k);
                                      changed();
                                  });
@@ -792,7 +811,7 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
                                    : "规格参考线",
                         e.show_limits, c,
                         [i, changed](bool value) {
-                            visual.drafts[i].show_limits = value;
+                            chartEdits().drafts[i].show_limits = value;
                             changed();
                         },
                         noLimits);
@@ -800,18 +819,18 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
             })
             .build();
         // 错误和草稿状态共用固定槽位，应用失败不推移编辑操作。
-        const bool invalidPreview = visual.editDirty[i] && visual.preview.selected == i &&
+        const bool invalidPreview = chartEdits().editDirty[i] && visual.preview.selected == i &&
                                     visual.preview.draft && !visual.preview.draftError.empty();
         u.text(id + ".status")
             .size(c, 44)
-            .text(!visual.editError[i].empty() ? visual.editError[i]
+            .text(!chartEdits().editError[i].empty() ? chartEdits().editError[i]
                   : invalidPreview             ? visual.preview.draftError
-                  : visual.editDirty[i]        ? "正在预览草稿，应用后可导出。"
+                  : chartEdits().editDirty[i]        ? "正在预览草稿，应用后可导出。"
                                                : "图表外观保留在本次运行期间。")
             .fontSize(16)
             .lineHeight(22)
-            .color(!visual.editError[i].empty() || invalidPreview ? levelColor(Level::Error)
-                   : visual.editDirty[i]                          ? levelColor(Level::Warning)
+            .color(!chartEdits().editError[i].empty() || invalidPreview ? levelColor(Level::Error)
+                   : chartEdits().editDirty[i]                          ? levelColor(Level::Warning)
                                                                   : muted)
             .wrap()
             .maxWidth(c)
@@ -824,14 +843,14 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
             .content([&] {
                 button(
                     u, id + ".apply", "应用编辑", (c - 12) / 2, [i] { applyChartEdits(i); }, true,
-                    !visual.editDirty[i]);
+                    !chartEdits().editDirty[i]);
                 button(
                     u, id + ".discard", "撤销草稿", (c - 12) / 2,
                     [i] {
                         discardChartEdits(i);
                         state.hint("已撤销图表草稿");
                     },
-                    false, !visual.editDirty[i] && visual.editError[i].empty());
+                    false, !chartEdits().editDirty[i] && chartEdits().editError[i].empty());
             })
             .build();
         u.row(id + ".reset.row")
@@ -871,7 +890,7 @@ void chartAppearance(Ui &u, float w, float viewportHeight = 0) {
     });
 }
 void openFileOptions() {
-    state.optionsTab = 2;
+    state.optionsTab = fileOptionsTab;
     state.configOffset = 0;
     state.navigate(Page::Options);
 }
@@ -964,6 +983,68 @@ void visualRecovery(Ui &u, float w) {
             .build();
     });
 }
+void chartStyleSettings(Ui &u, float w) {
+    section(u, "chart.styles", "图表风格", w, [&](float c) {
+        const auto choice = [&](float width) {
+            segments(u, "chart.style", {"默认风格", "Origin 风格"}, state.draft.charts.style, width,
+                     [](int index) {
+                         if (index == state.draft.charts.style)
+                             return;
+                         state.draft.charts.style = index;
+                         visual.editorOffset = 0;
+                         visual.preview.attempted = false;
+                         if (visual.errorKind == "edit" || visual.errorKind == "render")
+                             clearVisualError();
+                         menu.id.clear();
+                         state.outputChanged();
+                     });
+        };
+        const auto palette = [&](float width) {
+            const auto colors = msa::charts::series_colors(
+                msa::charts::default_editor(msa::charts::Kind::Interaction, activeChartStyle()));
+            u.row("chart.style.palette")
+                .size(width, 36)
+                .gap(6)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    text(u, "chart.palette.label", "系列配色", 64, 26, 13, muted);
+                    for (int i = 0; i < 3; ++i)
+                        u.rect("chart.palette." + std::to_string(i))
+                            .size(24, 10)
+                            .radius(4)
+                            .color(colors[i])
+                            .build();
+                })
+                .build();
+        };
+        const auto open = [&] {
+            button(u, "chart.style.open", "查看图表", 108, [] { state.navigate(Page::Charts); });
+        };
+        if (c < 510) {
+            choice(c);
+            u.row("chart.style.actions")
+                .width(c)
+                .gap(12)
+                .content([&] {
+                    palette(c - 120);
+                    open();
+                })
+                .build();
+        } else {
+            const float width = std::min(360.f, c - 298);
+            u.row("chart.style.actions")
+                .width(c)
+                .gap(12)
+                .alignItems(eui::Align::CENTER)
+                .content([&] {
+                    choice(width);
+                    palette(c - width - 132);
+                    open();
+                })
+                .build();
+        }
+    });
+}
 void chartExportSettings(Ui &u, float w) {
     section(u, "chart.output", "图表导出", w, [&](float c) {
         const auto format = [&](float width) {
@@ -972,8 +1053,11 @@ void chartExportSettings(Ui &u, float w) {
                 .gap(5)
                 .content([&] {
                     text(u, "chart.format.label", "文件格式", width, 21, 13);
-                    segments(u, "chart.format", {"PNG", "JPEG", "PDF", "SVG"}, visual.format, width,
-                             [](int i) { visual.format = i; });
+                    segments(u, "chart.format", chartFormatLabels, state.draft.charts.format, width,
+                             [](int i) {
+                                 state.draft.charts.format = i;
+                                 state.outputChanged();
+                             });
                 })
                 .build();
         };
@@ -983,8 +1067,11 @@ void chartExportSettings(Ui &u, float w) {
                 .gap(5)
                 .content([&] {
                     text(u, "chart.scope.label", "导出范围", width, 21, 13);
-                    segments(u, "chart.scope", {"当前单图", "多图组合"}, visual.scope, width,
-                             [](int i) { visual.scope = i; });
+                    segments(u, "chart.scope", {"当前单图", "多图组合"}, state.draft.charts.scope,
+                             width, [](int i) {
+                                 state.draft.charts.scope = i;
+                                 state.outputChanged();
+                             });
                 })
                 .build();
         };
@@ -995,7 +1082,10 @@ void chartExportSettings(Ui &u, float w) {
                 .content([&] {
                     text(u, "chart.resolution.label", "单图宽度", width, 21, 13);
                     segments(u, "chart.resolution", {"1200 px", "1800 px", "2400 px"},
-                             visual.resolution, width, [](int i) { visual.resolution = i; });
+                             state.draft.charts.resolution, width, [](int i) {
+                                 state.draft.charts.resolution = i;
+                                 state.outputChanged();
+                             });
                 })
                 .build();
         };
@@ -1005,12 +1095,15 @@ void chartExportSettings(Ui &u, float w) {
                 .gap(5)
                 .content([&] {
                     text(u, "chart.columns.label", "组合排版", width, 21, 13);
-                    segments(u, "chart.columns", {"单列", "双列"}, visual.columns, width,
-                             [](int i) { visual.columns = i; });
+                    segments(u, "chart.columns", {"单列", "双列"}, state.draft.charts.columns,
+                             width, [](int i) {
+                                 state.draft.charts.columns = i;
+                                 state.outputChanged();
+                             });
                 })
                 .build();
         };
-        const bool combination = visual.scope == 1;
+        const bool combination = state.draft.charts.scope == 1;
         if (c >= (combination ? 940.f : 700.f)) {
             const int count = combination ? 4 : 3;
             const float width = (c - 12 * (count - 1)) / count;
@@ -1062,17 +1155,28 @@ void chartExportSettings(Ui &u, float w) {
                          "组合图表  ·  " + std::to_string(selectedChartCount()) + " / 7 张",
                          c - 160, 32, 13, selectedChartCount() ? ink : levelColor(Level::Warning));
                     button(
-                        u, "chart.selection.all", "全选", 72, [] { visual.included.fill(true); },
+                        u, "chart.selection.all", "全选", 72,
+                        [] {
+                            state.draft.charts.included.fill(true);
+                            state.outputChanged();
+                        },
                         false, false, 32);
                     button(
-                        u, "chart.selection.none", "清空", 72, [] { visual.included.fill(false); },
+                        u, "chart.selection.none", "清空", 72,
+                        [] {
+                            state.draft.charts.included.fill(false);
+                            state.outputChanged();
+                        },
                         false, false, 32);
                 })
                 .build();
             const auto item = [&](int i, float width) {
                 checkOption(u, "chart.select." + std::to_string(i),
-                            msa::charts::label(msa::charts::all_kinds()[i]), visual.included[i],
-                            width, [i](bool value) { visual.included[i] = value; });
+                            msa::charts::label(msa::charts::all_kinds()[i]),
+                            state.draft.charts.included[i], width, [i](bool value) {
+                                state.draft.charts.included[i] = value;
+                                state.outputChanged();
+                            });
             };
             const int count = c >= 1010 ? 4 : c >= 760 ? 3 : c >= 460 ? 2 : 1;
             u.column("chart.selection.list")
@@ -1110,8 +1214,8 @@ void chartExportSettings(Ui &u, float w) {
             .size(c, 44)
             .text(std::string(state.draft.silentCharts ? "静默保存，同名文件会追加序号。\n"
                                                        : "另存为时可选择目录和文件名。\n") +
-                  (visual.format == 3 ? "SVG 保留矢量线条、数据点和文字。"
-                   : visual.format == 2 ? "PDF 保存为单页图像。"
+                  (state.draft.charts.format == 3 ? "SVG 保留矢量线条、数据点和文字。"
+                   : state.draft.charts.format == 2 ? "PDF 保存为单页图像。"
                    : combination      ? "所选图表保存为一张合成图片。"
                                       : "目录留空时，图片保存在 Windows 桌面。"))
             .fontSize(16)
@@ -1239,7 +1343,7 @@ void chartPreviewToolbar(Ui &u, float w) {
             const float headingWidth =
                 w - draftWidth - gap - (inlineControls ? controlsWidth + gap : 0.f);
             chartSectionHeading(u, "charts.preview.heading", "图表预览", headingWidth);
-            if (visual.editDirty[visual.selected])
+            if (chartEdits().editDirty[visual.selected])
                 badge(u, "charts.preview.state",
                       !visual.editing ? "草稿待应用"
                       : !visual.preview.draftError.empty() ? "显示已应用" : "草稿预览", draftWidth,
@@ -1402,7 +1506,6 @@ void chartsPage(Ui &u, float w, float h) {
                     }
                     if (!sourceError)
                         visualRecovery(v, cw);
-                    chartExportSettings(v, cw);
                 })
                 .build();
         })

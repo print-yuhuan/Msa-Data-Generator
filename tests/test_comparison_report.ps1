@@ -42,6 +42,23 @@ foreach ($content in @($fromFile, $fromGenerator)) {
 Check ($fromGenerator.Contains('模拟生成') -and $fromGenerator.Contains('数据生成种子 123')) '模拟研究来源缺失'
 Check ($fromFile.Contains('数据导入') -and $fromFile.Contains('研究&amp;A.csv') -and -not $fromFile.Contains('数据生成种子')) '导入文件名转义或种子不正确'
 
+$styleConfig = Join-Path $run 'origin-settings.json'
+$styledReport = Join-Path $run 'origin.html'
+# Data analysis uses only the selected chart style when producing a comparison report.
+[IO.File]::WriteAllText($styleConfig, '{"output":{"charts":{"style":"origin","panel_width":999}}}')
+$null = & $Cli --config $styleConfig --input $csv --method crossed_xbarr --comparison-report $styledReport @parameters
+Check ($LASTEXITCODE -eq 0) '命令行报告应采用图表风格，跳过独立图像才使用的输出宽度'
+$styled = Read-Report $styledReport
+$svgPattern = '(?s)<svg .*?</svg>'
+$defaultFigures = [regex]::Matches($fromFile, $svgPattern)
+$originFigures = [regex]::Matches($styled, $svgPattern)
+Check ($originFigures.Count -eq 2) 'Origin 风格报告须包含两张控制图'
+for ($i = 0; $i -lt $originFigures.Count; $i++) {
+    Check ($originFigures[$i].Value.Contains('#2F65A4') -and
+           $originFigures[$i].Value -cne $defaultFigures[$i].Value) '两种风格应生成对应的控制图配色'
+}
+Check ([regex]::Replace($styled,$svgPattern,'') -ceq [regex]::Replace($fromFile,$svgPattern,'')) '切换风格只能改变报告图形'
+
 $browser = @(
     foreach ($binary in 'msedge.exe','chrome.exe') {
         foreach ($hive in 'HKCU:','HKLM:') {

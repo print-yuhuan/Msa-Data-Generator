@@ -59,6 +59,7 @@ enum class Status {
     SearchFailed
 };
 enum class Page { Data, Charts, Logs, Options, Help, About };
+constexpr int chartOptionsTab = 2, fileOptionsTab = 3;
 enum class Level { Info, Warning, Error };
 const char *levelColor(Level level) {
     return level == Level::Error ? "#9F3229" : level == Level::Warning ? "#80580B" : blue;
@@ -226,6 +227,7 @@ struct State {
         draft.importFilename = previous.importFilename;
         draft.chartDirectory = previous.chartDirectory;
         draft.chartFilename = previous.chartFilename;
+        draft.charts = previous.charts;
         draft.reportFilename = previous.reportFilename;
         draft.analysisMethod = method;
         draft.interactionMode = interaction;
@@ -3049,6 +3051,13 @@ void pairedCards(Ui &u, const std::string &id, float w, const char *leftId,
         })
         .build();
 }
+void chartStyleSettings(Ui &u, float w);
+void chartExportSettings(Ui &u, float w);
+void openChartOptions() {
+    state.optionsTab = chartOptionsTab;
+    state.configOffset = 0;
+    state.navigate(Page::Options);
+}
 void config(Ui &u, float w, float disclosureProgress = reveal(state.advancedChanged)) {
     if (state.optionsTab == 0) {
         pairedCards(u, "options.study.definition", w, "design", designSettings, "generation.rules",
@@ -3068,7 +3077,10 @@ void config(Ui &u, float w, float disclosureProgress = reveal(state.advancedChan
             processSettings(u, w);
             statisticsSettings(u, w);
         }
-    } else if (state.optionsTab == 2) {
+    } else if (state.optionsTab == chartOptionsTab) {
+        chartStyleSettings(u, w);
+        chartExportSettings(u, w);
+    } else if (state.optionsTab == fileOptionsTab) {
         fileSettings(u, w);
         exportPreferences(u, w);
         pairedCards(u, "options.output", w, "output", exportSettings, "runorder", runOrderSettings);
@@ -3088,8 +3100,8 @@ void optionsPage(Ui &u, float w, float h) {
                 const float tabsWidth =
                     navigationWidth - titleWidth - secondaryNavGap - 2 * secondaryNavInset;
                 tabs(
-                    u, "options.tabs", {"研究", "分析", "文件"}, state.optionsTab,
-                    std::min(tabsWidth, 378.f),
+                    u, "options.tabs", {"研究", "分析", "图表", "文件"}, state.optionsTab,
+                    std::min(tabsWidth, 480.f),
                     [](int i) {
                         state.optionsTab = i;
                         state.configOffset = 0;
@@ -4054,7 +4066,7 @@ void helpCsv(Ui &v, float cw) {
                  "点击底部「导出数据」。在「导出方式」关闭测量数据静默导出，即可每次选择位置。",
                  c);
         button(v, "help.files.open", "前往文件选项", 160, [] {
-            state.optionsTab = 2;
+            state.optionsTab = fileOptionsTab;
             state.configOffset = 0;
             state.navigate(Page::Options);
         });
@@ -4125,7 +4137,7 @@ void helpFilename(Ui &v, float cw) {
                  "只填写基本名称，导出时按所选文件类型添加扩展名。",
                  c);
         button(v, "help.filename.open", "编辑导入与导出名称", 176, [] {
-            state.optionsTab = 2;
+            state.optionsTab = fileOptionsTab;
             state.configOffset = 0;
             state.navigate(Page::Options);
         });
@@ -4289,19 +4301,25 @@ void helpCharts(Ui &v, float cw) {
                  "收起编辑器可查看已应用的图形。点击「应用编辑」即可按该样式导出。「撤销草稿」返回"
                  "上次应用的样式，「重置当前图表」恢复默认外观。",
                  c);
-        helpText(v, "help.charts.edit.session", "图表外观、组合选择和图表分辨率保留在本次运行期间。",
+        helpText(v, "help.charts.edit.session",
+                 "在「选项 → 图表」可选用与界面配色一致的默认风格，或沿用 Origin 风格。"
+                 "每种风格各自保留七张图的已应用样式和草稿，重置当前或全部图表仅作用于选中的风格。"
+                 "编辑内容在本次运行期间保留，方法对比报告使用导出时所选风格的控制图配色。",
                  c);
     });
     section(v, "help.charts.export", "导出单图或组合", cw, [&](float c) {
         helpItem(v, "help.charts.export.scope", "选图和版式",
-                 "在「图表导出」选择「当前单图」或「多图组合」。组合可勾选至少一张图，按列表"
-                 "顺序排列，支持单列或双列。先应用或撤销待导出图表的草稿。",
+                 "在「选项 → 图表 → 图表导出」选择「当前单图」或「多图组合」。组合可勾选至少一张图，按列表"
+                 "顺序排列，支持单列或双列。返回图表页，应用或撤销待导出图表的草稿，点击底部「导出图表」。",
                  c);
         helpItem(v, "help.charts.export.files", "设置格式和保存位置",
                  "选择 PNG、JPEG、PDF 或 SVG 和单图宽度。「目录与文件名」可打开选项页修改图表名称和目录。"
                  "默认打开「另存为」。开启图表静默导出后直接保存，同名时追加序号。"
                  "保存后可点击「上次导出目录」查看文件。",
                  c);
+        button(v, "help.charts.options", "前往图表选项", 160, openChartOptions);
+        helpText(v, "help.charts.export.persist",
+                 "点击选项页底部「保存配置」，下次启动会恢复风格、格式、宽度、组合范围、排版和勾选项。", c);
         helpText(v, "help.charts.export.pdf",
                  "PDF 将全部所选图表保存为一页，图形与中文文字一起绘制成高分辨率图像。SVG 可导出"
                  "单图或组合图，缩放后线条、数据点和文字仍清晰，适合排版或在矢量编辑器中继续编辑。", c);
@@ -4665,9 +4683,11 @@ void footer(Ui &u, float w) {
     const bool compact = w < 760;
     if (state.page == Page::Charts && !state.busy()) {
         const float applyWidth = compact ? 110.f : 132.f, exportWidth = compact ? 124.f : 152.f;
-        footerStatus(u, w - applyWidth - exportWidth - 24, chartFooterSummary());
+        const float settingsWidth = compact ? 96.f : 112.f;
+        footerStatus(u, w - settingsWidth - applyWidth - exportWidth - 36, chartFooterSummary());
+        button(u, "charts.options", "图表选项", settingsWidth, openChartOptions);
         button(u, "charts.apply", "应用编辑", applyWidth, [] { applyChartEdits(visual.selected); },
-               false, visual.busy() || !insightResult() || !visual.editDirty[visual.selected]);
+               false, visual.busy() || !insightResult() || !chartEdits().editDirty[visual.selected]);
         button(u, "charts.export", visual.busy() && !visual.exportingReport ? "导出中…" : "导出图表", exportWidth,
                exportVisuals, true, visual.busy() || !insightResult() || selectedChartCount() == 0);
         return;

@@ -52,6 +52,7 @@ struct Draft {
     bool silentCsv = false, silentCharts = false, silentReport = false;
     int dataFileType = 0, reportFormat = 0;
     std::string importDirectory, importFilename, chartDirectory, chartFilename = msa::default_chart_basename;
+    msa::ChartPreferences charts;
     std::string reportDirectory, reportFilename = msa::default_report_basename;
     int analysisMethod = 0, interactionMode = 0;
     std::string interactionAlpha = "0.05";
@@ -152,6 +153,7 @@ inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
         throw msa::ConfigError("对照报告格式选择无效");
     auto output = data_output_fields(d, saveInactiveSeed);
     output["charts"] = {{"directory", trim(d.chartDirectory)}, {"filename", d.chartFilename}};
+    d.charts.write_to(output["charts"]);
     output["comparison_report"] = {{"format", d.reportFormat == 1 ? "html" : "pdf"},
                                    {"directory", trim(d.reportDirectory)},
                                    {"filename", d.reportFilename}};
@@ -293,6 +295,7 @@ inline Draft from_config(const msa::Json &raw) {
     d.importFilename = c["input"]["filename"];
     d.chartDirectory = c["output"]["charts"]["directory"];
     d.chartFilename = c["output"]["charts"]["filename"];
+    d.charts = msa::ChartPreferences::read(c["output"]["charts"]);
     d.filename = c["output"]["filename"];
     d.dataFileType = c["output"]["file_type"] == "xlsx";
     const auto &silent = c["output"]["silent"];

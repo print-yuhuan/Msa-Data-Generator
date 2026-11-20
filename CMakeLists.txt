@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(MsaNative VERSION 1.0.7 LANGUAGES C CXX)
+project(MsaNative VERSION 1.0.8 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -112,10 +112,6 @@ if(WIN32)
     -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_minitab_policy.ps1"
     -Cli "$<TARGET_FILE:msa_cli>" -OutputDirectory "${CMAKE_CURRENT_BINARY_DIR}/minitab-policy-test-output")
 endif()
-if(MSA_BUILD_GUI)
-if(NOT WIN32)
-  message(FATAL_ERROR "Desktop integration is Windows-only; use -DMSA_BUILD_GUI=OFF for the portable core/CLI")
-endif()
 set(MSA_APP_ICON_SVG "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app-icon.svg")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MSA_APP_ICON_SVG}")
 file(STRINGS "${MSA_APP_ICON_SVG}" MSA_BRAND_BACKGROUND REGEX "id=\"brand-background\"")
@@ -131,6 +127,10 @@ namespace msa {
 inline constexpr char brand_blue[] = "@MSA_BRAND_BLUE@";
 }
 ]=] @ONLY)
+if(MSA_BUILD_GUI)
+if(NOT WIN32)
+  message(FATAL_ERROR "Desktop integration is Windows-only; use -DMSA_BUILD_GUI=OFF for the portable core/CLI")
+endif()
 set(EUI_BUILD_APPS OFF CACHE BOOL "" FORCE)
 set(EUI_BUILD_USER_APPS OFF CACHE BOOL "" FORCE)
 set(EUI_BUILD_TEST_FIXTURES OFF CACHE BOOL "" FORCE)

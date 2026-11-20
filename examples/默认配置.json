@@ -62,7 +62,20 @@
     },
     "charts": {
       "directory": "",
-      "filename": "MSA_Charts"
+      "filename": "MSA_Charts",
+      "style": "default",
+      "format": "png",
+      "scope": "current",
+      "columns": 2,
+      "panel_width": 1800,
+      "included": [
+        "variance_components",
+        "measurement_by_part",
+        "measurement_by_operator",
+        "range_chart",
+        "mean_chart",
+        "interaction"
+      ]
     },
     "run_order": {
       "mode": "standard",

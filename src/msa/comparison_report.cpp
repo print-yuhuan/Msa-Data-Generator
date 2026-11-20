@@ -35,8 +35,8 @@ std::string tolerance_name(const Json &study) {
     return "未定义";
 }
 
-void chart(std::ostream &out, const Result &result, charts::Kind kind) {
-    const auto scene = charts::make_scene(result, kind, charts::default_editor(kind), 720, 425);
+void chart(std::ostream &out, const Result &result, charts::Kind kind, charts::Style style) {
+    const auto scene = charts::make_scene(result, kind, charts::default_editor(kind, style), 720, 425);
     out << "<figure><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " << scene.width << ' '
         << scene.height << "\" role=\"img\"><title>" << charts::xml_text(charts::label(kind))
         << "</title>\n";
@@ -61,7 +61,7 @@ small{color:#435a6d}section{overflow-wrap:anywhere}
 
 void write_comparison_report(const std::filesystem::path &path, const Result &study,
                              StudySource source, const std::string &source_name,
-                             ExistingFile policy) {
+                             ExistingFile policy, std::optional<charts::Style> style) {
     Result reference;
     reference.matrix = study.matrix;
     auto cfg = study.config;
@@ -144,8 +144,10 @@ void write_comparison_report(const std::filesystem::path &path, const Result &st
                                                          : "将交互项合并入误差")
         << "。</p></section><section class=\"plots\"><h2>测量子组控制图</h2>"
            "<p>两种分析使用同一组读数。图中按操作员分面，控制限采用均值极差法。</p>";
-    chart(out, reference, charts::Kind::RangeChart);
-    chart(out, reference, charts::Kind::MeanChart);
+    const auto reportStyle = style.value_or(reference.config.at("output").at("charts").at("style") == "origin"
+                                                ? charts::Style::Origin : charts::Style::Default);
+    chart(out, reference, charts::Kind::RangeChart, reportStyle);
+    chart(out, reference, charts::Kind::MeanChart, reportStyle);
     out << "</section></main></body></html>\n";
     auto content = out.str();
     auto extension = path.extension().u8string();

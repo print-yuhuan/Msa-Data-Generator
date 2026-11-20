@@ -405,7 +405,7 @@ bool unused_output_field(OutputUse use, std::string_view path) {
            (path == "/output/directory" || path == "/output/filename" ||
             path == "/output/existing_file" || path == "/output/file_type");
 }
-void default_invalid_unused_output_fields(msa::Json &config, OutputUse use) {
+void default_invalid_unused_output_fields(msa::Json &config, OutputUse use, bool writesComparison) {
     constexpr const char *fields[]{"/input/directory",
                                    "/input/filename",
                                    "/output/directory",
@@ -423,12 +423,19 @@ void default_invalid_unused_output_fields(msa::Json &config, OutputUse use) {
                                    "/output/silent/comparison_report",
                                    "/output/charts/directory",
                                    "/output/charts/filename",
+                                   "/output/charts/style",
+                                   "/output/charts/format",
+                                   "/output/charts/scope",
+                                   "/output/charts/columns",
+                                   "/output/charts/panel_width",
+                                   "/output/charts/included",
                                    "/output/comparison_report/format",
                                    "/output/comparison_report/directory",
                                    "/output/comparison_report/filename"};
     const auto defaults = msa::default_config();
     for (const auto *field : fields) {
-        if (!unused_output_field(use, field))
+        if (!unused_output_field(use, field) ||
+            (writesComparison && std::string_view(field) == "/output/charts/style"))
             continue;
         const msa::Json::json_pointer path(field);
         if (!config.contains(path))
@@ -609,7 +616,7 @@ int run(const std::vector<std::string> &args) {
                 c[names] = msa::default_config().at(names);
             c[path] = value;
         }
-        default_invalid_unused_output_fields(c, outputUse);
+        default_invalid_unused_output_fields(c, outputUse, !comparison.empty());
         if (outputUse == OutputUse::Explicit)
             c["output"]["file_type"] = msa::data_file_type(output);
         if (overwrite)

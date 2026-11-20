@@ -232,13 +232,14 @@ void options_grouping(const eui::Ui &ui, int tab) {
         if (std::abs(left.y - right.y) > .1f || left.x + left.width + 8 > right.x + .1f)
             throw std::runtime_error(std::string("选项控件未按同一行对齐：") + first + " / " + second);
     };
-    const std::array<std::vector<const char *>, 3> groups{{
+    const std::array<std::vector<const char *>, 4> groups{{
         {"design.card", "generation.rules.card", "generation.card", "advanced.card"},
         {"analysis.card", "analysis.evaluation.card", "analysis.process.card",
          "analysis.statistics.card"},
+        {"chart.styles.card", "chart.output.card"},
         {"output.files.card", "export.preferences.card", "output.card", "runorder.card"},
     }};
-    for (int category = 0; category < 3; ++category)
+    for (int category = 0; category < int(groups.size()); ++category)
         for (const auto *id : groups[category])
             if (bool(ui.find(id)) != (category == tab))
                 throw std::runtime_error(std::string("选项业务分组跨页或丢失：") + id);
@@ -294,6 +295,9 @@ void options_grouping(const eui::Ui &ui, int tab) {
         else if (ui.find("analysis.confidence.method") || ui.find("analysis.confidence.level.hit"))
             throw std::runtime_error("置信区间关闭时仍占用字段空间");
         aligned("analysis.misclassification.control", "analysis.confidence.control");
+    } else if (tab == gui::chartOptionsTab) {
+        group("chart.styles.card", {"chart.style", "chart.style.palette", "chart.style.open.bg"});
+        group("chart.output.card", {"chart.format", "chart.scope", "chart.resolution", "chart.file.options.bg"});
     } else {
         group("output.card", {"csvformat", "runorder.standard.hit"});
         group("output.files.card", {"import.directory.hit", "import.filename.hit", "directory.hit",
@@ -347,7 +351,7 @@ void options_grouping(const eui::Ui &ui, int tab) {
         } else if (tab == 1) {
             pair("analysis.card", "analysis.process.card");
             pair("analysis.evaluation.card", "analysis.statistics.card");
-        } else {
+        } else if (tab == gui::fileOptionsTab) {
             pair("output.card", "runorder.card");
         }
     } else {
@@ -613,7 +617,7 @@ void options_navigation(const msa::Result &generated) {
     gui::state.resultRevision = gui::state.revision;
     gui::state.resultTab = 1;
     const auto revision = gui::state.revision;
-    const std::array<const char *, 3> anchors{"design.card", "analysis.card", "output.card"};
+    const std::array<const char *, 4> anchors{"design.card", "analysis.card", "chart.styles.card", "output.card"};
     for (float width : {588.f, 1020.f, 1100.f, 1132.f, 1232.f})
         for (int method : {0, 1}) {
             gui::state.draft.analysisMethod = method;
@@ -622,8 +626,8 @@ void options_navigation(const msa::Result &generated) {
             gui::state.draft.confidenceEnabled = method == 1;
             gui::state.advanced = method == 1;
             gui::state.advancedChanged = gui::Clock::now() - std::chrono::seconds(1);
-            for (int tab = 0; tab < 3; ++tab) {
-                gui::state.optionsTab = (tab + 2) % 3;
+            for (int tab = 0; tab < int(anchors.size()); ++tab) {
+                gui::state.optionsTab = (tab + 1) % int(anchors.size());
                 gui::state.configOffset = 80;
                 eui::Ui select;
                 select.begin("options-navigation");
@@ -643,7 +647,7 @@ void options_navigation(const msa::Result &generated) {
                 page.layout(width, 500);
                 controls_fit(page, width, "options category " + std::to_string(tab));
                 options_grouping(page, tab);
-                for (int other = 0; other < 3; ++other)
+                for (int other = 0; other < int(anchors.size()); ++other)
                     if (bool(page.find(anchors[other])) != (other == tab))
                         throw std::runtime_error(
                             "options categories overlap or omit their controls");
@@ -681,7 +685,7 @@ void options_navigation(const msa::Result &generated) {
                         fixed->frame.height != navFrame.height)
                         throw std::runtime_error("options navigation moves with scrolling");
                 }
-                if (tab == 2) {
+                if (tab == gui::fileOptionsTab) {
                     const auto *format = page.find("csvformat");
                     if (!format || !format->onPress)
                         throw std::runtime_error("output category lacks CSV format selection");
@@ -975,7 +979,7 @@ void regrouped_settings_state(const msa::Result &generated) {
                     throw std::runtime_error("随机取样未随双侧规格限更新填写提示");
             }
     }
-    reset(2);
+    reset(gui::fileOptionsTab);
     gui::state.draft.csvFormat = 1;
     gui::state.draft.storeStandardOrder = false;
     eui::Ui output;
@@ -2512,7 +2516,7 @@ void help_destinations() {
         help.end();
         help.layout(588, 500);
         click(help, buttons[i]);
-        if (gui::state.page != gui::Page::Options || gui::state.optionsTab != std::min(i, 2) ||
+        if (gui::state.page != gui::Page::Options || gui::state.optionsTab != (i < 2 ? i : gui::fileOptionsTab) ||
             gui::state.configOffset != 0 || !gui::state.footerMessage.empty() ||
             gui::state.revision != revision)
             throw std::runtime_error(
@@ -2707,8 +2711,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     gui::visual.importedName.clear();
     gui::visual.importedSelected = false;
     const auto editId = [](int index) {
-        return "chart.edit." + std::to_string(index) + "." +
-               std::to_string(gui::visual.editEpoch[index]);
+        return gui::chartEditId(index);
     };
     eui::Ui editorUi;
     const auto composeEditor = [&](int index) {
@@ -2765,10 +2768,10 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
             }) && gui::chartEditor(0).title == originalEditor.title,
             "编辑标题没有实时预览，或草稿写入了已应用设置");
     input(editId(0) + ".min", "-");
-    require(gui::visual.editDirty[0] && gui::visual.lower[0] == "-" &&
+    require(gui::chartEdits().editDirty[0] && gui::chartEdits().lower[0] == "-" &&
                 gui::sameChartEditor(gui::chartEditor(0), originalEditor),
             "半输入坐标或标题修改了已生效设置");
-    const auto draftEpoch = gui::visual.editEpoch[0];
+    const auto draftEpoch = gui::chartEdits().editEpoch[0];
     for (const bool expected : {false, true}) {
         eui::Ui page;
         page.begin("chart-edit-disclosure");
@@ -2776,9 +2779,9 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
         page.end();
         page.layout(1020, 560);
         click(page, "charts.edit.bg");
-        require(gui::visual.editing == expected && gui::visual.editDirty[0] &&
-                    gui::visual.drafts[0].title == "已应用的研究图表" &&
-                    gui::visual.lower[0] == "-" && gui::visual.editEpoch[0] == draftEpoch &&
+        require(gui::visual.editing == expected && gui::chartEdits().editDirty[0] &&
+                    gui::chartEdits().drafts[0].title == "已应用的研究图表" &&
+                    gui::chartEdits().lower[0] == "-" && gui::chartEdits().editEpoch[0] == draftEpoch &&
                     gui::sameChartEditor(gui::chartEditor(0), originalEditor),
                 "收起或展开图表编辑丢失草稿或应用了未完成参数");
     }
@@ -2788,7 +2791,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
                 std::any_of(fallback->items.begin(), fallback->items.end(), [&](const auto &p) {
                     return p.text == originalEditor.title;
                 }), "未完成坐标输入没有提示原因或丢失已应用预览");
-    require(!gui::applyChartEdits(0) && !gui::visual.editError[0].empty() &&
+    require(!gui::applyChartEdits(0) && !gui::chartEdits().editError[0].empty() &&
                 gui::sameChartEditor(gui::chartEditor(0), originalEditor) &&
                 gui::state.result->matrix == generated.matrix,
             "非法草稿未保留数据和已生效外观");
@@ -2796,25 +2799,57 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     input(editId(0) + ".min", "0");
     input(editId(0) + ".max", "120");
     input(editId(0) + ".ticks", "7");
-    require(gui::applyChartEdits(0) && !gui::visual.editDirty[0] &&
+    require(gui::applyChartEdits(0) && !gui::chartEdits().editDirty[0] &&
                 gui::chartEditor(0).title == "已应用的研究图表" && gui::chartEditor(0).y_min == 0 &&
                 gui::chartEditor(0).y_max == 120 && gui::chartEditor(0).y_tick_intervals == 7,
             "有效编辑未正确应用");
     sameSceneFrames(beforeDraftFrames, sceneFrames());
     composeEditor(1);
     require(editorUi.find(editId(1) + ".title.hit") && !editorUi.find(editId(0) + ".title.hit") &&
-                gui::visual.drafts[1].title == gui::visual.editors[1].title,
+                gui::chartEdits().drafts[1].title == gui::chartEdits().editors[1].title,
             "切换图表复用了另一图表输入状态");
     input(editId(1) + ".title", "第二张图的独立草稿");
+    const auto chooseStyle = [&](int index) {
+        eui::Ui options;
+        options.begin("chart-style-switch");
+        gui::chartStyleSettings(options, 620);
+        options.end();
+        options.layout(620, 250);
+        click(options, "chart.style.hit." + std::to_string(index));
+    };
+    gui::state.configDirty = false;
+    chooseStyle(1);
+    require(gui::activeChartStyle() == msa::charts::Style::Origin &&
+                !gui::chartEdits().editDirty[1] && gui::chartEditor(0).title == originalEditor.title &&
+                gui::chartEditor(0).primary_color != originalEditor.primary_color &&
+                gui::state.configDirty && gui::state.revision == revision && gui::state.validResult(),
+            "切换 Origin 风格未采用独立样式，或使研究结果失效");
     composeEditor(0);
-    require(gui::visual.drafts[0].title == "已应用的研究图表" &&
-                gui::visual.drafts[1].title == "第二张图的独立草稿",
+    input(editId(0) + ".title", "Origin 已应用");
+    require(gui::applyChartEdits(0), "Origin 风格无法编辑");
+    composeEditor(1);
+    input(editId(1) + ".min", "-");
+    chooseStyle(0);
+    require(gui::chartEditor(0).title == "已应用的研究图表" &&
+                gui::chartEdits().drafts[1].title == "第二张图的独立草稿" &&
+                gui::chartEdits().lower[1].empty(), "切回默认风格丢失了修改或混用了输入缓冲");
+    chooseStyle(1);
+    require(gui::chartEditor(0).title == "Origin 已应用" && gui::chartEdits().lower[1] == "-",
+            "切回 Origin 风格丢失有效样式或未完成的输入");
+    gui::resetAllCharts();
+    require(!gui::chartEdits().editDirty[1] &&
+                gui::chartEditor(0).primary_color == msa::charts::default_primary_color(msa::charts::Style::Origin),
+            "重置没有恢复当前风格的配色");
+    chooseStyle(0);
+    composeEditor(0);
+    require(gui::chartEdits().drafts[0].title == "已应用的研究图表" &&
+                gui::chartEdits().drafts[1].title == "第二张图的独立草稿",
             "跨图切换丢失或混用了草稿");
-    const auto oldEpoch = gui::visual.editEpoch[1];
+    const auto oldEpoch = gui::chartEdits().editEpoch[1];
     gui::discardChartEdits(1);
-    require(!gui::visual.editDirty[1] && gui::visual.editEpoch[1] > oldEpoch &&
-                gui::visual.drafts[1].title == gui::visual.editors[1].title &&
-                gui::visual.editors[0].title == "已应用的研究图表",
+    require(!gui::chartEdits().editDirty[1] && gui::chartEdits().editEpoch[1] > oldEpoch &&
+                gui::chartEdits().drafts[1].title == gui::chartEdits().editors[1].title &&
+                gui::chartEdits().editors[0].title == "已应用的研究图表",
             "撤销未隔离当前图表或未重置输入控件状态");
 
     composeEditor(1);
@@ -2838,7 +2873,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     require(editorUi.find(editId(6) + ".bins.hit") && !editorUi.find(editId(6) + ".marker"),
             "直方图的分箱和点形控件状态错误");
     input(editId(6) + ".bins", "41");
-    require(!gui::applyChartEdits(6) && !gui::visual.editError[6].empty(),
+    require(!gui::applyChartEdits(6) && !gui::chartEdits().editError[6].empty(),
             "直方图接受了超过范围的分箱数");
     input(editId(6) + ".bins", "12");
     require(gui::chartPreview(generated, 720, 448) && gui::visual.preview.draftError.empty() &&
@@ -2871,7 +2906,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     require(gui::chartPreview(generated, 720, 448) && gui::visual.errorKind.empty(),
             "恢复有效数据后渲染错误未清除");
 
-    gui::visual.scope = 1;
+    gui::state.draft.charts.scope = 1;
     eui::Ui outputUi;
     const auto composeOutput = [&] {
         outputUi.begin("chart-selection");
@@ -2895,7 +2930,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     };
     composeOutput();
     click(outputUi, "chart.format.hit.3");
-    require(gui::visual.format == static_cast<int>(platform::ChartFormat::Svg) &&
+    require(gui::state.draft.charts.format == static_cast<int>(platform::ChartFormat::Svg) &&
                 platform::completeExportFilename(L"图形", platform::ExportKind::Svg) == L"图形.svg",
             "SVG 格式未关联矢量导出和对应的文件扩展名");
     click(outputUi, "chart.format.hit.0");
@@ -2922,27 +2957,27 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     require(gui::selectedChartCount() == 7, "全选组合未生效");
     composeOutput();
     click(outputUi, "chart.select.2.hit");
-    require(gui::selectedChartCount() == 6 && !gui::visual.included[2], "组合图表复选框未更新选择");
+    require(gui::selectedChartCount() == 6 && !gui::state.draft.charts.included[2], "组合图表复选框未更新选择");
     click(outputUi, "chart.format.hit.2");
     composeOutput();
-    require(gui::visual.format == 2 &&
+    require(gui::state.draft.charts.format == 2 &&
                 outputUi.find("chart.output.note")->text.find("PDF") != std::string::npos,
             "导出格式选择未更新格式说明");
     sameSceneFrames(populatedOutput, outputAnchors());
     click(outputUi, "chart.scope.hit.0");
     composeOutput();
-    require(gui::visual.scope == 0 && !outputUi.find("chart.select.2.hit"),
+    require(gui::state.draft.charts.scope == 0 && !outputUi.find("chart.select.2.hit"),
             "单图模式仍显示组合选择");
     click(outputUi, "chart.scope.hit.1");
     composeOutput();
-    require(gui::visual.scope == 1 && !gui::visual.included[2] && gui::state.revision == revision &&
+    require(gui::state.draft.charts.scope == 1 && !gui::state.draft.charts.included[2] && gui::state.revision == revision &&
                 gui::state.validResult() && gui::state.result->matrix == generated.matrix &&
                 gui::state.result->metrics == generated.metrics,
             "切换导出范围丢失组合选择或改变了有效数据");
     click(outputUi, "chart.selection.all.bg");
-    const auto included = gui::visual.included;
+    const auto included = gui::state.draft.charts.included;
     gui::resetAllCharts();
-    require(gui::visual.included == included && !gui::visual.editDirty[0] &&
+    require(gui::state.draft.charts.included == included && !gui::chartEdits().editDirty[0] &&
                 gui::sameChartEditor(gui::chartEditor(0), originalEditor),
             "重置全部外观改变了组合选择或未恢复默认值");
     gui::clearVisualError();
@@ -2950,7 +2985,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     for (const float width : {588.f, 1020.f, 1232.f}) {
         for (const bool editing : {false, true}) {
             gui::visual.editing = editing;
-            gui::visual.scope = 1;
+            gui::state.draft.charts.scope = 1;
             eui::Ui page;
             page.begin("chart-page-layout");
             page.column("chart-host")
@@ -2967,10 +3002,10 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
             page.end();
             page.layout(width, 636);
             controls_fit(page, width, "图表页");
-            require(page.find("charts.preview.card") && page.find("chart.selection.count") &&
-                        page.find("chart.file.options.bg") && !page.find("chart.directory.hit") &&
+            require(page.find("charts.preview.card") && page.find("charts.options.bg") &&
+                        !page.find("chart.output.card") && !page.find("chart.directory.hit") &&
                         !page.find("chart.filename.hit"),
-                    "图表页缺少预览、选择计数或目录操作");
+                    "图表页应保留预览和选项入口，导出设置应在选项页");
             if (width >= 1020) {
                 const auto &actions = page.find("charts.dataset.actions")->frame;
                 const auto &source = page.find("charts.dataset")->frame;
@@ -3166,10 +3201,10 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
             "测量数据导入失败丢失旧数据或缺少恢复状态");
     gui::clearVisualError();
     gui::visual.importedSelected = false;
-    gui::visual.scope = 0;
+    gui::state.draft.charts.scope = 0;
     gui::visual.selected = 0;
-    gui::visual.format = 0;
-    gui::visual.resolution = 0;
+    gui::state.draft.charts.format = 0;
+    gui::state.draft.charts.resolution = 0;
     gui::state.draft.chartDirectory = folder.u8string();
     gui::state.draft.chartFilename = "图表_[PARTS]件";
     gui::state.draft.silentCharts = true;
@@ -3233,34 +3268,34 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     require(gui::visual.errorText.empty() && gui::visual.lastExportPath != second &&
                 gui::state.revision == revision,
             "修改导出目录后未恢复，或图表操作使研究失效");
-    gui::visual.scope = 1;
-    gui::visual.included.fill(false);
-    gui::visual.included[0] = gui::visual.included[3] = true;
+    gui::state.draft.charts.scope = 1;
+    gui::state.draft.charts.included.fill(false);
+    gui::state.draft.charts.included[0] = gui::state.draft.charts.included[3] = true;
     gui::visual.selected = 2;
-    gui::visual.editDirty[2] = true;
+    gui::chartEdits().editDirty[2] = true;
     require(gui::chartFooterSummary().find("未应用") == std::string::npos,
             "组合导出误报未勾选图表的草稿");
-    gui::visual.editDirty[3] = true;
+    gui::chartEdits().editDirty[3] = true;
     require(gui::chartFooterSummary().find("未应用") != std::string::npos,
             "组合导出未提示已勾选图表的草稿");
     gui::exportVisuals();
     require(!gui::visual.busy() && gui::visual.selected == 3 && gui::visual.errorChart == 3,
             "组合导出和底栏使用的草稿检查范围不一致");
-    gui::visual.editDirty[2] = gui::visual.editDirty[3] = false;
+    gui::chartEdits().editDirty[2] = gui::chartEdits().editDirty[3] = false;
     gui::clearVisualError();
-    gui::visual.format = 2;
+    gui::state.draft.charts.format = 2;
     gui::state.draft.chartFilename = "两图组合快照";
     gui::exportVisuals();
     require(gui::visual.busy() && gui::visual.exportingCount == 2, "组合没有捕获两张已选图表");
-    gui::visual.included.fill(false);
-    gui::visual.format = 0;
+    gui::state.draft.charts.included.fill(false);
+    gui::state.draft.charts.format = 0;
     gui::state.draft.chartFilename = "下一次导出";
     finishExport();
     require(gui::visual.errorText.empty() &&
                 gui::visual.lastExportPath.filename().u8string() == "两图组合快照.pdf" &&
                 msa::read_text(gui::visual.lastExportPath).rfind("%PDF-", 0) == 0,
             "导出中的编辑改变了本次组合或格式快照");
-    gui::visual.scope = 0;
+    gui::state.draft.charts.scope = 0;
     gui::visual.selected = 0;
     gui::state.draft.silentCharts = false;
     const auto prior = gui::visual.lastExportPath;
@@ -3269,7 +3304,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     const std::array<std::string, 3> extensions{".png", ".jpeg", ".pdf"};
     const std::array<std::string, 3> signatures{"\x89PNG", "\xFF\xD8", "%PDF-"};
     for (int i = 0; i < 3; ++i) {
-        gui::visual.format = i;
+        gui::state.draft.charts.format = i;
         const auto target = folder / ("chosen-chart" + extensions[i]);
         bool cancelled = true;
         gui::state.chooseExportPath = [&](const auto &initial, Kind format) -> Selection {
@@ -3293,7 +3328,7 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     }
     require(std::filesystem::exists(prior), "另存为覆盖了上次图表");
     click(outputUi, "chart.file.options.bg");
-    require(gui::state.page == gui::Page::Options && gui::state.optionsTab == 2 &&
+    require(gui::state.page == gui::Page::Options && gui::state.optionsTab == gui::fileOptionsTab &&
                 gui::state.configOffset == 0,
             "图表页未跳转到集中管理目录与文件名的位置");
     gui::state.chooseExportPath = picker;
@@ -3466,7 +3501,7 @@ int wmain(int argc, wchar_t **argv) {
             ("msa-output-ui-" + std::to_string(gui::Clock::now().time_since_epoch().count()));
         eui::Ui outputUi;
         outputUi.begin("export-edit-test");
-        gui::state.optionsTab = 2;
+        gui::state.optionsTab = gui::fileOptionsTab;
         gui::config(outputUi, 620);
         outputUi.end();
         outputUi.layout(620, 1200);

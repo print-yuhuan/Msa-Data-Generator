@@ -7,10 +7,70 @@
 #include <set>
 
 namespace msa {
+namespace {
+constexpr std::array chart_styles{"default", "origin"};
+constexpr std::array chart_formats{"png", "jpeg", "pdf", "svg"};
+constexpr std::array chart_scopes{"current", "combined"};
+constexpr std::array chart_columns{1, 2};
+constexpr std::array chart_widths{1200, 1800, 2400};
+// Same order as charts::all_kinds(). Persist names so selection survives file editing.
+constexpr std::array chart_keys{"variance_components", "measurement_by_part", "measurement_by_operator",
+                                "range_chart", "mean_chart", "interaction", "histogram"};
+
+template <class Choices>
+auto chart_choice(const Choices &choices, int index, const char *field) {
+    if (index < 0 || static_cast<std::size_t>(index) >= choices.size())
+        throw ConfigError(std::string("图表选项无效：") + field);
+    return choices[index];
+}
+template <class Choices>
+int chart_index(const Choices &choices, const Json &value, const char *field) {
+    auto it = std::find_if(choices.begin(), choices.end(),
+                           [&](const auto &choice) { return value == choice; });
+    if (it == choices.end())
+        throw ConfigError(std::string("图表选项无效：") + field);
+    return static_cast<int>(it - choices.begin());
+}
+} // namespace
+void ChartPreferences::write_to(Json &charts) const {
+    charts["style"] = chart_choice(chart_styles, style, "风格");
+    charts["format"] = chart_choice(chart_formats, format, "导出格式");
+    charts["scope"] = chart_choice(chart_scopes, scope, "导出范围");
+    charts["columns"] = chart_choice(chart_columns, columns, "组合列数");
+    charts["panel_width"] = chart_choice(chart_widths, resolution, "单图宽度");
+    auto selected = Json::array();
+    for (std::size_t i = 0; i < chart_keys.size(); ++i)
+        if (included[i])
+            selected.push_back(chart_keys[i]);
+    charts["included"] = std::move(selected);
+}
+ChartPreferences ChartPreferences::read(const Json &charts) {
+    ChartPreferences prefs;
+    prefs.style = chart_index(chart_styles, charts.at("style"), "风格");
+    prefs.format = chart_index(chart_formats, charts.at("format"), "导出格式");
+    prefs.scope = chart_index(chart_scopes, charts.at("scope"), "导出范围");
+    if (!charts.at("columns").is_number_integer() || !charts.at("panel_width").is_number_integer())
+        throw ConfigError("图表组合列数和单图宽度必须为整数");
+    prefs.columns = chart_index(chart_columns, charts.at("columns"), "组合列数");
+    prefs.resolution = chart_index(chart_widths, charts.at("panel_width"), "单图宽度");
+    const auto &selected = charts.at("included");
+    if (!selected.is_array() || selected.size() > chart_keys.size())
+        throw ConfigError("组合图表清单必须是最多含七种图表的数组");
+    prefs.included.fill(false);
+    for (const auto &item : selected) {
+        const auto index = chart_index(chart_keys, item, "组合图表类型");
+        if (prefs.included[index])
+            throw ConfigError("组合图表清单中存在重复的图表类型");
+        prefs.included[index] = true;
+    }
+    return prefs;
+}
 Json default_config() {
     Json targets = Json::object();
     for (auto key : metric_keys)
         targets[key] = nullptr;
+    Json charts = {{"directory", ""}, {"filename", default_chart_basename}};
+    ChartPreferences{}.write_to(charts);
     return {{"schema_version", 2},
             {"input", {{"directory", ""}, {"filename", ""}}},
             {"design", {{"operators", 3}, {"replicates", 3}, {"parts", 10},
@@ -52,7 +112,7 @@ Json default_config() {
               {"existing_file", "number"},
               {"format", "default"},
               {"silent", {{"csv", false}, {"charts", false}, {"comparison_report", false}}},
-              {"charts", {{"directory", ""}, {"filename", default_chart_basename}}},
+              {"charts", std::move(charts)},
               {"comparison_report", {{"format", "pdf"}, {"directory", ""},
                                      {"filename", default_report_basename}}},
               {"run_order",
@@ -247,6 +307,7 @@ Json normalize_config(const Json &raw) {
     check_directory(c["input"]["directory"], "测量数据导入目录");
     check_directory(out["directory"], "测量数据导出目录");
     check_directory(out["charts"]["directory"], "图表导出目录");
+    ChartPreferences::read(out["charts"]).write_to(out["charts"]);
     check_directory(out["comparison_report"]["directory"], "方法对比报告导出目录");
     const auto normalize_name = [](Json &name, const char *label, const auto &normalize) {
         if (!name.is_string())
