@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(MsaNative VERSION 1.0.8 LANGUAGES C CXX)
+project(MsaNative VERSION 1.0.9 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -191,7 +191,7 @@ add_executable(msa_gui_layout_tests tests/test_gui_layout.cpp resources/workshee
 target_compile_definitions(msa_gui_layout_tests PRIVATE MSA_UI_VERSION="${PROJECT_VERSION}")
 target_compile_options(msa_gui_layout_tests PRIVATE /utf-8 /EHsc /W4)
 target_link_options(msa_gui_layout_tests PRIVATE /MANIFEST:EMBED "/MANIFESTINPUT:${CMAKE_CURRENT_BINARY_DIR}/generated/app.manifest")
-target_link_libraries(msa_gui_layout_tests PRIVATE msa_core msa_font_resource msa_chart_export eui::neo ole32 comdlg32 shell32 shcore dwmapi)
+target_link_libraries(msa_gui_layout_tests PRIVATE msa_core msa_font_resource msa_chart_export eui::neo ole32 comdlg32 comctl32 shell32 shcore dwmapi)
 add_dependencies(msa_gui_layout_tests msa_embedded_font)
 add_test(NAME msa_gui_layout_regression COMMAND msa_gui_layout_tests
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts/NotoSansCJKsc-Regular.otf"
@@ -234,7 +234,7 @@ target_compile_definitions(msa_generator PRIVATE MSA_UI_VERSION="${PROJECT_VERSI
 eui_neo_configure_app(msa_generator)
 target_compile_options(msa_generator PRIVATE /utf-8 /EHsc /W4)
 target_link_options(msa_generator PRIVATE /MANIFEST:EMBED "/MANIFESTINPUT:${CMAKE_CURRENT_BINARY_DIR}/generated/app.manifest")
-target_link_libraries(msa_generator PRIVATE msa_core msa_font_resource msa_chart_export ole32 comdlg32 shell32 shcore dwmapi)
+target_link_libraries(msa_generator PRIVATE msa_core msa_font_resource msa_chart_export ole32 comdlg32 comctl32 shell32 shcore dwmapi)
 add_dependencies(msa_generator msa_embedded_font)
 add_custom_command(TARGET msa_generator POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/licenses" "$<TARGET_FILE_DIR:msa_generator>/licenses")

@@ -1,6 +1,6 @@
 #include "msa/core.hpp"
 #include "msa/xlsx.hpp"
-#include "msa/xlsx_package.hpp"
+#include "xlsx_selection_fixture.hpp"
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -25,37 +25,6 @@ template <class Fn> void expect_config_error(Fn fn, const std::string &descripti
         throw;
     }
     throw std::runtime_error("expected an error containing " + description);
-}
-// By default the first sheet and unused shared-string part contain invalid XML.
-std::string selection_workbook(const std::string &relationship_type,
-                               const std::string &first_sheet = "<unclosed>",
-                               const std::string &second_sheet = {}) {
-    const std::string rels = "http://schemas.openxmlformats.org/package/2006/relationships";
-    const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-    const std::string ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-    return msa::xlsx::zip_stored(
-        {{"[Content_Types].xml",
-          R"(<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>)"},
-         {"_rels/.rels", "<Relationships xmlns=\"" + rels + "\"><Relationship Id=\"book\" Type=\"" +
-                             rel + "/officeDocument\" Target=\"workbook.xml\"/></Relationships>"},
-         {"workbook.xml",
-          "<workbook xmlns=\"" + ns + "\" xmlns:r=\"" + rel +
-              "\"><sheets><sheet name=\"损坏页\" sheetId=\"1\" r:id=\"one\"/><sheet "
-              "name=\"数据页\" sheetId=\"2\" r:id=\"two\"/><sheet name=\"外部页\" sheetId=\"3\" "
-              "r:id=\"external\"/></sheets></workbook>"},
-         {"_rels/workbook.xml.rels",
-          "<Relationships xmlns=\"" + rels + "\"><Relationship Id=\"two\" Type=\"" + rel + "/" +
-              relationship_type + "\" Target=\"two.xml\"/><Relationship Id=\"one\" Type=\"" + rel +
-              "/" + relationship_type +
-              "\" Target=\"one.xml\"/><Relationship Id=\"external\" Type=\"" + rel +
-              "/worksheet\" Target=\"https://example.invalid/unread\" "
-              "TargetMode=\"External\"/><Relationship Id=\"strings\" Type=\"" +
-              rel + "/sharedStrings\" Target=\"strings.xml\"/></Relationships>"},
-         {"strings.xml", "<unclosed>"},
-         {"one.xml", first_sheet},
-         {"two.xml", second_sheet.empty() ? "<worksheet xmlns=\"" + ns +
-                         "\"><sheetData><row r=\"1\"><c "
-                         "r=\"A1\"><v>42</v></c></row></sheetData></worksheet>" : second_sheet}});
 }
 void test_sheet_selection(const std::filesystem::path &fixtures,
                           const std::filesystem::path &output, const msa::Json &config) {
@@ -100,7 +69,7 @@ void test_sheet_selection(const std::filesystem::path &fixtures,
             "CSV selection bypass");
     expect_config_error([&] { msa::read_data(csv_path, config, "MSA"); }, "只有 XLSX");
 
-    const auto broken = selection_workbook("worksheet");
+    const auto broken = test_fixture::selection_workbook("worksheet");
     const msa::XlsxWorkbook workbook(broken);
     require(workbook.sheet_names() == std::vector<std::string>{"损坏页", "数据页"},
             "external worksheet was offered");
@@ -110,8 +79,9 @@ void test_sheet_selection(const std::filesystem::path &fixtures,
     require(!msa::read_data(path, config, [](const auto &) { return std::nullopt; }),
             "cancelled worksheet was decoded");
     expect_config_error([&] { msa::read_data(path, config, "损坏页"); }, "损坏页");
-    expect_config_error([&] { msa::XlsxWorkbook empty(selection_workbook("chartsheet")); },
-                        "没有可读取");
+    expect_config_error(
+        [&] { msa::XlsxWorkbook empty(test_fixture::selection_workbook("chartsheet")); },
+        "没有可读取");
 
     const auto table_xml = [](const std::string &csv) {
         return msa::xlsx::Package(msa::xlsx_from_csv(csv, 2)).part("xl/worksheets/sheet1.xml");
@@ -125,8 +95,9 @@ void test_sheet_selection(const std::filesystem::path &fixtures,
         for (int trial = 0; trial < 3; ++trial)
             three_people += std::string(name) + ",6,5,4,3,2,1\r\n";
     const auto different_teams = output / "worksheet-teams.xlsx";
-    msa::atomic_text(different_teams, selection_workbook("worksheet", table_xml(two_people),
-                                                         table_xml(three_people)));
+    msa::atomic_text(different_teams,
+                     test_fixture::selection_workbook("worksheet", table_xml(two_people),
+                                                      table_xml(three_people)));
     auto preferences = msa::default_config();
     preferences["design"]["operators"] = 2;
     preferences["design"]["operator_names"] = {"保存甲", "保存乙", "保存甲"};
@@ -155,22 +126,11 @@ void test_sheet_selection(const std::filesystem::path &fixtures,
             "cancelled selection should not produce a study");
     expect_config_error([&] { msa::read_study_data(path, preferences, "损坏页"); }, "损坏页");
 
-    std::string numeric =
-        R"(<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>)";
-    msa::Matrix readings;
-    for (int row = 0; row < 6; ++row) {
-        numeric += "<row>";
-        readings.emplace_back();
-        for (int col = 0; col < 5; ++col) {
-            const int value = 10 * row + col;
-            readings.back().push_back(value);
-            numeric += "<c><v>" + std::to_string(value) + "</v></c>";
-        }
-        numeric += "</row>";
-    }
+    const msa::Matrix readings{{0, 1, 2, 3, 4},      {10, 11, 12, 13, 14}, {20, 21, 22, 23, 24},
+                               {30, 31, 32, 33, 34}, {40, 41, 42, 43, 44}, {50, 51, 52, 53, 54}};
     const auto six = output / "worksheet-six-rows.xlsx";
-    msa::atomic_text(six, selection_workbook("worksheet", table_xml(two_people),
-                                             numeric + "</sheetData></worksheet>"));
+    msa::atomic_text(six, test_fixture::selection_workbook("worksheet", table_xml(two_people),
+                                                           test_fixture::numeric_sheet(readings)));
     int design_prompts = 0;
     std::optional<int> answer;
     const auto choose_design = [&] {
