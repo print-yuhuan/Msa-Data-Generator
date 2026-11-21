@@ -89,7 +89,7 @@ Check ($aliasOutput.exit -eq 2 -and $aliasOutput.stderr.Contains('配置文件')
 $namingData = Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json
 $namingData.generation.seed = 123
 $namingData.output.directory = Join-Path $runRoot '模板 导出'
-$namingData.output.filename = '研究_[OPERATORS]_[SEED].csv'
+$namingData.output.filename = '研究_[OPERATORS]_[SEED]'
 $namingData.output | Add-Member -NotePropertyName existing_file -NotePropertyValue 'number' -Force
 $namingConfig = Join-Path $runRoot 'naming.json'
 $namingData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $namingConfig -Encoding UTF8
@@ -101,7 +101,7 @@ $numberedPath = ($namedAgain.stdout | ConvertFrom-Json).output
 Check ([IO.Path]::GetFileName($namedPath) -eq '研究_3_123.csv' -and [IO.Path]::GetFileName($numberedPath) -eq '研究_3_123_001.csv') 'configured template uses actual seed and numbers collisions'
 $reservedSource = Join-Path $runRoot '配置-123.csv'
 $namingData.output.directory = $runRoot
-$namingData.output.filename = '配置-[SEED].csv'
+$namingData.output.filename = '配置-[SEED]'
 $namingData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $reservedSource -Encoding UTF8
 $reservedHash = (Get-FileHash -LiteralPath $reservedSource).Hash
 $rejectReserved = Run-Cli @('--config',$reservedSource,'--overwrite') $true
@@ -114,7 +114,7 @@ Check ($numberReserved.exit -eq 0 -and
 $literalPath = Join-Path $runRoot 'literal_[SEED].csv'
 $literal = Run-Cli @('--config',$namingConfig,'--output',$literalPath) $true
 Check ($literal.exit -eq 0 -and (Test-Path -LiteralPath $literalPath)) 'explicit output brackets remain literal'
-$namingData.output.filename = '[UNKNOWN].csv'
+$namingData.output.filename = '[UNKNOWN]'
 $namingData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $namingConfig -Encoding UTF8
 $badTemplate = Run-Cli @('--config',$namingConfig)
 Check ($badTemplate.exit -eq 1 -and $badTemplate.stderr.Contains('[UNKNOWN]')) 'unknown filename token is a controlled configuration error'
@@ -130,7 +130,7 @@ $ignoredOutputData | Add-Member -NotePropertyName input -NotePropertyValue ([psc
 $ignoredOutputData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ignoredOutputConfig -Encoding UTF8
 $ignoredOutputHash = (Get-FileHash -LiteralPath $ignoredOutputConfig).Hash
 $explicitOverride = Join-Path $runRoot 'explicit-with-unused-settings.csv'
-$ignoreFilename = Run-Cli @('--config',$ignoredOutputConfig,'--filename','[ALSO_UNKNOWN].csv',
+$ignoreFilename = Run-Cli @('--config',$ignoredOutputConfig,'--filename','[ALSO_UNKNOWN]',
     '--existing-file','invalid','--csv-format','minitab','--store-standard-order','true',
     '--output',$explicitOverride) $true
 Check ($ignoreFilename.exit -eq 0 -and (Get-Content -LiteralPath $explicitOverride -TotalCount 1) -ceq
@@ -149,7 +149,7 @@ $ignoredOutputData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ignore
 $unknownOutput = Run-Cli @('--config',$ignoredOutputConfig,'--input',$explicitOverride) $true
 Check ($unknownOutput.exit -eq 1 -and $unknownOutput.stderr.Contains('output.unknown_field')) 'analysis-only input retains strict config field names'
 
-$namingData.output.filename = 'long.csv'
+$namingData.output.filename = 'long'
 $namingData.output | Add-Member -NotePropertyName format -NotePropertyValue 'minitab' -Force
 $namingData.output | Add-Member -NotePropertyName run_order -NotePropertyValue ([pscustomobject]@{mode='within_operator';seed=321;randomize_operators=$true;store_standard_order=$true}) -Force
 $namingData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $namingConfig -Encoding UTF8
@@ -189,7 +189,7 @@ $business=@('--operators=2','--operator-a','B','--operator-b','张 敏','--opera
     '--reference-tv-sd','0.2','--decimal-places','6','--seed','-123','--max-attempts','50',
     '--timeout-seconds','5','--percentage-tolerance-pp','1','--ndc-tolerance','2',
     '--ev','target:10:1','--av','between:0:20','--grr','at_most:30','--pt','none','--ndc','at_least:1',
-    '--output-directory',$overrideDirectory,'--filename','命令行_[OPERATORS]_[SEED].csv',
+    '--output-directory',$overrideDirectory,'--filename','命令行_[OPERATORS]_[SEED]',
     '--existing-file','number','--csv-format','minitab','--run-order','within_operator',
     '--randomize-operators','true','--run-seed','321','--store-standard-order','true')
 $overridden=Run-Cli ($business+@('--config',$overrideConfig,'--report',$overrideReport)) $true
@@ -282,7 +282,7 @@ foreach($arguments in $invalidArguments){
     Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0 -and -not (Test-Path -LiteralPath $invalidPath)) "invalid CLI options rejected before writing: $($arguments -join ' ')"
     $invalidIndex++
 }
-foreach ($arguments in @(@('--existing-file','invalid'), @('--filename','[UNKNOWN].csv'), @('--file-type','txt'))) {
+foreach ($arguments in @(@('--existing-file','invalid'), @('--filename','[UNKNOWN]'), @('--file-type','txt'))) {
     $badArgs = Run-Cli (@('--no-config')+$arguments) $true
     Check ($badArgs.exit -eq 2 -and $badArgs.stderr.Length -gt 0) "configured CSV export validates active CLI option: $($arguments[0])"
 }
@@ -448,9 +448,9 @@ $xlsxDir = Join-Path $runRoot '测量工作簿'
 $xlsxReport = Join-Path $runRoot 'xlsx-generated.json'
 $xlsxArgs = @('--no-config','--lsl','9','--usl','11','--seed','123','--csv-format','minitab',
     '--run-order','all','--store-standard-order','true','--file-type','xlsx',
-    '--output-directory',$xlsxDir,'--filename','来料_[SEED].csv','--report',$xlsxReport)
+    '--output-directory',$xlsxDir,'--filename','来料_[SEED]','--report',$xlsxReport)
 $bookResult = Run-Cli $xlsxArgs $true
-Check ($bookResult.exit -eq 0) 'configured XLSX generation with a legacy CSV filename template'
+Check ($bookResult.exit -eq 0) 'configured XLSX generation with a shared basename template'
 $book = ($bookResult.stdout | ConvertFrom-Json).output
 $bookManifest = Get-Content -LiteralPath $xlsxReport -Raw -Encoding UTF8 | ConvertFrom-Json
 Check ([IO.Path]::GetFileName($book) -ceq '来料_123.xlsx' -and $bookManifest.export.file_type -ceq 'xlsx') 'selected file type supplies exactly one extension'
@@ -482,14 +482,26 @@ $otherMean = ($otherSheet.stdout | ConvertFrom-Json).metrics.mean
 Check ([Math]::Abs($otherMean - $firstMean - 100) -lt 1e-9) 'choosing a different worksheet changes the analyzed measurements'
 $missingSheet = Run-Cli ($sheetArgs + @('--sheet','无此表')) $true
 Check ($missingSheet.exit -eq 1 -and $missingSheet.stderr.Contains('无此表')) 'missing worksheet name is reported'
-$oldNamingConfig = Join-Path $runRoot '旧版名称.json'
-$oldAnalysis = Join-Path $runRoot '旧版分析.json'
-'{"schema_version":1,"input":{"filename":"来料[复核]"},"output":{"charts":{"filename":"图表[DATE]"}}}' |
-    Set-Content -LiteralPath $oldNamingConfig -Encoding UTF8
-$readLegacy = Run-Cli @('--config',$oldNamingConfig,'--input',$book,'--report',$oldAnalysis) $true
-Check ($readLegacy.exit -eq 0) 'analysis accepts literal bracket names from older configurations'
-$upgraded = (Get-Content -LiteralPath $oldAnalysis -Raw -Encoding UTF8 | ConvertFrom-Json).config
-Check ($upgraded.schema_version -eq 2 -and $upgraded.input.filename -ceq '来料[[复核]]' -and $upgraded.output.charts.filename -ceq '图表[[DATE]]') 'effective CLI config preserves old literal names after migration'
+$schemaConfig = Join-Path $runRoot 'unsupported-config.json'
+$schemaReport = Join-Path $runRoot 'protected-analysis.json'
+[IO.File]::WriteAllText($schemaReport, 'keep')
+foreach ($payload in @('{}', '{"schema_version":1}', '{"schema_version":3}')) {
+    [IO.File]::WriteAllText($schemaConfig, $payload, [Text.UTF8Encoding]::new($false))
+    $rejected = Run-Cli @('--config',$schemaConfig,'--input',$book,'--report',$schemaReport,'--overwrite') $true
+    Check ($rejected.exit -eq 1 -and [IO.File]::ReadAllText($schemaReport) -ceq 'keep') "invalid saved schema rejected before analysis: $payload"
+}
+[IO.File]::WriteAllText($schemaConfig, '{"schema_version":2}', [Text.UTF8Encoding]::new($false))
+$partialConfig = Run-Cli @('--config',$schemaConfig,'--input',$book) $true
+Check ($partialConfig.exit -eq 0) 'file with current schema may omit optional settings'
+foreach ($extension in @('.txt','.xls','')) {
+    $unsupported = Join-Path $runRoot ("unsupported" + $extension)
+    Copy-Item -LiteralPath $autoCsv -Destination $unsupported
+    $contentHash = (Get-FileHash -LiteralPath $unsupported).Hash
+    $rejectInput = Run-Cli @('--no-config','--input',$unsupported) $true
+    $rejectOutput = Run-Cli @('--config',$config,'--output',$unsupported,'--overwrite') $true
+    Check ($rejectInput.exit -ne 0 -and $rejectOutput.exit -ne 0 -and
+        (Get-FileHash -LiteralPath $unsupported).Hash -eq $contentHash) "unsupported data extension rejected: '$extension'"
+}
 foreach ($wrongSheetArgs in @(@('--no-config','--sheet','原始记录'),@('--no-config','--input',$csv,'--sheet','原始记录'))) {
     $wrongSheet = Run-Cli $wrongSheetArgs $true
     Check ($wrongSheet.exit -eq 2 -and $wrongSheet.stderr.Contains('--sheet')) 'worksheet selection requires XLSX input'

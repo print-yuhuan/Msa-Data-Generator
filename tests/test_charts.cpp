@@ -374,7 +374,7 @@ void model_checks() {
             auto origin = msa::charts::default_editor(kind, Style::Origin);
             require(app.style == Style::Default && origin.style == Style::Origin &&
                         app.primary_color == msa::brand_blue && origin.primary_color == "#2F65A4",
-                    "默认风格未采用程序蓝或 Origin 首色不兼容");
+                    "默认风格或 Origin 风格的首个系列颜色不正确");
             const auto a = msa::charts::make_scene(result, kind, app, 840, 480);
             auto b = msa::charts::make_scene(result, kind, origin, 840, 480);
             require(hasColor(a, app.primary_color) && hasColor(b, origin.primary_color) &&
@@ -538,7 +538,7 @@ void model_checks() {
         for (auto kind : {Kind::MeanChart, Kind::RangeChart})
             require(msa::charts::default_editor(kind).show_limits, "控制限应默认可见");
     });
-    check("图表按研究顺序标记操作员姓名，兼容旧配置并缩略狭窄标签", [] {
+    check("图表按研究顺序显示操作员姓名、留空默认名称与缩略标签", [] {
         auto contains = [](const Scene &scene, const std::string &text) {
             return std::any_of(scene.items.begin(), scene.items.end(),
                                [&](const Primitive &item) { return item.text == text; });
@@ -562,11 +562,11 @@ void model_checks() {
         auto result = study(3);
         const auto kind = Kind::MeanChart;
         const auto editor = msa::charts::default_editor(kind);
-        result.config["design"].erase("operator_names");
-        const auto legacy = msa::charts::make_scene(result, kind, editor, 360, 260);
-        require(contains(legacy, "操作员 A") && contains(legacy, "操作员 B") &&
-                    contains(legacy, "操作员 C"),
-                "旧研究缺少名称时应仍显示 A/B/C");
+        result.config["design"]["operator_names"] = {"", "", ""};
+        const auto defaults = msa::charts::make_scene(result, kind, editor, 360, 260);
+        require(contains(defaults, "操作员 A") && contains(defaults, "操作员 B") &&
+                    contains(defaults, "操作员 C"),
+                "操作员名称留空时应显示 A/B/C");
         result.config["design"]["operator_names"] = {"质量实验室第一测量工位", "", ""};
         const auto compact = msa::charts::make_scene(result, kind, editor, 360, 260);
         require(std::any_of(compact.items.begin(), compact.items.end(), [](const Primitive &item) {

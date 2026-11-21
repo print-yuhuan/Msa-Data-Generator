@@ -105,20 +105,15 @@ Json classification(double mean, double part, double gage, const Json &spec) {
 } // namespace
 
 void apply_analysis_options(Json &m, const Json &cfg) {
-    // calculate 同时供已有独立对标配置使用；缺省新字段必须保持旧配置可读。
-    Json a = cfg["analysis"];
-    for (const auto *key : {"historical_sd", "historical_mean"})
-        if (!a.contains(key))
-            a[key] = nullptr;
-    if (!a.contains("process_variation"))
-        a["process_variation"] = "historical";
-    if (!a.contains("misclassification"))
-        a["misclassification"] = false;
+    const auto &a = cfg.at("analysis");
     const auto &s = cfg["specification"];
     const double grr = m["GRR"], sample_pv = m["PV"], sample_tv = m["TV"];
-    const bool history = !a["historical_sd"].is_null();
-    const double historical = history ? a["historical_sd"].get<double>() : 0;
-    const bool use_history = history && a["process_variation"] == "historical" && historical >= grr;
+    const auto &historical_sd = a.at("historical_sd");
+    const auto &historical_mean = a.at("historical_mean");
+    const auto &process_variation = a.at("process_variation");
+    const bool history = !historical_sd.is_null();
+    const double historical = history ? historical_sd.get<double>() : 0;
+    const bool use_history = history && process_variation == "historical" && historical >= grr;
     if (use_history) {
         m["PV"] = std::sqrt(std::max(0., (historical - grr) * (historical + grr)));
         m["TV"] = historical;
@@ -131,14 +126,14 @@ void apply_analysis_options(Json &m, const Json &cfg) {
             m["ndc"] = ndc < 9223372036854775808.0 ? Json(std::int64_t(ndc)) : Json(ndc);
         }
     }
-    const double mean = a["historical_mean"].is_null() ? m["mean"].get<double>()
-                                                       : a["historical_mean"].get<double>();
+    const double mean = historical_mean.is_null() ? m["mean"].get<double>()
+                                                  : historical_mean.get<double>();
     const auto [width, tolerance_source] = detail::effective_tolerance(a, s, mean);
     Json study{{"sample_pv", sample_pv},
                {"sample_tv", sample_tv},
                {"historical_applied", use_history},
-               {"historical_sd", a["historical_sd"]},
-               {"process_variation", a["process_variation"]},
+               {"historical_sd", historical_sd},
+               {"process_variation", process_variation},
                {"tolerance_source", tolerance_source},
                {"effective_tolerance", width > 0 ? Json(width) : Json(nullptr)},
                {"reference_mean", mean}};
@@ -167,7 +162,7 @@ void apply_analysis_options(Json &m, const Json &cfg) {
         study["components"][entry.key()] = row;
         if (m.contains("anova")) {
             auto &an = m["anova"];
-            // 默认口径保留原计算路径与精度；仅实际修改口径时更新旧报告字段。
+            // Historical process variation changes the PV and TV decomposition.
             if (use_history && (entry.key() == "PV" || entry.key() == "TV")) {
                 an["variance_components"][entry.key()] = sd * sd;
                 an["stddev"][entry.key()] = sd;
@@ -184,7 +179,7 @@ void apply_analysis_options(Json &m, const Json &cfg) {
     }
     m["PT_pct"] = study["components"]["GRR"]["tolerance_pct"];
     m["study"] = std::move(study);
-    if (a.contains("confidence") && a["confidence"]["enabled"] == true && m.contains("anova")) {
+    if (a.at("confidence").at("enabled") == true && m.contains("anova")) {
         auto confidence = anova_confidence_intervals(m["anova"], cfg);
         auto &intervals = confidence["variance_components"];
         if (use_history) {
@@ -238,7 +233,7 @@ void apply_analysis_options(Json &m, const Json &cfg) {
         }
         m["confidence"] = std::move(confidence);
     }
-    if (a["misclassification"].get<bool>() && a["method"] == "crossed_anova" &&
+    if (a.at("misclassification").get<bool>() && a["method"] == "crossed_anova" &&
         (!s["lsl"].is_null() || !s["usl"].is_null())) {
         // 误分类使用历史过程波动（若可用），与 %Study Var 选择研究部件的设置相互独立。
         const double part = history && historical >= grr

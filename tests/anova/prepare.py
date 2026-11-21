@@ -4,7 +4,7 @@ import csv, json, pathlib, subprocess, sys, hashlib
 root=pathlib.Path(__file__).resolve().parents[2]
 out=pathlib.Path(sys.argv[1]).resolve()
 out.mkdir(parents=True,exist_ok=True)
-cli=root/'build/Release/msa_cli.exe'
+cli=pathlib.Path(sys.argv[2]).resolve()
 cases=[]
 def invoke(args):
     completed=subprocess.run([str(cli),*map(str,args)],capture_output=True,encoding='utf-8')

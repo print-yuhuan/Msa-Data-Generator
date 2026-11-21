@@ -114,7 +114,7 @@ Write-Fixture 'tests/info-excluded.txt' 'FAKE_PRIVATE_MARKER'
 Write-Fixture '.git/info/exclude' 'tests/info-excluded.txt'
 Write-Fixture 'docs/diagnostics/private.md' 'FAKE_PRIVATE_MARKER'
 Write-Fixture 'docs/使用说明.md' 'public documentation'
-Write-Fixture 'docs/图示.png' 'fixture image bytes'
+Write-Fixture 'docs/images/图示.png' 'fixture image bytes'
 Write-Fixture 'docs/not-in-document-types.pdf' 'excluded documentation type'
 Write-Fixture 'build/release-version.json' '{"version":"1.0.0","native_version":"1.0.0-native"}'
 Write-Fixture 'build/temporary.exe' 'FAKE_PRIVATE_MARKER'
@@ -138,7 +138,7 @@ foreach ($excluded in @('tests/.env', 'tests/local-private.json', 'tests/tempora
     Check (-not $contents.ContainsKey($prefix + $excluded)) "排除受忽略规则或目录白名单限制的文件：$excluded"
 }
 Check (@($contents.Values | Where-Object { $_.Contains('FAKE_PRIVATE_MARKER') }).Count -eq 0) '归档不包含任何伪造私密标记'
-foreach ($required in @('docs/使用说明.md', 'docs/图示.png', '.github/workflows/build.yml',
+foreach ($required in @('docs/使用说明.md', 'docs/images/图示.png', '.github/workflows/build.yml',
     'third_party/fixture/header.h', 'resources/fonts/fixture.otf', 'release-version.json')) {
     Check ($contents.ContainsKey($prefix + $required)) "保留源码构建与文档材料：$required"
 }

@@ -1,6 +1,6 @@
 # 配置示例
 
-示例适用于 v1.1.2，使用 `schema_version=2`。GUI 与 CLI 共用字段及校验规则。业务参数含义、类型及默认值见[配置参考](../docs/配置参考.md)，命令行覆盖方式见[使用说明](../docs/使用说明.md#cli)。
+示例适用于 v1.1.3，使用 `schema_version=2`。GUI 与 CLI 共用字段及校验规则。业务参数含义、类型及默认值见[配置参考](../docs/配置参考.md)，命令行覆盖方式见[使用说明](../docs/使用说明.md#cli)。
 
 | 文件 | 用途 |
 |---|---|
@@ -16,7 +16,7 @@
 .\build\Release\msa_cli.exe --config ".\examples\Minitab随机运行配置.json" --output ".\build\example-minitab.csv" --report ".\build\example-minitab.json"
 ```
 
-显式路径已存在时应更换路径或添加`--overwrite`。省略`--output`则使用配置中的输出目录、文件名模板和同名策略。`--file-type csv` 或 `--file-type xlsx` 决定自动附加的扩展名。输出目录留空时使用系统桌面，相对目录从桌面计算；每次 CLI 正常执行都会生成研究，相同生成种子、参数、版本且搜索未被超时截断时可复现。
+显式路径已存在时应更换路径或添加`--overwrite`。省略`--output`则使用配置中的测量数据导出目录、导出名称和同名策略。`--file-type csv` 或 `--file-type xlsx` 决定自动附加的扩展名。导出目录留空时使用系统桌面，相对目录从桌面计算；每次 CLI 正常执行都会生成研究，相同生成种子、参数、版本且搜索未被超时截断时可复现。
 
 以下示例选择等距取样，要求部件均值跨度至少达到规格宽度的 60%，并筛选近似正态的测量值。
 

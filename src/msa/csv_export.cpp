@@ -36,7 +36,7 @@ struct Design {
     }
     void check(const Matrix &matrix) const {
         if (int(matrix.size()) != operators * trials)
-            throw ConfigError("测量矩阵行数与人员、测量次数不符");
+            throw ConfigError("测量矩阵行数与操作员数、重复测量次数不符");
         for (const auto &row : matrix)
             if (int(row.size()) != parts)
                 throw ConfigError("测量矩阵列数与产品件数不符");

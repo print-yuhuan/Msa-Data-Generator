@@ -1298,7 +1298,7 @@ void chartExportSettings(Ui &u, float w) {
             .build();
         u.text("chart.output.note")
             .size(c, 44)
-            .text(std::string(state.draft.silentCharts ? "静默保存，同名文件会追加序号。\n"
+            .text(std::string(state.draft.silentCharts ? "静默导出时，同名文件会追加序号。\n"
                                                        : "另存为时可选择目录和文件名。\n") +
                   (state.draft.charts.format == 3 ? "SVG 保留矢量线条、数据点和文字。"
                    : state.draft.charts.format == 2 ? "PDF 保存为单页图像。"

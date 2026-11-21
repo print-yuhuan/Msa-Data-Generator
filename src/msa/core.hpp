@@ -47,6 +47,7 @@ enum class ExistingFile { Replace, Preserve };
 Json default_config();
 std::array<std::string, 3> operator_names(const Json &design);
 Json normalize_config(const Json &raw);
+void require_config_version(const Json &config);
 Json validate_request(const Json &raw);
 Bounds acceptance(const Json &cfg, const std::string &key);
 std::array<double, 6> ratios(const Json &cfg);
@@ -97,8 +98,6 @@ struct ChartPreferences {
     static ChartPreferences read(const Json &charts);
 };
 Json normalize_output(const Json &output);
-std::string render_filename(const std::string &name, const Result &result,
-                            std::chrono::system_clock::time_point when);
 std::string render_study_basename(const std::string &name, ExportBasenameKind kind,
                                   const Result &study, StudySource source,
                                   std::chrono::system_clock::time_point when,
@@ -107,8 +106,6 @@ std::string render_import_basename(const std::string &name, const Json &options,
                                    const Result *active_study, StudySource source,
                                    std::chrono::system_clock::time_point when,
                                    const std::string &extension = {});
-std::filesystem::path configured_csv_path(const Result &result, const Json &output,
-                                          std::chrono::system_clock::time_point when);
 std::filesystem::path configured_data_path(const Result &result, const Json &output,
                                            std::chrono::system_clock::time_point when);
 std::filesystem::path
@@ -117,19 +114,12 @@ export_configured_data(const Result &result, const Json &output,
                        const std::filesystem::path &reserved_report = {},
                        const std::filesystem::path &source_config = {},
                        const std::filesystem::path &comparison_report = {}, Json *receipt = nullptr);
-std::filesystem::path
-export_configured_csv(const Result &result, const Json &output,
-                      std::chrono::system_clock::time_point when = std::chrono::system_clock::now(),
-                      const std::filesystem::path &reserved_report = {},
-                      const std::filesystem::path &source_config = {},
-                      const std::filesystem::path &comparison_report = {}, Json *receipt = nullptr);
 using Progress = std::function<void(int, double, bool)>;
 Result generate(const Json &raw, const std::atomic<bool> *cancel = nullptr, Progress progress = {});
 std::filesystem::path config_path();
 std::filesystem::path desktop_directory();
 std::filesystem::path resolve_output_directory(const std::string &directory);
 // Data directories use the system desktop as their base. Explicit CLI file paths use the CWD.
-std::filesystem::path configured_csv_path(const Json &cfg);
 std::filesystem::path configured_data_path(const Json &cfg);
 void atomic_text(const std::filesystem::path &path, const std::string &bytes,
                  ExistingFile policy = ExistingFile::Replace);
@@ -143,7 +133,6 @@ void save_config(const Json &cfg, const std::filesystem::path &path = config_pat
 Json load_config(const std::filesystem::path &path = config_path());
 std::string csv_text(const Matrix &matrix, int dp);
 Matrix parse_csv(const std::string &text);
-Matrix read_csv(const std::filesystem::path &path);
 std::string data_file_type(const std::filesystem::path &path);
 using WorksheetSelector =
     std::function<std::optional<std::size_t>(const std::vector<std::string> &)>;
@@ -178,15 +167,10 @@ std::vector<MeasurementRecord> export_records(const Result &result, const Json &
 std::string export_csv_text(const Result &result, const Json &output);
 Json effective_run_seed(const Result &result, const Json &output);
 std::string sha256(const std::string &bytes);
-void replay_csv(const Json &report, const std::filesystem::path &path, ExistingFile policy);
 void replay_data(const Json &report, const std::filesystem::path &path, ExistingFile policy);
 Json export_data(const Result &result, const std::filesystem::path &path,
                  ExistingFile policy = ExistingFile::Replace);
 Json export_data(const Result &result, const std::filesystem::path &path, const Json &output,
                  ExistingFile policy = ExistingFile::Replace, Json *receipt = nullptr);
 Matrix parse_export_csv(const std::string &text, const Json &config);
-Json export_csv(const Result &result, const std::filesystem::path &path,
-                ExistingFile policy = ExistingFile::Replace);
-Json export_csv(const Result &result, const std::filesystem::path &path, const Json &output,
-                ExistingFile policy = ExistingFile::Replace, Json *receipt = nullptr);
 } // namespace msa

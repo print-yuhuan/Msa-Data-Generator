@@ -184,11 +184,6 @@ inline std::wstring wide(const std::string &s) {
                         count);
     return result;
 }
-inline std::filesystem::path compatibilityConfig() {
-    wchar_t p[32768]{};
-    GetEnvironmentVariableW(L"USERPROFILE", p, 32768);
-    return std::filesystem::path(p) / L"MSA数据生成器" / L"msa_generator.json";
-}
 inline void openDirectory(const std::filesystem::path &p) {
     if (reinterpret_cast<INT_PTR>(
             ShellExecuteW(owner(), L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32)

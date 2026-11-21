@@ -955,11 +955,6 @@ void regrouped_settings_state(const msa::Result &generated) {
             generation["generation"] != saved["generation"] || loaded.partSampling != selected ||
             loaded.minimumPartSpanPct != "80.5")
             throw std::runtime_error("部件取样或跨度未随生成请求或配置保存和恢复");
-        saved["generation"].erase("part_sampling");
-        saved["generation"].erase("minimum_part_span_pct");
-        const auto legacy = native_ui::from_config(saved);
-        if (legacy.partSampling != 0 || !legacy.minimumPartSpanPct.empty())
-            throw std::runtime_error("旧配置应采用默认取样和自动跨度");
         for (const auto &method : msa::part_sampling_methods) {
             saved["generation"]["part_sampling"] = method.key;
             const auto restored = native_ui::from_config(saved);
@@ -1005,16 +1000,23 @@ void regrouped_settings_state(const msa::Result &generated) {
     if (gui::state.draft.silentCsv || gui::state.draft.silentCharts || gui::state.draft.silentReport ||
         gui::state.draft.dataFileType != 0 || gui::state.draft.reportFormat != 0)
         throw std::runtime_error("首次使用应全部询问保存位置，测量数据默认 CSV，报告默认 PDF");
-    for (const auto &[fieldId, member, entered, expected] :
+    for (const auto &[fieldId, member, withSuffix, basename] :
          std::array<std::tuple<const char *, std::string native_ui::Draft::*, const char *, const char *>, 4>{{
              {"filename", &native_ui::Draft::filename, "测量_[YYYY].xlsx", "测量_[YYYY]"},
              {"import.filename", &native_ui::Draft::importFilename, "测量.v2.CSV", "测量.v2"},
              {"chart.filename", &native_ui::Draft::chartFilename, "控制图.jpeg", "控制图"},
              {"report.filename", &native_ui::Draft::reportFilename, "报告.pdf", "报告"}}}) {
-        input(output, fieldId, entered);
-        output.find(std::string(fieldId) + ".hit")->onFocusChanged(false);
-        if (gui::state.draft.*member != expected)
-            throw std::runtime_error(std::string("文件名输入结束后未显示基本名：") + fieldId);
+        input(output, fieldId, withSuffix);
+        bool rejected = false;
+        try {
+            (void)native_ui::to_config(gui::state.draft);
+        } catch (const msa::ConfigError &) {
+            rejected = true;
+        }
+        if (!rejected || gui::state.draft.*member != withSuffix)
+            throw std::runtime_error(std::string("名称带扩展名时应提示修正并保留输入：") + fieldId);
+        input(output, fieldId, basename);
+        (void)native_ui::to_config(gui::state.draft);
     }
     click(output, "runorder.standard.hit");
     click(output, "silent.csv.hit");
@@ -1164,7 +1166,7 @@ void help_topics() {
         nullptr,     "help.charts.open.bg"};
     const std::array<const char *, 6> lastSections{
         "help.troubleshooting.card", "help.software.card", "help.minitab.card",
-        "help.filename.collision", "help.cli.outputs.card", "help.charts.export.card"};
+        "help.filename.collision", "help.cli.outputs.card", "help.charts.report.card"};
     constexpr float tolerance = .1f;
     const auto bottom = [](const core::dsl::Element &node) {
         return node.frame.y + node.frame.height;
@@ -1245,6 +1247,22 @@ void help_topics() {
                 checkShortcut("help.cli.help.copy.bg");
                 checkShortcut("help.cli.example.copy.bg");
                 checkShortcut("help.cli.analyze.example.copy.bg");
+                const auto *command = page.find("help.cli.analyze.example");
+                if (!command || command->text.find("--input data.csv") == std::string::npos ||
+                    command->text.find("--report analysis.json") == std::string::npos ||
+                    command->text.find("--comparison-report comparison.html") == std::string::npos)
+                    throw std::runtime_error("命令操作的分析示例缺少输入或混淆两种报告");
+            }
+            if (topic == 5) {
+                checkShortcut("help.charts.options.bg");
+                const auto *design = page.find("help.charts.source.sixrows");
+                const auto *report = page.find("help.charts.report.format");
+                if (!design || design->text.find("2 人各测 3 次") == std::string::npos ||
+                    design->text.find("3 人各测 2 次") == std::string::npos ||
+                    !page.find("help.charts.source.sheet") || !report ||
+                    report->text.find("Microsoft Edge") == std::string::npos ||
+                    report->text.find("HTML") == std::string::npos)
+                    throw std::runtime_error("结果图表帮助未说明工作表、研究设计与报告格式");
             }
             if (topic == 3) {
                 for (const auto &variable : msa::filename_variables()) {
@@ -1478,7 +1496,7 @@ void state_recovery(const msa::Result &generated) {
         throw std::runtime_error("output preference edit changes study validity");
 
     state.draft.directory = "D:/study/output";
-    state.draft.filename = "Study_[YYYY]_[SEED].csv";
+    state.draft.filename = "Study_[YYYY]_[SEED]";
     state.draft.csvFormat = 4;
     state.draft.existingFile = 1;
     state.draft.runMode = 2;
@@ -1492,7 +1510,7 @@ void state_recovery(const msa::Result &generated) {
     state.draft.reportFormat = 1;
     state.draft.reportDirectory = "reports";
     state.draft.importDirectory = "inputs";
-    state.draft.importFilename = "input.csv";
+    state.draft.importFilename = "input";
     state.draft.chartDirectory = "charts";
     state.draft.chartFilename = "chart-name";
     state.draft.reportFilename = "report-name";
@@ -3833,7 +3851,7 @@ int wmain(int argc, wchar_t **argv) {
             folder /
             std::filesystem::u8path("研究_" + generated.config["design"]["operators"].dump() + "_" +
                                     std::to_string(generated.seed) + ".csv");
-        if (!gui::state.validResult() || msa::read_csv(exported) != generated.matrix)
+        if (!gui::state.validResult() || msa::read_data(exported, generated.config) != generated.matrix)
             throw std::runtime_error("GUI export ignored current output settings or changed data");
         const auto chosenCsv = folder / "explicit.csv";
         gui::state.draft.silentCsv = false;
@@ -3853,7 +3871,7 @@ int wmain(int argc, wchar_t **argv) {
         cancelCsv = false;
         msa::atomic_text(chosenCsv, "before");
         gui::exportData();
-        if (msa::read_csv(chosenCsv) != generated.matrix || !gui::state.dataExportError.empty())
+        if (msa::read_data(chosenCsv, generated.config) != generated.matrix || !gui::state.dataExportError.empty())
             throw std::runtime_error("CSV 另存为未执行指定目的地和覆盖选择");
         const auto chosenXlsx = folder / L"交叉选择.v2.xlsx";
         gui::state.chooseExportPath = [&](const auto &initial, auto kind)
@@ -3921,7 +3939,7 @@ int wmain(int argc, wchar_t **argv) {
             throw std::runtime_error("保存配置丢失了有效的禁用种子");
         gui::state.draft.runSeed = "未填写";
         gui::exportData();
-        if (!gui::state.validResult() || msa::read_csv(exported) != generated.matrix)
+        if (!gui::state.validResult() || msa::read_data(exported, generated.config) != generated.matrix)
             throw std::runtime_error("默认宽表导出被禁用的运行种子阻塞或改变了数据");
         auto standardDraft = gui::state.draft;
         standardDraft.csvFormat = 1;
@@ -3943,7 +3961,7 @@ int wmain(int argc, wchar_t **argv) {
         gui::exportData();
         if (gui::state.dataExportError.empty() || !gui::state.retainedResult())
             throw std::runtime_error("invalid output template discarded the generated result");
-        gui::state.draft.filename = "repaired.csv";
+        gui::state.draft.filename = "repaired";
         gui::state.outputChanged();
         if (!gui::state.dataExportError.empty() || !gui::state.retainedResult() ||
             gui::state.revision != revision)

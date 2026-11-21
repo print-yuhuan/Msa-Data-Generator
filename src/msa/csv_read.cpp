@@ -88,7 +88,7 @@ int CsvReader::index(std::size_t column, int maximum, const std::string &name) c
     return static_cast<int>(value);
 }
 namespace {
-const auto legacy_names = operator_names(Json::object());
+const auto default_names = operator_names(Json::object());
 void check_width(const CsvReader &reader, std::size_t expected) {
     if (reader.cells.size() != expected)
         throw ConfigError(location(reader.row, std::min(expected, reader.cells.size())) +
@@ -100,8 +100,7 @@ Matrix wide(CsvReader &reader, const Json *design, std::vector<std::string> *fil
     const auto parts = labeled ? reader.cells.size() - 1 : reader.cells.size();
     std::map<std::string, std::size_t> group_sizes;
     std::string previous_label;
-    const auto configured = design ? operator_names(*design) : legacy_names;
-    bool matches_config = true, matches_legacy = true;
+    const auto configured = design ? operator_names(*design) : default_names;
     Matrix matrix;
     const auto expected_rows = design ? design->at("operators").get<std::size_t>() *
                                             design->at("replicates").get<std::size_t>()
@@ -131,9 +130,7 @@ Matrix wide(CsvReader &reader, const Json *design, std::vector<std::string> *fil
             const auto &label = reader.cells.front();
             if (design) {
                 const auto op = matrix.size() / design->at("replicates").get<std::size_t>();
-                matches_config &= label == configured[op];
-                matches_legacy &= label == legacy_names[op];
-                if (!matches_config && !matches_legacy)
+                if (label != configured[op])
                     throw ConfigError(location(reader.row, 0) + "：实际操作员为「" + label +
                                       "」，与研究设计的操作员顺序不符");
             } else {
@@ -152,7 +149,7 @@ Matrix wide(CsvReader &reader, const Json *design, std::vector<std::string> *fil
     } while (reader.next());
     if (!std::all_of(group_sizes.begin(), group_sizes.end(),
                      [&](const auto &group) { return group.second == group_sizes.begin()->second; }))
-        throw ConfigError("宽表各人员的重复测量次数不一致");
+        throw ConfigError("宽表各操作员的重复测量次数不一致");
     if (design && matrix.size() != expected_rows)
         throw ConfigError("宽表共 " + std::to_string(matrix.size()) +
                           " 行数据，研究设计要求 " + std::to_string(expected_rows) + " 行");
@@ -190,59 +187,30 @@ Matrix long_table(CsvReader &reader, const Json &design, const Columns &columns)
               parts = design.at("parts");
     const auto configured = operator_names(design);
     const int total = ops * trials * parts;
-    struct Row {
-        int configured_op, legacy_op, part, trial;
-        double value;
-        std::size_t line;
-    };
-    std::vector<Row> records;
-    bool matches_config = true, matches_legacy = true;
+    Matrix matrix(ops * trials, std::vector<double>(parts));
+    std::vector<bool> seen(total);
     while (reader.next()) {
         check_width(reader, width);
         const auto &label = reader.cells[columns[0]];
-        const auto locate = [&](const auto &labels) {
-            return int(std::find(labels.begin(), labels.begin() + ops, label) - labels.begin());
-        };
-        const int configured_op = locate(configured), legacy_op = locate(legacy_names);
-        matches_config &= configured_op < ops;
-        matches_legacy &= legacy_op < ops;
-        if (!matches_config && !matches_legacy)
+        const int op = static_cast<int>(
+            std::find(configured.begin(), configured.begin() + ops, label) - configured.begin());
+        if (op == ops)
             throw ConfigError(location(reader.row, columns[0]) +
-                              "：Operator 与当前研究设计或旧版 A/B/C 标记不符，收到「" +
-                              label.substr(0, 80) + "」");
+                              "：Operator 与研究设计中的操作员名称不符，收到「" + label.substr(0, 80) + "」");
         const int part = reader.index(columns[1], parts, "Part") - 1;
         const int trial = reader.index(columns[2], trials, "Trial") - 1;
-        if (columns[4] != width) {
-            const int order = reader.index(columns[4], total, "StdOrder") - 1;
-            const int base = (trial * parts + part) * ops;
-            matches_config &= order == base + configured_op;
-            matches_legacy &= order == base + legacy_op;
-            if (!matches_config && !matches_legacy)
-                throw ConfigError(location(reader.row, columns[4]) + "：StdOrder 与测量记录不对应");
-        }
-        if (records.size() >= static_cast<std::size_t>(total))
-            throw ConfigError(location(reader.row, columns[0]) + "：测量记录数超过研究设计");
-        records.push_back({configured_op, legacy_op, part, trial, reader.measurement(columns[3]),
-                           reader.row});
-    }
-    // A custom name can itself be another operator's legacy letter. Use one mapping
-    // for the entire table, including any available StdOrder identities.
-    Matrix matrix(ops * trials, std::vector<double>(parts));
-    std::vector<bool> seen(total);
-    for (const auto &record : records) {
-        const int op = matches_config ? record.configured_op : record.legacy_op;
-        const int index = (record.trial * parts + record.part) * ops + op;
+        const int index = (trial * parts + part) * ops + op;
+        if (columns[4] != width && reader.index(columns[4], total, "StdOrder") != index + 1)
+            throw ConfigError(location(reader.row, columns[4]) + "：StdOrder 与测量记录不对应");
         if (seen[index])
-            throw ConfigError(location(record.line, columns[0]) +
-                              "：重复的 Operator/Part/Trial 组合");
+            throw ConfigError(location(reader.row, columns[0]) + "：重复的 Operator/Part/Trial 组合");
         seen[index] = true;
-        matrix[op * trials + record.trial][record.part] = record.value;
+        matrix[op * trials + trial][part] = reader.measurement(columns[3]);
     }
     const auto missing = std::find(seen.begin(), seen.end(), false);
     if (missing != seen.end()) {
         const auto index = missing - seen.begin();
-        throw ConfigError("长表缺少记录：Operator=" +
-                          (matches_config ? configured : legacy_names)[index % ops] +
+        throw ConfigError("长表缺少记录：Operator=" + configured[index % ops] +
                           "，Part=" + std::to_string(index / ops % parts + 1) +
                           "，Trial=" + std::to_string(index / ops / parts + 1));
     }
@@ -360,7 +328,7 @@ std::optional<ImportedData> import_csv_study(const std::string &bytes, const Jso
                 return std::nullopt;
             file.trials = *trials;
             const auto count = matrix.size() / file.trials;
-            file.operators.assign(legacy_names.begin(), legacy_names.begin() + count);
+            file.operators.assign(default_names.begin(), default_names.begin() + count);
         } else {
             if (file.operators.size() < 2 || file.operators.size() > 3)
                 throw ConfigError("宽表须包含 2～3 名不同的操作员");

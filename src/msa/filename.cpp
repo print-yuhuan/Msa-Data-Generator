@@ -27,7 +27,7 @@ const std::vector<FilenameVariable> &filename_variables() {
         {"CENTER", "数据中心", "中心设定值；留空时取实际数据均值", "10"},
         {"MULTIPLIER", "研究变异倍数", "研究变异倍数", "6"},
         {"SEED", "随机种子", "生成研究的实际种子；导入研究显示 NA", "123"},
-        {"DP", "小数位数", "数据输出小数位数", "4"},
+        {"DP", "小数位数", "测量数据的小数位数", "4"},
         {"EV_PCT", "EV实际值", "EV/TV%，两位小数，不含百分号", "10.00"},
         {"AV_PCT", "AV实际值", "AV/TV%，两位小数，不含百分号", "9.81"},
         {"GRR_PCT", "GRR实际值", "GRR/TV%，两位小数，不含百分号", "14.01"},
@@ -41,7 +41,7 @@ const FilenameVariable &variable(const std::string &name) {
     for (const auto &v : filename_variables())
         if (name == v.name || (*v.alias && name == v.alias))
             return v;
-    throw ConfigError("未知文件名变量：[" + name + "]；请查看帮助页的变量表。");
+    throw ConfigError("未知名称变量：[" + name + "]；请查看帮助页的变量表。");
 }
 std::string expand(const std::string &name,
                    const std::function<std::string(const FilenameVariable &)> &value) {
@@ -56,7 +56,7 @@ std::string expand(const std::string &name,
         } else if (name[i] == '[') {
             const auto end = name.find(']', i + 1);
             if (end == std::string::npos || end == i + 1 || name.find('[', i + 1) < end)
-                throw ConfigError("文件名变量括号未配对、为空或存在嵌套；请查看帮助页。");
+                throw ConfigError("名称变量的括号未配对、为空或存在嵌套；请查看帮助页。");
             out += value(variable(name.substr(i + 1, end - i - 1)));
             i = end + 1;
         } else if (name[i] == ']')
@@ -142,27 +142,20 @@ std::string compact(const Json &v) {
         s.resize(s.size() - 2);
     return s;
 }
-std::string without_format_suffix(const std::string &name, ExportBasenameKind kind) {
-    auto base = trim_name(name);
-    // Strip known format suffixes so repeated saves and switching formats preserve one base.
-    for (auto dot = base.rfind('.'); dot != base.npos; dot = base.rfind('.')) {
-        const auto ext = ascii_lower(base.substr(dot));
-        const bool recognized = ext == ".csv" || ext == ".xlsx" ||
-            (kind != ExportBasenameKind::Data && ext == ".pdf") ||
-            (kind == ExportBasenameKind::Chart &&
-             (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".svg")) ||
-            (kind == ExportBasenameKind::ComparisonReport && (ext == ".html" || ext == ".htm"));
-        if (!recognized)
-            break;
-        base.resize(dot);
-    }
-    return base;
-}
 std::string normalize_template(const std::string &name, ExportBasenameKind kind,
                                std::size_t extension_units) {
     if (name.size() > 16384)
-        throw ConfigError("文件名模板过长");
-    const auto base = without_format_suffix(name, kind);
+        throw ConfigError("名称模板过长");
+    const auto base = trim_name(name);
+    if (const auto dot = base.rfind('.'); dot != base.npos) {
+        const auto ext = ascii_lower(base.substr(dot));
+        if (ext == ".csv" || ext == ".xlsx" ||
+            (kind != ExportBasenameKind::Data && ext == ".pdf") ||
+            (kind == ExportBasenameKind::Chart &&
+             (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".svg")) ||
+            (kind == ExportBasenameKind::ComparisonReport && (ext == ".html" || ext == ".htm")))
+            throw ConfigError("名称无需填写文件扩展名：" + ext);
+    }
     validate_component(expand(base, [](const FilenameVariable &) { return "0"; }), extension_units);
     return base;
 }
@@ -309,15 +302,6 @@ std::string render_import_basename(const std::string &name, const Json &options,
     const auto base = normalize_template(name, ExportBasenameKind::Data, units);
     return render_context(base, options, active_study, source, when, units);
 }
-std::string render_filename(const std::string &name, const Result &result,
-                            std::chrono::system_clock::time_point when) {
-    // Legacy callers can still pass a suffixed template to obtain a complete name.
-    const auto cleaned = trim_name(name);
-    const auto base = without_format_suffix(name, ExportBasenameKind::Data);
-    const auto suffix = cleaned == base ? std::string{} : cleaned.substr(cleaned.rfind('.'));
-    return render_study_basename(name, ExportBasenameKind::Data, result, StudySource::Generated,
-                                 when, suffix) + suffix;
-}
 std::filesystem::path configured_data_path(const Result &result, const Json &raw,
                                           std::chrono::system_clock::time_point when) {
     const auto output = normalize_output(raw);
@@ -327,10 +311,6 @@ std::filesystem::path configured_data_path(const Result &result, const Json &raw
     return (resolve_output_directory(output.at("directory").get<std::string>()) /
             std::filesystem::u8path(name))
         .lexically_normal();
-}
-std::filesystem::path configured_csv_path(const Result &result, const Json &raw,
-                                         std::chrono::system_clock::time_point when) {
-    return configured_data_path(result, raw, when);
 }
 std::filesystem::path export_configured_data(const Result &result, const Json &raw,
                                             std::chrono::system_clock::time_point when,
@@ -352,11 +332,11 @@ std::filesystem::path export_configured_data(const Result &result, const Json &r
         if (!reserved_report.empty() && same_file_path(path, reserved_report))
             throw ConfigError("数据文件与报告路径不能相同");
         if (!comparison_report.empty() && same_file_path(path, comparison_report))
-            throw ConfigError("数据文件与对照报告路径不能相同");
+            throw ConfigError("数据文件与方法对比报告路径不能相同");
         if (!source_config.empty() && same_file_path(path, source_config)) {
             if (number)
                 continue;
-            throw ConfigError("数据输出路径不能覆盖本次使用的配置文件");
+            throw ConfigError("测量数据导出路径不能覆盖本次使用的配置文件");
         }
         if (number && std::filesystem::exists(path))
             continue;
@@ -370,12 +350,5 @@ std::filesystem::path export_configured_data(const Result &result, const Json &r
         }
     }
     throw std::runtime_error("同名文件过多，无法分配导出序号，请修改文件名或目录。");
-}
-std::filesystem::path export_configured_csv(const Result &result, const Json &output,
-                                            std::chrono::system_clock::time_point when,
-                                            const std::filesystem::path &report,
-                                            const std::filesystem::path &config,
-                                            const std::filesystem::path &comparison, Json *receipt) {
-    return export_configured_data(result, output, when, report, config, comparison, receipt);
 }
 } // namespace msa

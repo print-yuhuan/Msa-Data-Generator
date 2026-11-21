@@ -5,7 +5,7 @@
 - `app-icon.svg`：64 × 64 矢量设计源。`brand-background` 的填充色同时是界面主色，由 CMake 在配置时读取。
 - `app-icon.ico`：16、20、24、32、40、48、64、128、256 像素九档原生尺寸；每档先对齐像素边界，再处理圆角抗锯齿。小尺寸使用 32 位位图和透明遮罩，256 像素使用 PNG。
 - `app-icon-*.png`：对应尺寸的透明 PNG。
-- [明暗背景与实际尺寸预览](../../docs/app-icon-preview.png)。
+- [明暗背景与实际尺寸预览](../../docs/images/app-icon-preview.png)。
 
 Windows 的主程序、CLI 和各测试 EXE 均嵌入资源组 `1` 和 `GLFW_ICON`，供资源管理器与程序窗口使用。程序使用本项目的完整 ICO 资源；GUI 中文字体和窗口清单同样内嵌，运行包不携带外部 resources 目录，也不复制 EUI 演示资源与默认图标。界面左上角按同一几何设计绘制，随显示缩放对齐像素。
 

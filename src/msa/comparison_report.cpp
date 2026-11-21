@@ -46,7 +46,7 @@ void chart(std::ostream &out, const Result &result, charts::Kind kind, charts::S
 
 constexpr auto page_start = R"HTML(<!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>交叉量具 R&amp;R 双方法对比报告</title><style>
+<title>交叉量具 R&amp;R 方法对比报告</title><style>
 *{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#192b40;font:16px/1.55 "Microsoft YaHei UI","Noto Sans CJK SC",sans-serif}
 main{max-width:960px;margin:28px auto;padding:36px 40px;background:white}h1{font-size:1.8em;margin:0 0 .3em}
 h2{font-size:1.2em;margin:1.4em 0 .45em}p{margin:.35em 0}header{border-bottom:2px solid #38536c;padding-bottom:14px}
@@ -55,7 +55,7 @@ th:first-child{text-align:left}thead{background:#edf2f6}tbody th{font-weight:500
 small{color:#435a6d}section{overflow-wrap:anywhere}
 @media(max-width:600px){main{margin:0;padding:16px}th,td{padding:5px;font-size:.85em}}
 @page{size:A4;margin:14mm}@media print{body{background:white;font-size:10pt}main{margin:0;padding:0;max-width:none}table,tr{break-inside:avoid}.plots{break-before:page}h2{break-after:avoid}}
-</style></head><body><main><header><h1>交叉量具 R&amp;R 双方法对比报告</h1>
+</style></head><body><main><header><h1>交叉量具 R&amp;R 方法对比报告</h1>
 )HTML";
 } // namespace
 

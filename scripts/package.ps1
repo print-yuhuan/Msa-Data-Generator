@@ -22,9 +22,7 @@ try {
     foreach($document in 'README.md','THIRD_PARTY_NOTICES.md','dependencies.lock.json'){Copy-Item -LiteralPath (Join-Path $projectRoot $document) -Destination $stage}
     Copy-Item -LiteralPath (Join-Path $info.BuildRoot 'release-version.json') -Destination $stage
     Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs') -Filter *.md | Copy-Item -Destination (Join-Path $stage 'docs')
-    foreach($asset in 'app-icon-preview.png','ui-preview.png','chart-origin-comparison.png','chart-styles.png','worksheet-import.png','six-row-import.png'){
-        Copy-Item -LiteralPath (Join-Path $projectRoot "docs\$asset") -Destination (Join-Path $stage 'docs')
-    }
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\images') -Destination (Join-Path $stage 'docs') -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'tests\fixtures\minitab_baseline.json') -Destination (Join-Path $stage 'tests\fixtures')
     & (Join-Path $PSScriptRoot 'verify-release.ps1') -BuildDirectory $info.BuildRoot -PackageDirectory $stage -ReportDirectory $runRoot
     $checks=Join-Path $stage 'docs\checks'

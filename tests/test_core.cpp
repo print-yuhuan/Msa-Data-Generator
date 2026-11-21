@@ -94,7 +94,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         for (auto v : input["sum"])
             out["sum"].push_back(accurate_sum(v.get<std::vector<double>>()));
         for (auto v : input["calculate"])
-            out["calculate"].push_back(calculate(v["matrix"].get<Matrix>(), v["config"]));
+            out["calculate"].push_back(calculate(v["matrix"].get<Matrix>(), normalize_config(v["config"])));
         atomic_text(std::filesystem::u8path(argv[3]), out.dump());
         return 0;
     }
@@ -110,7 +110,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         require(fixture["cases"].size() == 192);
         std::set<std::string> designs;
         for (const auto &v : fixture["cases"]) {
-            auto c = v["config"], native = v["native"];
+            auto c = normalize_config(v["config"]), native = v["native"];
             auto m = calculate(v["matrix"].get<Matrix>(), c);
             require(qualified(m, c), "baseline constraints");
             designs.insert(c["design"].dump());
@@ -147,7 +147,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
                     auto path = dir / std::filesystem::u8path("组合_" + std::to_string(o) + "_" +
                                                               std::to_string(r) + "_" +
                                                               std::to_string(p) + " 数据.csv");
-                    auto m = export_csv(a, path);
+                    auto m = export_data(a, path);
                     require(m == a.metrics);
                 }
     });
@@ -170,7 +170,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             require(qualified(original.metrics, c));
             require(original.search_diagnostics["anderson_darling"]["adjusted"].get<double>() > 1);
             c["generation"]["require_normality"] = false;
-            require(generate(c).matrix == original.matrix, "legacy seed sequence changed");
+            require(generate(c).matrix == original.matrix, "normality off changed seeded generation");
             // The first rounded candidate has adjusted A² above 1 for both seeds.
             c["generation"]["require_normality"] = true;
             throws<SearchError>([&] { generate(c); });
@@ -187,10 +187,10 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             auto c = example();
             c["analysis"]["method"] = method;
             clear_targets(c);
-            const auto legacy = generate(c).matrix;
+            const auto standard = generate(c).matrix;
             c["generation"].erase("part_sampling");
             c["generation"].erase("minimum_part_span_pct");
-            require(generate(c).matrix == legacy, "omitting new settings changes the default");
+            require(generate(c).matrix == standard, "omitting new settings changes the default");
             c["generation"]["minimum_part_span_pct"] = 80;
             for (const char *mode : {"even", "stratified", "center_dense", "end_dense"}) {
                 c["generation"]["part_sampling"] = mode;
@@ -463,7 +463,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             require(generate(c).matrix == result.matrix);
         }
     });
-    test("anova_subgroup_residual_model_preserves_targets_and_legacy_default", [] {
+    test("anova_subgroup_residual_model_preserves_targets_and_standard_default", [] {
         for (int r : {2, 3}) {
             auto c = example(3, r, 10);
             c["analysis"]["method"] = "crossed_anova";
@@ -471,9 +471,9 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             c["targets"]["EV_pct"] = {{"mode", "between"}, {"min", 5}, {"max", 10}};
             c["generation"]["decimal_places"] = 8;
             c["generation"].erase("residual_model");
-            const auto legacy = generate(c);
+            const auto standard = generate(c);
             c["generation"]["residual_model"] = "standard";
-            require(generate(c).matrix == legacy.matrix);
+            require(generate(c).matrix == standard.matrix);
             c["generation"]["residual_model"] = "varied";
             const auto varied = generate(c);
             require(qualified(varied.metrics, c) && varied.matrix == generate(c).matrix);
@@ -572,7 +572,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             const auto output = dir / (std::string("constant-") + method + ".csv");
             atomic_text(output, "keep");
             throws<std::invalid_argument>(
-                [&] { export_csv(Result{constant, metrics, c, 123}, output); });
+                [&] { export_data(Result{constant, metrics, c, 123}, output); });
             require(read_text(output) == "keep");
         }
     });
@@ -785,18 +785,18 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         auto previous = std::locale();
         std::locale::global(std::locale(std::locale::classic(), new Comma));
         auto path = dir / std::filesystem::u8path("区域 中文.csv");
-        export_csv(a, path);
+        export_data(a, path);
         std::locale::global(previous);
         std::ifstream f(path, std::ios::binary);
         std::string s((std::istreambuf_iterator<char>(f)), {});
         require(s.substr(0, 3) == "\xef\xbb\xbf");
-        require(read_csv(path) == a.matrix);
+        require(read_data(path, a.config) == a.matrix);
         require(s.find('\r') != s.npos);
         auto bad = a;
         bad.config["generation"]["decimal_places"] = 0;
         auto target = dir / "must-not-overwrite.csv";
         atomic_text(target, "keep");
-        throws<std::invalid_argument>([&] { export_csv(bad, target); });
+        throws<std::invalid_argument>([&] { export_data(bad, target); });
         require(read_text(target) == "keep");
         auto folder = dir / "target-directory";
         std::filesystem::create_directories(folder);
@@ -917,20 +917,20 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         require(config_path().parent_path().filename() == std::filesystem::u8path("MSA数据生成器") &&
                     config_path().filename() == "msa_generator.json",
                 "配置文件沿用原位置");
-        require(configured_csv_path(cfg) == desktop / "msa_data.csv");
+        require(configured_data_path(cfg) == desktop / "msa_data.csv");
         cfg["output"]["directory"] = "relative/subdir";
-        cfg["output"]["filename"] = "中文 数据.csv";
-        require(configured_csv_path(cfg) == (desktop / "relative/subdir" /
+        cfg["output"]["filename"] = "中文 数据";
+        require(configured_data_path(cfg) == (desktop / "relative/subdir" /
                                              std::filesystem::u8path("中文 数据.csv"))
                                                 .lexically_normal());
         cfg["output"]["directory"] =
             (std::filesystem::absolute(dir) / std::filesystem::u8path("静默 输出")).u8string();
-        auto path = configured_csv_path(cfg);
+        auto path = configured_data_path(cfg);
         auto result = generate(cfg);
         atomic_text(path, "old file");
-        require(export_csv(result, path) == result.metrics);
-        require(read_csv(path) == result.matrix);
-        require(export_csv(result, path) == result.metrics);
+        require(export_data(result, path) == result.metrics);
+        require(read_data(path, result.config) == result.matrix);
+        require(export_data(result, path) == result.metrics);
     });
     test("filename_variables_local_time_result_values_and_validation", [&] {
         auto cfg = example();
@@ -938,9 +938,14 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         auto autoSeedConfig = cfg;
         autoSeedConfig["generation"]["seed"] = nullptr;
         const auto autoSeedResult = generate(autoSeedConfig);
+        const auto data_name = [](const std::string &pattern, const Result &study,
+                                  std::chrono::system_clock::time_point when) {
+            return render_study_basename(pattern, ExportBasenameKind::Data, study,
+                                         StudySource::Generated, when, ".csv");
+        };
         require(
-            render_filename("[随机种子].csv", autoSeedResult, std::chrono::system_clock::now()) ==
-            std::to_string(autoSeedResult.seed) + ".csv");
+            data_name("[随机种子]", autoSeedResult, std::chrono::system_clock::now()) ==
+            std::to_string(autoSeedResult.seed));
         std::tm local{};
         local.tm_year = 126;
         local.tm_mon = 9;
@@ -951,49 +956,49 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         local.tm_isdst = -1;
         const auto when = std::chrono::system_clock::from_time_t(std::mktime(&local)) +
                           std::chrono::milliseconds(37);
-        require(render_filename("MSA_[YYYY]-[MM]-[DD]_[H]-[M]-[S]_[MS].csv", result, when) ==
-                "MSA_2026-10-24_22-08-12_037.csv");
-        require(render_filename("[YY]_[DATE]_[TIME]_[DATETIME].CSV", result, when) ==
-                "26_2026-10-24_22-08-12_2026-10-24_22-08-12.CSV");
+        require(data_name("MSA_[YYYY]-[MM]-[DD]_[H]-[M]-[S]_[MS]", result, when) ==
+                "MSA_2026-10-24_22-08-12_037");
+        require(data_name("[YY]_[DATE]_[TIME]_[DATETIME]", result, when) ==
+                "26_2026-10-24_22-08-12_2026-10-24_22-08-12");
         const auto epochTime =
             std::chrono::system_clock::from_time_t(1700000000) + std::chrono::milliseconds(999);
-        require(render_filename("[TIMESTAMP]_[时间戳]_[MS].csv", result, epochTime) ==
-                "1700000000_1700000000_999.csv");
-        require(render_filename("[TIMESTAMP].csv", result,
-                                std::chrono::system_clock::from_time_t(0)) == "0.csv");
-        require(render_filename("[[已复核]]_[人员数量]_[REPLICATES]_[产品件数]_[USL]_[LSL]_["
-                                "研究变异倍数]_[SEED]_[小数位数]_[VERSION].csv",
+        require(data_name("[TIMESTAMP]_[时间戳]_[MS]", result, epochTime) ==
+                "1700000000_1700000000_999");
+        require(data_name("[TIMESTAMP]", result,
+                                std::chrono::system_clock::from_time_t(0)) == "0");
+        require(data_name("[[已复核]]_[人员数量]_[REPLICATES]_[产品件数]_[USL]_[LSL]_["
+                                "研究变异倍数]_[SEED]_[小数位数]_[VERSION]",
                                 result, when) ==
-                std::string("[已复核]_3_3_10_11_9_6_123_4_") + ui_version + ".csv");
+                std::string("[已复核]_3_3_10_11_9_6_123_4_") + ui_version);
         result.metrics["GRR_pct"] = 999; // Names must use actual data, not a mutable cached label.
         const auto actual = calculate(result.matrix, cfg);
-        require(render_filename("[EV_PCT]_[AV_PCT]_[GRR_PCT]_[PT_PCT]_[NDC].csv", result, when) ==
+        require(data_name("[EV_PCT]_[AV_PCT]_[GRR_PCT]_[PT_PCT]_[NDC]", result, when) ==
                 fixed(actual["EV_pct"], 2) + "_" + fixed(actual["AV_pct"], 2) + "_" +
                     fixed(actual["GRR_pct"], 2) + "_" + fixed(actual["PT_pct"], 2) + "_" +
-                    actual["ndc"].dump() + ".csv");
-        require(render_filename("[CENTER].csv", result, when) == actual["mean"].dump() + ".csv" ||
-                render_filename("[CENTER].csv", result, when) == "10.csv");
+                    actual["ndc"].dump());
+        require(data_name("[CENTER]", result, when) == actual["mean"].dump() ||
+                data_name("[CENTER]", result, when) == "10");
         result.config["specification"]["lsl"] = nullptr;
         result.config["specification"]["usl"] = nullptr;
-        require(render_filename("[USL]_[LSL]_[PT_PCT].csv", result, when) == "NA_NA_NA.csv");
+        require(data_name("[USL]_[LSL]_[PT_PCT]", result, when) == "NA_NA_NA");
         for (const auto &v : filename_variables()) {
-            validate_filename_template(std::string("[") + v.name + "].csv");
+            validate_filename_template(std::string("[") + v.name + "]");
             if (*v.alias)
-                require(render_filename(std::string("[") + v.alias + "].csv", result, when) ==
-                        render_filename(std::string("[") + v.name + "].csv", result, when));
+                require(data_name(std::string("[") + v.alias + "]", result, when) ==
+                        data_name(std::string("[") + v.name + "]", result, when));
         }
         for (const std::string bad :
-             {"[HH].csv", "[mm].csv", "[unknown].csv", "[].csv", "[YYYY.csv", "[A[B]].csv",
-              "a].csv", "../a.csv", "CON.csv", "LPT1.data.csv", "COM¹.csv", "x\t.csv", ".xlsx"})
+             {"[HH]", "[mm]", "[unknown]", "[]", "[YYYY", "[A[B]]",
+              "a]", "../a", "CON", "LPT1.data", "COM¹", "x\t", ".xlsx", "batch.csv", "batch.XLSX"})
             throws<ConfigError>([&] { validate_filename_template(bad); });
-        throws<ConfigError>([&] { validate_filename_template(std::string(252, 'a') + ".csv"); });
+        throws<ConfigError>([&] { validate_filename_template(std::string(252, 'a')); });
         const auto fullCsvBase = std::string(251, 'a');
-        require(normalize_import_filename(fullCsvBase + ".csv") == fullCsvBase);
-        require(normalize_output({{"filename", fullCsvBase + ".csv"}})["filename"] == fullCsvBase);
+        require(normalize_import_filename(fullCsvBase) == fullCsvBase);
+        require(normalize_output({{"filename", fullCsvBase}})["filename"] == fullCsvBase);
         throws<ConfigError>([&] { normalize_output({{"filename", fullCsvBase}, {"file_type", "xlsx"}}); });
         require(normalize_output({{"filename", std::string(250, 'a')}, {"file_type", "xlsx"}})["file_type"] == "xlsx");
         throws<ConfigError>(
-            [&] { render_filename(std::string(248, 'a') + "[VERSION].csv", result, when); });
+            [&] { data_name(std::string(248, 'a') + "[VERSION]", result, when); });
         auto invalid = cfg;
         invalid["output"]["existing_file"] = "invalid";
         throws<ConfigError>([&] { normalize_config(invalid); });
@@ -1011,7 +1016,9 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         result.metrics["GRR_pct"] = -2; // The selected matrix is authoritative.
         const auto generated = StudySource::Generated, imported = StudySource::ImportedData;
         const auto chart = ExportBasenameKind::Chart, report = ExportBasenameKind::ComparisonReport;
-        require(normalize_export_basename("交互图_[SEED].SVG", chart, ".png") == "交互图_[SEED]");
+        throws<ConfigError>([&] { normalize_export_basename("交互图_[SEED].SVG", chart, ".png"); });
+        throws<ConfigError>([&] { normalize_export_basename("方法对比.pdf", report, ".html"); });
+        throws<ConfigError>([&] { normalize_import_filename("测量数据.xlsx"); });
         const std::string pattern = "[[检]]_[时间戳]_[MS]_[随机种子]_[GRR实际值]";
         const std::string prefix = "[检]_1700000000_037_";
         for (auto kind : {ExportBasenameKind::Data, chart, report}) {
@@ -1050,31 +1057,15 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         require(render_study_basename(long_template, chart, result, generated, when, ".png").size() == 251);
         throws<ConfigError>([&] { render_study_basename(long_template, report, result, imported, when, ".html"); });
     });
-    test("v1_literal_names_migrate_once_without_changing_measurement_templates", [] {
-        Json legacy = {{"schema_version", 1},
-                       {"input", {{"filename", "[DATE]_测量.csv"}}},
-                       {"output", {{"filename", "结果_[SEED].CSV"},
-                                   {"charts", {{"filename", "图[批次]_[DATE]_[["}}},
-                                   {"comparison_report", {{"filename", "记录]_[SEED].pdf"}}}}}};
-        const auto cfg = normalize_config(legacy);
-        require(cfg.at("schema_version") == 2 && normalize_config(cfg) == cfg);
-        require(cfg["output"]["filename"] == "结果_[SEED]" &&
-                cfg["input"]["filename"] == "[[DATE]]_测量");
-        const auto study = generate(example());
-        const auto when = std::chrono::system_clock::now();
-        require(render_import_basename(cfg["input"]["filename"], cfg, nullptr, StudySource::Generated, when) ==
-                "[DATE]_测量");
-        require(render_study_basename(cfg["output"]["charts"]["filename"], ExportBasenameKind::Chart,
-                                     study, StudySource::Generated, when, ".png") == "图[批次]_[DATE]_[[");
-        require(render_study_basename(cfg["output"]["comparison_report"]["filename"],
-                                     ExportBasenameKind::ComparisonReport, study,
-                                     StudySource::ImportedData, when, ".pdf") == "记录]_[SEED]");
-        require(render_filename(cfg["output"]["filename"], study, when) ==
-                "结果_" + std::to_string(study.seed));
-        for (auto version : {0, 3})
+    test("current_config_version_and_literal_name_variables", [] {
+        auto cfg = default_config();
+        cfg["input"]["filename"] = "[[DATE]]_[OPERATORS]";
+        require(normalize_config(cfg) == cfg);
+        require(render_import_basename(cfg["input"]["filename"], cfg, nullptr,
+                                       StudySource::Generated, std::chrono::system_clock::now()) ==
+                "[DATE]_3");
+        for (int version : {0, 1, 3})
             throws<ConfigError>([&] { normalize_config({{"schema_version", version}}); });
-        legacy["schema_version"] = 2;
-        throws<ConfigError>([&] { normalize_config(legacy); });
     });
     test("configured_export_numbering_overwrite_unicode_and_parallel_safety", [&] {
         auto result = generate(example());
@@ -1084,19 +1075,19 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
             ("naming-" +
              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         settings["directory"] = folder.u8string();
-        settings["filename"] = "中文_[[报告]]_[人员数量]_[SEED].csv";
-        const auto first = export_configured_csv(result, settings);
+        settings["filename"] = "中文_[[报告]]_[人员数量]_[SEED]";
+        const auto first = export_configured_data(result, settings);
         const auto original = read_text(first);
-        const auto second = export_configured_csv(result, settings);
+        const auto second = export_configured_data(result, settings);
         require(first.filename().u8string() == "中文_[报告]_3_123.csv");
         require(second.filename().u8string() == "中文_[报告]_3_123_001.csv");
-        require(read_text(first) == original && read_csv(second) == result.matrix);
+        require(read_text(first) == original && read_data(second, result.config) == result.matrix);
         settings["existing_file"] = "overwrite";
         atomic_text(first, "old");
-        require(export_configured_csv(result, settings) == first &&
-                read_csv(first) == result.matrix);
+        require(export_configured_data(result, settings) == first &&
+                read_data(first, result.config) == result.matrix);
         throws<ConfigError>([&] {
-            export_configured_csv(result, settings, std::chrono::system_clock::now(), first);
+            export_configured_data(result, settings, std::chrono::system_clock::now(), first);
         });
         settings["existing_file"] = "number";
         std::mutex mutex;
@@ -1106,8 +1097,8 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         for (int i = 0; i < 8; ++i)
             jobs.emplace_back([&] {
                 try {
-                    auto path = export_configured_csv(result, settings);
-                    require(read_csv(path) == result.matrix);
+                    auto path = export_configured_data(result, settings);
+                    require(read_data(path, result.config) == result.matrix);
                     std::lock_guard<std::mutex> lock(mutex);
                     paths.insert(path);
                 } catch (...) {
@@ -1148,12 +1139,12 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         auto result = generate(example());
         auto output = result.config["output"];
         output["directory"] = folder.u8string();
-        output["filename"] = std::string(247, 'a') + ".csv";
-        const auto first = export_configured_csv(result, output);
-        const auto second = export_configured_csv(result, output);
+        output["filename"] = std::string(247, 'a');
+        const auto first = export_configured_data(result, output);
+        const auto second = export_configured_data(result, output);
         require(first.filename().u8string().size() == 251 &&
                     second.filename().u8string().size() == 255 &&
-                    read_csv(first) == result.matrix && read_csv(second) == result.matrix,
+                    read_data(first, result.config) == result.matrix && read_data(second, result.config) == result.matrix,
                 "长文件名导出或追加序号回读失败");
         const auto original = read_text(first);
         std::mutex mutex;
@@ -1163,9 +1154,9 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         for (int i = 0; i < 4; ++i)
             jobs.emplace_back([&] {
                 try {
-                    auto path = export_configured_csv(result, output);
+                    auto path = export_configured_data(result, output);
                     require(path.filename().u8string().size() == 255 &&
-                            read_csv(path) == result.matrix);
+                            read_data(path, result.config) == result.matrix);
                     std::lock_guard<std::mutex> lock(mutex);
                     paths.insert(path);
                 } catch (...) {
@@ -1214,13 +1205,13 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
         auto result = generate(example());
         auto csv = dir / "policy.csv";
         atomic_text(csv, "keep");
-        throws<FileExistsError>([&] { export_csv(result, csv, ExistingFile::Preserve); });
+        throws<FileExistsError>([&] { export_data(result, csv, ExistingFile::Preserve); });
         require(read_text(csv) == "keep");
-        export_csv(result, csv, ExistingFile::Replace);
-        require(read_csv(csv) == result.matrix);
+        export_data(result, csv, ExistingFile::Replace);
+        require(read_data(csv, result.config) == result.matrix);
         std::filesystem::remove(csv);
-        export_csv(result, csv, ExistingFile::Preserve);
-        require(read_csv(csv) == result.matrix);
+        export_data(result, csv, ExistingFile::Preserve);
+        require(read_data(csv, result.config) == result.matrix);
         for (auto &entry : std::filesystem::directory_iterator(dir))
             require(entry.path().extension() != ".tmp", "temporary file leaked");
     });
@@ -1255,7 +1246,7 @@ int run_tests(int argc, const std::vector<std::string> &argv) {
                 value *= 1e10;
         auto output = dir / "overflow-must-preserve.csv";
         atomic_text(output, "keep");
-        throws<std::overflow_error>([&] { export_csv(normal, output); });
+        throws<std::overflow_error>([&] { export_data(normal, output); });
         require(read_text(output) == "keep");
     });
     test("polish_budget_counts_skipped_candidates_and_is_reproducible", [] {

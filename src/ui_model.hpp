@@ -150,7 +150,7 @@ inline msa::Json data_output_config(const Draft &d) {
 inline msa::Json csv_output_config(const Draft &d) { return data_output_config(d); }
 inline msa::Json output_config(const Draft &d, bool saveInactiveSeed = false) {
     if (d.reportFormat < 0 || d.reportFormat > 1)
-        throw msa::ConfigError("对照报告格式选择无效");
+        throw msa::ConfigError("方法对比报告默认格式选择无效");
     auto output = data_output_fields(d, saveInactiveSeed);
     output["charts"] = {{"directory", trim(d.chartDirectory)}, {"filename", d.chartFilename}};
     d.charts.write_to(output["charts"]);

@@ -170,31 +170,17 @@ std::array<std::string, 3> operator_names(const Json &design) {
     }
     return names;
 }
+void require_config_version(const Json &config) {
+    const auto version = config.find("schema_version");
+    if (version == config.end() || !version->is_number_integer() || *version != 2)
+        throw ConfigError("配置的 schema_version 必须为整数 2");
+}
 Json normalize_config(const Json &raw) {
     auto c = merge(default_config(), raw);
-    if (!c["schema_version"].is_number_integer() ||
-        (c["schema_version"] != 1 && c["schema_version"] != 2))
-        throw ConfigError("不支持的配置版本");
-    if (c["schema_version"] == 1) {
-        // Only measurement export used template syntax in version 1. Preserve
-        // literal brackets in the other names, including text that resembles a token.
-        for (Json *field : {&c["input"]["filename"], &c["output"]["charts"]["filename"],
-                            &c["output"]["comparison_report"]["filename"]}) {
-            if (!field->is_string())
-                continue;
-            std::string escaped;
-            for (char ch : field->get_ref<const std::string &>()) {
-                if (ch == '[' || ch == ']')
-                    escaped += ch;
-                escaped += ch;
-            }
-            *field = std::move(escaped);
-        }
-        c["schema_version"] = 2;
-    }
+    require_config_version(c);
     auto &d = c["design"], &a = c["analysis"], &s = c["specification"], &g = c["generation"],
          &t = c["target_defaults"], &out = c["output"];
-    number(d["operators"], "人员数", 2, 3, true);
+    number(d["operators"], "操作员数", 2, 3, true);
     const auto names = operator_names(d);
     std::set<std::string> active_names;
     for (std::size_t i = 0; i < names.size(); ++i) {
@@ -210,8 +196,8 @@ Json normalize_config(const Json &raw) {
         else
             stored = name;
     }
-    number(d["replicates"], "测量次数", 2, 3, true);
-    number(d["parts"], "产品数", 5, 10, true);
+    number(d["replicates"], "重复测量次数", 2, 3, true);
+    number(d["parts"], "部件数", 5, 10, true);
     if (!one_of(a["method"], {"crossed_xbarr", "crossed_anova"}) ||
         a["percentage_basis"] != "sd_over_tv")
         throw ConfigError("分析方法须为 crossed_xbarr/crossed_anova，百分比口径为 SD/TV");
@@ -331,7 +317,7 @@ Json normalize_config(const Json &raw) {
             throw ConfigError(std::string("静默导出开关须为布尔值：output.silent.") + key);
     const auto &report = out["comparison_report"];
     if (!one_of(report["format"], {"html", "pdf"}))
-        throw ConfigError("对照报告格式须为 html 或 pdf");
+        throw ConfigError("方法对比报告格式须为 html 或 pdf");
     if (!one_of(out["file_type"], {"csv", "xlsx"}))
         throw ConfigError("数据文件类型须为 csv 或 xlsx");
     normalize_name(out["filename"], "测量数据导出名称", [&](const auto &name) {

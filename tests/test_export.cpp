@@ -117,15 +117,15 @@ void wide_checks(const Result &s, const std::string &bytes) {
     check(row == s.matrix.size(), "missing wide row");
     check(parse_export_csv(bytes, s.config) == s.matrix && parse_csv(bytes) == s.matrix,
           "labeled wide roundtrip");
-    check(parse_csv(csv_text(s.matrix, dp)) == s.matrix, "legacy numeric wide reader");
+    check(parse_csv(csv_text(s.matrix, dp)) == s.matrix, "unlabeled numeric wide table");
 }
 void operator_name_checks(const std::filesystem::path &out) {
     auto sample = study(3, 2, 5);
     auto &design = sample.config["design"];
-    design.erase("operator_names");
+    design["operator_names"] = {"", "", ""};
     check(operator_names(design) == std::array<std::string, 3>{"A", "B", "C"} &&
               normalize_config(sample.config)["design"]["operator_names"] == Json({"", "", ""}),
-          "legacy operator defaults");
+          "empty operator names use A/B/C");
     design["operator_names"] = {"  张, \"伟\" <&>  ", "  ", "001"};
     auto normalized = normalize_config(sample.config);
     check(normalized["design"]["operator_names"] == Json({"张, \"伟\" <&>", "", "001"}) &&
@@ -167,23 +167,22 @@ void operator_name_checks(const std::filesystem::path &out) {
     design["operators"] = 3;
     rejects([&] { normalize_config(sample.config); });
 
-    const auto old = study(2, 2, 5);
-    auto renamed = old;
+    const auto standard = study(2, 2, 5);
+    auto renamed = standard;
     for (const auto &names : {Json({"B", "甲", ""}), Json({"B", "A", ""})}) {
         renamed.config["design"]["operator_names"] = names;
         for (const char *format : {"default", "minitab"}) {
-            auto settings = old.config["output"];
+            auto settings = standard.config["output"];
             settings["format"] = format;
             settings["run_order"]["mode"] = "all";
             settings["run_order"]["seed"] = 7;
             for (bool standard_order : {false, true}) {
                 settings["run_order"]["store_standard_order"] = standard_order;
                 const auto custom_csv = export_csv_text(renamed, settings);
-                check(parse_export_csv(custom_csv, renamed.config) == old.matrix,
-                      "custom labels confused with legacy letters");
+                check(parse_export_csv(custom_csv, renamed.config) == standard.matrix,
+                      "custom operator labels mapped to wrong measurements");
                 if (settings["format"] == "default" || standard_order || names[1] != "A")
-                    check(parse_export_csv(export_csv_text(old, settings), renamed.config) == old.matrix,
-                          "legacy identities changed when custom labels overlap legacy letters");
+                    rejects([&] { parse_export_csv(export_csv_text(standard, settings), renamed.config); });
             }
         }
     }
@@ -376,7 +375,7 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
         auto output = refCfg["output"];
         output["format"] = format;
         const auto path = out / (std::string(format) + ".csv");
-        check(export_csv(ref, path, output) == ref.metrics, "written reference metrics");
+        check(export_data(ref, path, output) == ref.metrics, "written reference metrics");
         check(parse_export_csv(read_text(path), refCfg) == reference, "written reference mapping");
     }
     for (int dp : {0, 4, 10}) {
@@ -402,9 +401,6 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
                       receipt["data_path"] == xlsx.u8string() && receipt["sha256"] == sha256(bytes),
                   "workbook receipt does not describe the saved bytes");
             auto report = sample.as_json();
-            report["config"]["design"].erase("operator_names");
-            report["config"]["schema_version"] = 1;
-            report["config"]["input"]["filename"] = "[DATE].csv";
             report["export"] = receipt;
             const auto replay = out / "workbook-replay.xlsx";
             replay_data(report, replay, ExistingFile::Replace);
@@ -417,31 +413,42 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     {
         auto settings = refCfg.at("output");
         settings["file_type"] = "xlsx";
-        settings["filename"] = "[SEED]_数据.CSV";
+        settings["filename"] = "[SEED]_数据";
         settings["directory"] = std::filesystem::absolute(out).u8string();
         settings["existing_file"] = "overwrite";
         auto dest = export_configured_data(ref, settings);
         check(dest.filename() == std::filesystem::u8path("123_数据.xlsx") &&
                   read_data(dest, refCfg) == ref.matrix,
               "configured workbook naming or format selection failed");
-        const auto legacy = out / "legacy.data";
+        const auto csv = out / "explicit.csv";
         Json receipt;
-        export_data(ref, legacy, settings, ExistingFile::Replace, &receipt);
-        check(receipt["file_type"] == "csv" && receipt["csv_path"] == legacy.u8string() &&
-                  read_data(legacy, refCfg) == ref.matrix,
-              "explicit non-workbook path lost legacy CSV semantics");
+        export_data(ref, csv, settings, ExistingFile::Replace, &receipt);
+        check(receipt.at("file_type") == "csv" && receipt.at("data_path") == csv.u8string() &&
+                  !receipt.contains("csv_path") && read_data(csv, refCfg) == ref.matrix,
+              "CSV receipt must identify the file type and data path");
+        const auto report_path = out / "restored.csv";
         auto report = ref.as_json();
-        receipt.erase("file_type");
-        receipt.erase("data_path");
         report["export"] = receipt;
-        report["config"]["output"]["filename"] = "legacy.csv";
-        report["config"]["schema_version"] = 1;
-        report["config"]["output"]["charts"]["filename"] = "旧[图表]";
-        report["config"]["output"].erase("file_type");
-        replay_data(report, out / "legacy-replay.csv", ExistingFile::Replace);
-        check(read_text(out / "legacy-replay.csv") == read_text(legacy),
-              "old CSV receipt could not be replayed");
+        replay_data(report, report_path, ExistingFile::Replace);
+        const auto expected = read_text(csv);
+        check(read_text(report_path) == expected, "CSV replay changed the output");
         rejects([&] { replay_data(report, out / "wrong-type.xlsx", ExistingFile::Replace); });
+        report["config"]["schema_version"] = 1;
+        rejects([&] { replay_data(report, report_path, ExistingFile::Replace); });
+        report["config"].erase("schema_version");
+        rejects([&] { replay_data(report, report_path, ExistingFile::Replace); });
+        report["config"] = ref.config;
+        report["export"].erase("file_type");
+        rejects([&] { replay_data(report, report_path, ExistingFile::Replace); });
+        check(read_text(report_path) == expected, "invalid report replaced destination bytes");
+        for (const auto *name : {"measurements", "measurements.data", "measurements.xls"}) {
+            const auto unsupported = out / name;
+            atomic_text(unsupported, "keep");
+            rejects([&] { export_data(ref, unsupported, settings, ExistingFile::Replace); });
+            check(read_text(unsupported) == "keep", "unsupported extension overwrote destination");
+            atomic_text(unsupported, expected);
+            rejects([&] { read_data(unsupported, refCfg); });
+        }
     }
     int configurations = 0;
     for (int o : {2, 3})
@@ -600,41 +607,31 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
     bad = output;
     bad["run_order"]["randomize_operators"] = 1;
     rejects([&] { normalize_output(bad); });
-    auto legacy = output;
-    legacy.erase("silent");
-    legacy.erase("comparison_report");
-    legacy.erase("charts");
-    legacy.erase("file_type");
-    legacy["filename"] = "msa_data.csv";
-    const auto upgraded = normalize_output(legacy);
-    check(upgraded["file_type"] == "csv" && upgraded["filename"] == "msa_data" &&
-              upgraded["silent"] == Json{{"csv", false}, {"charts", false}, {"comparison_report", false}} &&
-              upgraded["comparison_report"] == Json{{"format", "pdf"}, {"directory", ""},
+    auto preferences = output;
+    preferences.erase("silent");
+    preferences.erase("comparison_report");
+    preferences.erase("charts");
+    preferences.erase("file_type");
+    preferences["filename"] = "msa_data";
+    const auto fileDefaults = normalize_output(preferences);
+    check(fileDefaults["file_type"] == "csv" && fileDefaults["filename"] == "msa_data" &&
+              fileDefaults["silent"] == Json{{"csv", false}, {"charts", false}, {"comparison_report", false}} &&
+              fileDefaults["comparison_report"] == Json{{"format", "pdf"}, {"directory", ""},
                                                     {"filename", "MSA_Comparison"}} &&
-              upgraded["charts"] ==
+              fileDefaults["charts"] ==
                   Json{{"directory", ""}, {"filename", "MSA_Charts"}, {"style", "default"},
                        {"format", "png"}, {"scope", "current"}, {"columns", 2}, {"panel_width", 1800},
                        {"included", {"variance_components", "measurement_by_part",
                                      "measurement_by_operator", "range_chart", "mean_chart", "interaction"}}},
-          "legacy output settings changed export behavior");
-    auto oldStudy = s.config;
-    oldStudy.erase("input");
-    oldStudy["output"] = legacy;
-    oldStudy["output"]["charts"] = {{"filename", "历史曲线"}, {"directory", "以往图表"}};
-    const auto oldDraft = native_ui::from_config(oldStudy);
-    check(oldDraft.importDirectory.empty() && oldDraft.importFilename.empty() &&
-              oldDraft.chartFilename == "历史曲线" && oldDraft.chartDirectory == "以往图表" &&
-              oldDraft.reportFilename == "MSA_Comparison" && oldDraft.charts.style == 0 &&
-              oldDraft.charts.included == ChartPreferences{}.included,
-          "old study lost default filenames or directory");
-    legacy["silent"] = {{"charts", true}};
-    legacy["comparison_report"] = {{"format", "html"}};
-    const auto partial = normalize_output(legacy);
+          "default file and report preferences changed");
+    preferences["silent"] = {{"charts", true}};
+    preferences["comparison_report"] = {{"format", "html"}};
+    const auto partial = normalize_output(preferences);
     check(partial["silent"]["charts"] == true && partial["silent"]["csv"] == false &&
               partial["silent"]["comparison_report"] == false &&
               partial["comparison_report"]["directory"] == "",
           "partial export preferences did not inherit missing fields");
-    const auto chartsPrompt = native_ui::from_config(Json{{"output", legacy}});
+    const auto chartsPrompt = native_ui::from_config(Json{{"output", preferences}});
     check(!chartsPrompt.silentCsv && chartsPrompt.silentCharts && !chartsPrompt.silentReport &&
               chartsPrompt.reportFormat == 1 &&
               native_ui::output_config(chartsPrompt)["silent"] == partial["silent"],
@@ -656,7 +653,7 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
         bad["charts"] = patch;
         rejects([&] { normalize_output(bad); });
     }
-    auto emptyCombination = oldDraft;
+    auto emptyCombination = native_ui::from_config(s.config);
     emptyCombination.charts.scope = 1;
     emptyCombination.charts.included.fill(false);
     check(native_ui::from_config(native_ui::to_config(emptyCombination)).charts.included ==
@@ -678,20 +675,18 @@ int run(const std::filesystem::path &fixtures, const std::filesystem::path &out)
         rejects([&] { normalize_output(bad); });
     }
     check(normalize_import_filename("") == "" && normalize_import_filename("  ") == "" &&
-              normalize_import_filename(" 来料复核.v2 ") == "来料复核.v2" &&
-              normalize_import_filename("测量.CSV") == "测量" &&
-              normalize_import_filename("测量.XLSX") == "测量",
+              normalize_import_filename(" 来料复核.v2 ") == "来料复核.v2",
           "import preset did not normalize the data basename");
-    for (const char *invalid : {"../old.csv", "NUL.csv", ".csv", "x/y", "..", "a?.csv"})
+    for (const char *invalid : {"测量.CSV", "测量.XLSX", "NUL", ".csv", "x/y", "..", "a?"})
         rejects([&] { normalize_config(Json{{"input", {{"filename", invalid}}}}); });
     rejects([&] { normalize_config(Json{{"input", {{"directory", false}}}}); });
     output["silent"] = {{"csv", false}, {"charts", true}, {"comparison_report", true}};
     output["file_type"] = "xlsx";
-    output["charts"] = {{"directory", "质量部/图表"}, {"filename", "极差图.v2.JPG"},
+    output["charts"] = {{"directory", "质量部/图表"}, {"filename", "极差图.v2"},
                         {"style", "origin"}, {"format", "svg"}, {"scope", "combined"},
                         {"columns", 1}, {"panel_width", 2400}, {"included", {"histogram", "range_chart"}}};
     output["comparison_report"] = {{"format", "pdf"}, {"directory", "质量部/对照报告"},
-                                   {"filename", " 研究对照.v2.HTML "}};
+                                   {"filename", " 研究对照.v2 "}};
     auto saved = s.config;
     saved["input"] = {{"directory", "质量部/原始记录"}, {"filename", "来料"}};
     saved["output"] = normalize_output(output);
@@ -794,7 +789,7 @@ int same_study(const std::filesystem::path &configPath, const std::filesystem::p
                                {"store_standard_order", true}};
         record_checks(result, output);
         const auto path = out / (std::string(mode) + ".csv");
-        check(export_csv(result, path, output) == originalMetrics, "same-study export metrics");
+        check(export_data(result, path, output) == originalMetrics, "same-study export metrics");
         check(parse_export_csv(read_text(path), result.config) == originalMatrix,
               "same-study export matrix");
         check(result.matrix == originalMatrix && result.metrics == originalMetrics,

@@ -96,7 +96,7 @@ def preview(images):
                       fill="#728198" if row == 0 else "#B4C2D9", font=font)
             x += size + 22
     (ROOT / "docs").mkdir(exist_ok=True)
-    sheet.save(ROOT / "docs" / "app-icon-preview.png")
+    sheet.save(ROOT / "docs" / "images" / "app-icon-preview.png")
 
 
 def main():

@@ -5,7 +5,7 @@
 ## 推荐导入流程
 
 1. 在“选项 → 文件 → 数据布局”的“导出布局”选择“Minitab”，按需设置运行顺序、种子与 StdOrder。已有生成结果时可直接导出。
-2. 在 Minitab 打开 CSV，使用英文逗号分隔、首行列名。Operator 列为操作员姓名或标识，其他列为数字。所有长表统一 UTF-8 无 BOM、CRLF，保持配置的小数位。
+2. 在 Minitab 打开 CSV，使用英文逗号分隔、首行列名。Operator 列为操作员名称或标识，其他列为数字。所有长表统一 UTF-8 无 BOM、CRLF，保持配置的小数位。
 3. 进入“统计 → 质量工具 → 量具研究 → 交叉量具 R&R”（英文界面为 Stat → Quality Tools → Gage Study → Gage R&R Study (Crossed)）。
 4. 按列名选择：部件=Part，操作员=Operator，测量数据=Measurement。**分析方法与本程序一致，选择 Xbar 和 R 或 ANOVA**。
 5. 研究变异倍数与程序一致，默认 6。比较 P/T 时匹配独立分析容差或规格限。只有一个规格限时按[单侧规格 P/T](#单侧规格-pt)设置。

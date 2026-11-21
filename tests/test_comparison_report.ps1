@@ -45,7 +45,7 @@ Check ($fromFile.Contains('数据导入') -and $fromFile.Contains('研究&amp;A.
 $styleConfig = Join-Path $run 'origin-settings.json'
 $styledReport = Join-Path $run 'origin.html'
 # Data analysis uses only the selected chart style when producing a comparison report.
-[IO.File]::WriteAllText($styleConfig, '{"output":{"charts":{"style":"origin","panel_width":999}}}')
+[IO.File]::WriteAllText($styleConfig, '{"schema_version":2,"output":{"charts":{"style":"origin","panel_width":999}}}')
 $null = & $Cli --config $styleConfig --input $csv --method crossed_xbarr --comparison-report $styledReport @parameters
 Check ($LASTEXITCODE -eq 0) '命令行报告应采用图表风格，跳过独立图像才使用的输出宽度'
 $styled = Read-Report $styledReport
@@ -105,4 +105,6 @@ $null = Invoke-Study @('--input',$constant,'--operator-a','生成姓名','--oper
 $zero = Read-Report $zeroReport
 Check ($zero.Contains('data-value="null">—') -and $zero.Contains('未定义')) '退化研究应清楚表示缺失的指标或容差'
 Check ($zero.Contains("操作员为${longName}、B。") -and -not $zero.Contains('备用姓名')) '两人研究应保留完整长名且只显示前两位操作员'
+[ordered]@{ passed=$true; html=$true; pdf=[bool]$browser } | ConvertTo-Json |
+    Set-Content -LiteralPath (Join-Path $OutputDirectory 'comparison-regression.json') -Encoding UTF8
 Write-Output 'Generated, imported and constant comparison studies passed'

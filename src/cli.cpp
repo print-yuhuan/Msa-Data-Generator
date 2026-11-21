@@ -94,8 +94,8 @@ const Option options[]{
     {"--ndc", "/targets/ndc", ValueType::Target,
      "可区分类别数 ndc 约束：SPEC，默认 none；数值和允许误差须为整数"},
     {"--output-directory", "/output/directory", ValueType::Text,
-     "数据输出目录；留空使用系统桌面，相对目录从桌面计算"},
-    {"--filename", "/output/filename", ValueType::Text, "数据文件名模板，不含扩展名，支持 [变量]"},
+     "测量数据导出目录；留空使用系统桌面，相对目录从桌面计算"},
+    {"--filename", "/output/filename", ValueType::Text, "测量数据导出名称，不含扩展名，支持名称变量"},
     {"--file-type", "/output/file_type", ValueType::Text, "数据文件类型：csv（默认）/ xlsx"},
     {"--existing-file", "/output/existing_file", ValueType::Text,
      "同名文件处理：number 追加序号（默认）/ overwrite 覆盖"},
@@ -125,16 +125,16 @@ void help() {
                          [--output PATH] [--report PATH] [--comparison-report PATH] [--overwrite]
   分析已有数据：msa_cli.exe --input PATH [--sheet NAME] [--config PATH | --no-config]
                            [业务参数] [--report PATH] [--comparison-report PATH] [--overwrite]
-  重放生成报告：msa_cli.exe --replay-report PATH --output PATH [--overwrite]
+  还原测量数据：msa_cli.exe --replay-report PATH --output PATH [--overwrite]
   创建默认配置：msa_cli.exe --init [--config PATH]
 
 基本参数：
-  --config PATH   读取指定的 JSON 配置文件；文件必须存在（--init 除外）
+  --config PATH   读取 schema_version 为 2 的 JSON 配置；文件必须存在（--init 除外）
   --no-config     不读取配置文件，仅使用内置默认值与命令行参数
-  --output PATH   数据文件路径（.csv 或 .xlsx）；相对当前工作目录，不展开文件名变量
+  --output PATH   数据文件路径（.csv 或 .xlsx）；相对当前工作目录，不展开名称变量
   --report PATH   保存包含最终配置、矩阵和统计结果的 JSON 报告
-  --comparison-report PATH  保存同一矩阵的 Xbar-R / ANOVA 对照报告，支持 .html 和 .pdf
-  --replay-report PATH  从新版生成报告还原原始数据文件，核对 SHA-256 后写入 --output
+  --comparison-report PATH  保存同一矩阵的 Xbar-R / ANOVA 方法对比报告，支持 .html 和 .pdf
+  --replay-report PATH  从生成报告还原原始数据文件，核对 SHA-256 后写入 --output
   --input PATH    分析 CSV 或 XLSX，自动识别文件中的操作员名称和人数，不能与 --output 合用
   --sheet NAME    按名称选择 XLSX 工作表；省略时按工作簿顺序读取第一张数据工作表
   --overwrite     允许覆盖数据文件和报告；优先于 --existing-file，与参数排列顺序无关
@@ -194,7 +194,7 @@ void help() {
 
 配置优先级与生成条件：
 优先级：内置默认值 < 配置文件 < 命令行；重复参数最后一次生效。
---config 与 --no-config 互斥；含空格的路径和文件名模板用引号包围。
+--config 与 --no-config 互斥；含空格的路径和名称模板用引号包围。
 省略参数保留配置值；null 是清空可选数值，不能用空字符串代替。
 未指定 --config 时读取 %USERPROFILE%\MSA数据生成器\msa_generator.json；
 该文件不存在则使用内置默认值，不自动创建。普通运行不保存命令行覆盖。
@@ -208,7 +208,7 @@ void help() {
 --require-normality true 对按小数位数舍入后的整批测量值应用 Anderson–Darling 正态性筛选。
 采用独立正态样本的 5% 参考阈值，筛选用于控制模拟样本的分布形状。
 --input 分析文件中的平衡交叉研究，自动读取操作员、部件数和重复测量次数。
-带标记的宽表按操作员分组排列。长表有 StdOrder 时按标准序号确定人员顺序，
+带操作员名称的宽表按操作员分组排列。长表有 StdOrder 时按标准序号确定操作员顺序，
 省略时按 Operator 首次出现的顺序列出。报告和图表使用文件中的名称。
 纯数值宽表按位置使用 A/B/C。恰有 6 行且没有操作员名称时，须在本次命令中指定
 --replicates 3（2 人各测 3 次）或 --replicates 2（3 人各测 2 次）。省略时提示后退出。
@@ -227,7 +227,7 @@ void help() {
   StdOrder = ((Trial-1)*部件数量+Part-1)*操作员人数+操作员编号，编号按研究设计中的位置从 1 开始。
   StdOrder 为完整的 1～总记录数排列；Trial 是原始重复测量编号，不是随机化后的行号。
   --seed 控制测量数据生成，--run-seed 独立控制排序；相同数据、运行配置和排序种子可复现排列。
-  随机化时最终 JSON 报告的 export.effective_run_seed 保存实际排序种子；可跨进程重放。
+  随机化时最终 JSON 报告的 export.effective_run_seed 保存实际排序种子；可据此还原数据文件。
   CLI 生成运行会重新生成研究；--input 只复算输入数据。GUI 仅修改导出设置时无需重新生成。
 
 路径与保存：
@@ -238,7 +238,7 @@ void help() {
 --config、--input、--output、--report、--comparison-report 指定的相对文件路径从当前工作目录计算。
 输入 CSV 上限为 4 MiB，XLSX 上限为 16 MiB，JSON 配置上限为 64 MiB。数据文件和报告须使用独立于本次输入配置的文件路径。
 --report 包含完整最终配置、实际生成种子、矩阵、指标、尝试次数、耗时和版本。
-生成报告另含数据导出清单 export（含 SHA-256）。重放从保存的矩阵还原，独立于搜索耗时。
+生成报告另含数据导出清单 export（含 SHA-256）。还原使用报告中保存的矩阵和排序种子。
 长表支持带双引号的字段、按名称重排列和附加列，必需列为 Operator、Part、Trial、Measurement。
 --input 报告标记 analysis_only=true，不具有数据生成种子；不要求输入数据满足指标约束。
 输入、输出和报告须指向独立文件；报告保存失败时，已成功导出的数据会保留。
@@ -256,7 +256,7 @@ void help() {
     std::cout << R"(
   日期时间变量使用导出时刻；研究参数、指标和 [SEED] 使用已生成结果，中心留空取实际均值。
   未设置的规格限、不可计算的指标输出 NA。
-  百分比文件名变量保留两位小数、不带百分号；未知变量或非法文件名会报错。
+  百分比名称变量保留两位小数、不带百分号；未知变量或非法名称会报错。
 
 分析方法与指标含义：
   crossed_xbarr：均值极差法，依据极差和均值估计重复性、再现性与部件间变异。
@@ -348,11 +348,8 @@ msa::Json target_value(const std::string &text, bool ndc) {
             "约束须为 none、target:值[:误差]、between:下限:上限、at_most:值或 at_least:值");
     return target;
 }
-void validate_option_field(const msa::Json::json_pointer &path, const msa::Json &value,
-                           const msa::Json &config = nullptr) {
+void validate_option_field(const msa::Json::json_pointer &path, const msa::Json &value) {
     auto single = msa::Json::object();
-    if (config.contains("schema_version"))
-        single["schema_version"] = config.at("schema_version");
     single[path] = value;
     msa::normalize_config(single);
 }
@@ -442,7 +439,7 @@ void default_invalid_unused_output_fields(msa::Json &config, OutputUse use, bool
             continue;
         // Retain valid report metadata. Full normalization still checks object shape and keys.
         try {
-            validate_option_field(path, config.at(path), config);
+            validate_option_field(path, config.at(path));
         } catch (const msa::ConfigError &) {
             config.at(path) = defaults.at(path);
         }
@@ -601,6 +598,7 @@ int run(const std::vector<std::string> &args) {
                     }
                 }
                 c = msa::Json::parse(msa::read_text(source_config, msa::config_read_limit));
+                msa::require_config_version(c);
             }
         }
         if (!c.is_object())

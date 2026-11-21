@@ -44,13 +44,14 @@ std::string read_file_bytes(const std::filesystem::path &path, std::size_t max_b
 std::filesystem::path config_path() {
 #ifdef _WIN32
     wchar_t home[32768]{};
-    if (!GetEnvironmentVariableW(L"USERPROFILE", home, 32768))
+    const auto length = GetEnvironmentVariableW(L"USERPROFILE", home, 32768);
+    if (!length || length >= 32768 || !std::filesystem::path(home).is_absolute())
         throw std::runtime_error("无法确定用户配置目录");
     return std::filesystem::path(home) / L"MSA数据生成器" / L"msa_generator.json";
 #else
     auto home = std::getenv("HOME");
-    if (!home)
-        throw std::runtime_error("HOME 未设置");
+    if (!home || !std::filesystem::path(home).is_absolute())
+        throw std::runtime_error("无法确定用户配置目录，请设置绝对路径 HOME");
     return std::filesystem::path(home) / "MSA数据生成器" / "msa_generator.json";
 #endif
 }
@@ -115,7 +116,6 @@ std::filesystem::path configured_data_path(const Json &cfg) {
                                     c["output"]["file_type"].get<std::string>()))
         .lexically_normal();
 }
-std::filesystem::path configured_csv_path(const Json &cfg) { return configured_data_path(cfg); }
 void atomic_text(const std::filesystem::path &path, const std::string &bytes, ExistingFile policy) {
     auto dir = path.parent_path();
     if (dir.empty())
@@ -243,7 +243,9 @@ Json load_config(const std::filesystem::path &path) {
             // A concurrent initializer won. Read it instead of replacing it.
         }
     }
-    return normalize_config(Json::parse(read_text(path, config_read_limit)));
+    const auto config = Json::parse(read_text(path, config_read_limit));
+    require_config_version(config);
+    return normalize_config(config);
 }
 std::string csv_text(const Matrix &matrix, int dp) {
     std::string s;
@@ -259,15 +261,14 @@ std::string csv_text(const Matrix &matrix, int dp) {
     }
     return s;
 }
-Matrix read_csv(const std::filesystem::path &path) {
-    return parse_csv(read_text(path, csv_read_limit));
-}
 std::string data_file_type(const std::filesystem::path &path) {
     auto extension = path.extension().u8string();
     for (char &ch : extension)
         if (ch >= 'A' && ch <= 'Z')
             ch = static_cast<char>(ch + ('a' - 'A'));
-    return extension == ".xlsx" ? "xlsx" : "csv";
+    if (extension == ".csv" || extension == ".xlsx")
+        return extension.substr(1);
+    throw ConfigError("测量数据文件扩展名须为 .csv 或 .xlsx");
 }
 namespace {
 Matrix decode_data(const std::string &bytes, const std::string &type, const Json &config) {
@@ -396,28 +397,24 @@ Json export_data(const Result &result, const std::filesystem::path &path, const 
                     {"run_order", settings.at("run_order")},
                     {"effective_run_seed", effective_run_seed(result, settings)},
                     {"sha256", sha256(saved)}};
-        if (type == "csv")
-            (*receipt)["csv_path"] = path.u8string();
     }
     return actual;
 }
-Json export_csv(const Result &result, const std::filesystem::path &path, ExistingFile policy) {
-    return export_data(result, path, policy);
-}
-Json export_csv(const Result &result, const std::filesystem::path &path, const Json &output,
-                ExistingFile policy, Json *receipt) {
-    return export_data(result, path, output, policy, receipt);
-}
 void replay_data(const Json &report, const std::filesystem::path &path, ExistingFile policy) {
     if (!report.is_object() || !report.contains("export") || report.value("analysis_only", false))
-        throw ConfigError("重放需要含 export 清单的生成报告。请用 --report 保存新版生成报告。");
+        throw ConfigError("还原数据需要包含 export 清单的生成报告，请使用 --report 保存报告。");
     const auto &receipt = report.at("export");
-    if (!receipt.is_object() || receipt.at("schema_version") != 1)
+    if (!receipt.contains("schema_version") || !receipt.at("schema_version").is_number_integer() ||
+        receipt.at("schema_version") != 1)
         throw ConfigError("不支持此数据文件导出清单版本");
-    const auto type = receipt.value("file_type", std::string("csv"));
+    if (!receipt.contains("file_type") || (receipt.at("file_type") != "csv" &&
+                                            receipt.at("file_type") != "xlsx"))
+        throw ConfigError("导出清单的 file_type 必须为 csv 或 xlsx");
+    const auto type = receipt.at("file_type").get<std::string>();
     if (type != data_file_type(path))
-        throw ConfigError("重放目标类型与报告中的原始数据文件类型不一致");
+        throw ConfigError("还原文件的类型与报告记录的数据文件类型不一致");
     Result study;
+    require_config_version(report.at("config"));
     study.config = normalize_config(report.at("config"));
     study.matrix = report.at("matrix").get<Matrix>();
     auto settings = study.config.at("output");
@@ -433,8 +430,5 @@ void replay_data(const Json &report, const std::filesystem::path &path, Existing
     if (sha256(bytes) != receipt.at("sha256"))
         throw ConfigError("重建数据文件的 SHA-256 与报告不一致，未写入文件");
     atomic_text(path, bytes, policy);
-}
-void replay_csv(const Json &report, const std::filesystem::path &path, ExistingFile policy) {
-    replay_data(report, path, policy);
 }
 } // namespace msa
