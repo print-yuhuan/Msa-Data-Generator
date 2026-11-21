@@ -104,6 +104,27 @@ index ef7776d6a4f97228b931c5e21df5a43e8f65d51b..c6442c70f39099930dd6679fdc16f8d0
      int zIndex_ = 0;
  };
  
+diff --git a/core/animation.h b/core/animation.h
+index 08c48bcee177c69ccdf39e3f351ce8664fba33d0..155e2cf38d4adec6a7ee70cf658a90cfd0385aed 100644
+--- a/core/animation.h
++++ b/core/animation.h
+@@ -281,12 +281,14 @@ public:
+             return true;
+         }
+ 
+-        if (closeEnough(target_, target)) {
++        const bool animate = transition.enabled && animateProperty && transition.durationSeconds > 0.0f;
++        // Disabling a transition also finishes an in-flight trip to the same target.
++        if (closeEnough(target_, target) && (!active_ || animate)) {
+             return false;
+         }
+ 
+         target_ = target;
+-        if (!transition.enabled || !animateProperty || transition.durationSeconds <= 0.0f) {
++        if (!animate) {
+             start_ = target;
+             current_ = target;
+             active_ = false;
 diff --git a/core/app/app_runner.h b/core/app/app_runner.h
 index ab201f8e11fad8a85e5ffaf9c6ee63bfaeed4fe8..72bec3871a027399cb56011a6e5c3842da4ee63b 100644
 --- a/core/app/app_runner.h

@@ -105,7 +105,7 @@ struct State {
     Level footerLevel = Level::Info;
     Page footerPage = Page::Data;
     Clock::time_point footerEntered{};
-    Clock::time_point resultEntered = Clock::now(), advancedChanged = Clock::now();
+    Clock::time_point advancedChanged{};
     float advancedFrom = 0;
     float generateOffset = 0, resultOffset = 0, configOffset = 0, pixelScale = 1;
     float previousWidth = 0, previousHeight = 0, limitScale = 0;
@@ -151,6 +151,24 @@ struct State {
         return displayedResult() &&
                (status == Status::Cancelled || status == Status::Error ||
                 status == Status::Infeasible || status == Status::SearchFailed);
+    }
+    float searchBudgetProgress(Clock::time_point now = Clock::now()) const {
+        const float target = advanced ? 1.f : 0.f;
+        if (!motion || advancedFrom == target)
+            return target;
+        const float elapsed =
+            std::max(0.f, std::chrono::duration<float>(now - advancedChanged).count());
+        return std::clamp(advancedFrom + (advanced ? elapsed : -elapsed) / .18f, 0.f, 1.f);
+    }
+    void toggleSearchBudget(Clock::time_point now = Clock::now()) {
+        if (busy())
+            return;
+        // Reverse the same timeline at the input event, even between layout frames.
+        advancedFrom = searchBudgetProgress(now);
+        advanced = !advanced;
+        advancedChanged = now;
+        if (!motion)
+            advancedFrom = advanced ? 1.f : 0.f;
     }
     void navigate(Page next) {
         if (next == page)
@@ -397,13 +415,6 @@ eui::Transition transition(float seconds = .18f) {
         eui::AnimProperty::Color | eui::AnimProperty::TextColor | eui::AnimProperty::Border;
     return value;
 }
-float reveal(Clock::time_point since, float duration = .18f) {
-    if (!state.motion)
-        return 1;
-    const float t = std::clamp(
-        std::chrono::duration<float>(Clock::now() - since).count() / duration, 0.0f, 1.0f);
-    return 1 - (1 - t) * (1 - t) * (1 - t);
-}
 // Attach keyboard behavior to the component's actual hit area, so pointer and Tab
 // focus use the same element. Keep this adaptation local to the application.
 void keyboard(Ui &u, const std::string &id, std::function<bool(const eui::KeyEvent &)> fn) {
@@ -412,6 +423,13 @@ void keyboard(Ui &u, const std::string &id, std::function<bool(const eui::KeyEve
         hit->interactive = true;
         hit->customFocusIndicator = true;
         hit->onKeyEvent = std::move(fn);
+        // Use one finite color transition. EUI's independent hover blend otherwise
+        // keeps retargeting it, including when the system disables animations.
+        if (hit->hasStateColors) {
+            hit->smoothStateColors = false;
+            hit->transition = transition(.12f);
+            hit->transition.properties = eui::AnimProperty::Color;
+        }
         if (!hit->disabled && u.isFocused(id))
             hit->border = {2, eui::Color(blue)};
     }
@@ -419,6 +437,19 @@ void keyboard(Ui &u, const std::string &id, std::function<bool(const eui::KeyEve
 bool activate(const eui::KeyEvent &key) {
     return key.action == core::KeyAction::Press &&
            (key.key == eui::InputKey::Enter || key.key == eui::InputKey::Space);
+}
+// EUI's built-in indicators animate their entire screen-space frame. Only the
+// horizontal selection offset should travel when a parent scrolls or changes layout.
+void slideWithinControl(Ui &u, const std::string &id, float trackWidth) {
+    if (auto *marker = u.find(id)) {
+        auto &previousWidth = u.state<float>(id + ".trackWidth");
+        marker->transform.translate.x = marker->x;
+        marker->x = 0;
+        marker->explicitFrameAnimation = false;
+        marker->transition = transition(previousWidth == trackWidth ? .16f : 0.f);
+        marker->transition.properties = eui::AnimProperty::Transform;
+        previousWidth = trackWidth;
+    }
 }
 void segments(Ui &u, const std::string &id, const std::vector<std::string> &items, int selected,
               float w, std::function<void(int)> select, float h = controlHeight,
@@ -433,10 +464,10 @@ void segments(Ui &u, const std::string &id, const std::vector<std::string> &item
         u.requestFocus(id + ".hit." + std::to_string(next));
     };
     auto style = components::SegmentedStyle(tokens());
-    if (soft) {
-        style.selected = eui::Color(surface);
-        style.selectedText = eui::Color(blue);
-    }
+    // Every label stays legible as the selection passes underneath it.
+    style.selected =
+        soft ? eui::Color(surface) : core::mixColor(eui::Color(surface), brandColor, .19f);
+    style.selectedText = core::mixColor(brandColor, eui::Color(ink), .40f);
     components::segmented(u, id)
         .size(w, h)
         .items(items)
@@ -447,8 +478,13 @@ void segments(Ui &u, const std::string &id, const std::vector<std::string> &item
         .transition(transition())
         .onChange(select)
         .build();
+    slideWithinControl(u, id + ".indicator", w);
     for (int i = 0; i < int(items.size()); ++i) {
         const auto hitId = id + ".hit." + std::to_string(i);
+        if (auto *hit = u.find(hitId)) {
+            hit->hoverColor = components::theme::withAlpha(brandColor, .06f);
+            hit->pressedColor = components::theme::withAlpha(brandColor, .13f);
+        }
         keyboard(u, hitId,
                  [select, &choice, i, count = int(items.size())](const eui::KeyEvent &key) {
                      if (activate(key)) {
@@ -498,14 +534,14 @@ void tabs(Ui &u, const std::string &id, const std::vector<std::string> &items, i
         .transition(transition())
         .onChange(select)
         .build();
+    slideWithinControl(u, id + ".indicator", w);
     for (int i = 0; i < int(items.size()); ++i) {
         const auto hitId = id + ".hit." + std::to_string(i);
         if (auto *hit = u.find(hitId)) {
             if (i == selected)
                 hit->color = eui::Color(blueWash);
             hit->hoverColor = eui::Color(i == selected ? blueWashActive : surfaceHover);
-            hit->pressedColor = eui::Color(i == selected ? blueWashActive : surfacePressed);
-            hit->transition = transition(.12f);
+            hit->pressedColor = eui::Color(surfacePressed);
         }
         keyboard(u, hitId,
                  [select, &choice, i, count = int(items.size())](const eui::KeyEvent &key) {
@@ -540,6 +576,14 @@ void toggle(Ui &u, const std::string &id, const std::string &label, bool value, 
         style.text = eui::Color(inkDisabled);
         style.rowHover = style.rowPressed = eui::Color("#00000000");
     }
+    auto &checked = u.state<bool>(id + ".checked");
+    checked = value;
+    auto flip = [&checked, disabled, change = std::move(change)] {
+        if (!disabled) {
+            checked = !checked;
+            change(checked);
+        }
+    };
     components::toggleSwitch(u, id)
         .size(w, controlHeight)
         .checked(value)
@@ -548,20 +592,21 @@ void toggle(Ui &u, const std::string &id, const std::string &label, bool value, 
         .trackSize(38, 22)
         .theme(tokens())
         .style(style)
-        .transition(transition())
-        .onChange([change, disabled](bool next) {
-            if (!disabled)
-                change(next);
-        })
+        .disabled(disabled)
+        .transition(transition(.16f))
+        .onChange([flip](bool) { flip(); })
         .build();
-    keyboard(u, id + ".hit", [change, value, disabled](const eui::KeyEvent &key) {
+    slideWithinControl(u, id + ".knob", 38.f);
+    if (auto *hit = u.find(id + ".hit"))
+        hit->disabled = disabled;
+    keyboard(u, id + ".hit", [flip, disabled](const eui::KeyEvent &key) {
         if (disabled || !activate(key))
             return false;
-        change(!value);
+        flip();
         return true;
     });
     if (auto *hit = u.find(id + ".hit"))
-        hit->disabled = disabled;
+        hit->focusable = !disabled;
 }
 void stepper(Ui &u, const std::string &id, std::string &value, float w, int lo, int hi) {
     const int current = std::clamp(std::atoi(value.c_str()), lo, hi);
@@ -1784,7 +1829,6 @@ void results(Ui &u, float w, bool summary = true, float contentHeight = 0) {
                 state.resultTab = i;
                 state.resultOffset = 0;
                 menu.id.clear();
-                state.resultEntered = Clock::now();
             },
             resultTabHeight);
         const bool fixedPanel = contentHeight > 0;
@@ -1794,10 +1838,6 @@ void results(Ui &u, float w, bool summary = true, float contentHeight = 0) {
         const bool paginated = columns.pages > 1;
         const float tableHeight =
             contentHeight - (fixedPanel && paginated ? previewPaginationHeight + resultGap : 0.f);
-        const float progress = reveal(state.resultEntered);
-        auto content = u.column("result.content").width(c).opacity(.96f + .04f * progress);
-        if (progress < 1)
-            content.onFrame([](float) {});
         const auto resultTab = [&](Ui &u, float c) {
             if (state.resultTab == 0)
                 review(u, c, tableHeight);
@@ -1980,7 +2020,8 @@ void results(Ui &u, float w, bool summary = true, float contentHeight = 0) {
                 }
             }
         };
-        content
+        u.column("result.content")
+            .width(c)
             .content([&] {
                 if (!fixedPanel || state.resultTab == 0) {
                     resultTab(u, c);
@@ -2618,7 +2659,7 @@ void runOrderChoice(Ui &u, const std::string &id, const std::string &label, bool
         })
         .build();
 }
-void searchSettings(Ui &u, float w, float elapsed = reveal(state.advancedChanged)) {
+void searchSettings(Ui &u, float w, float progress = state.searchBudgetProgress()) {
     section(u, "advanced", "约束与搜索", w, [&](float c) {
         const float f = (c - 12) / 2;
         u.row("target.defaults")
@@ -2632,48 +2673,46 @@ void searchSettings(Ui &u, float w, float elapsed = reveal(state.advancedChanged
         paragraph(u, "target.defaults.note",
                   "目标值未单独填写误差时，使用这里的默认值。ndc 的允许误差须为整数。",
                   c, muted, 17.5f);
-        const float expanded =
-            state.advancedFrom + ((state.advanced ? 1.0f : 0.0f) - state.advancedFrom) * elapsed;
-        u.row("advanced.header")
+        u.column("advanced.budget")
             .width(c)
-            .gap(12)
-            .alignItems(eui::Align::CENTER)
             .content([&] {
-                button(
-                    u, "advancedtoggle", state.advanced ? "收起搜索预算  ▴" : "展开搜索预算  ▾", 156,
-                    [expanded] {
-                        if (state.busy())
-                            return;
-                        state.advancedFrom = expanded;
-                        state.advanced = !state.advanced;
-                        state.advancedChanged = Clock::now();
-                    },
-                    false, state.busy(), 36);
-                paragraph(u, "advanced.note", "可设置候选数据集上限和搜索时限。", c - 168, muted,
-                          17.5f);
-            })
-            .build();
-        if (expanded > 0 || state.advanced) {
-            constexpr float fieldRowHeight = 66;
-            auto panel = u.column("advanced.reveal")
-                             .size(c, fieldRowHeight * expanded)
-                             .clip()
-                             .disabled(!state.advanced || expanded < .999f);
-            if (elapsed < 1)
-                panel.onFrame([](float) {});
-            panel
-                .content([&] {
+                u.row("advanced.header")
+                    .width(c)
+                    .gap(12)
+                    .alignItems(eui::Align::CENTER)
+                    .content([&] {
+                        button(u, "advancedtoggle",
+                               state.advanced ? "收起搜索预算  ▴" : "展开搜索预算  ▾", 156,
+                               [] { state.toggleSearchBudget(); }, false, state.busy(), 36);
+                        u.find("advancedtoggle.bg")->accessibleExpanded = state.advanced;
+                        paragraph(u, "advanced.note", "可设置候选数据集上限和搜索时限。", c - 168, muted,
+                                  17.5f);
+                    })
+                    .build();
+                if (!state.advanced && progress == 0.f)
+                    return;
+                // Include the spacing in the clip so that neither endpoint jumps.
+                constexpr float gap = 13.f, fieldRowHeight = 66.f;
+                const float expanded = progress * progress * (3.f - 2.f * progress);
+                auto panel = u.column("advanced.reveal")
+                                 .size(c, (gap + fieldRowHeight) * expanded)
+                                 .clip()
+                                 .disabled(!state.advanced || progress < 1.f);
+                if (progress != (state.advanced ? 1.f : 0.f))
+                    panel.onFrame([](float) {});
+                panel.content([&] {
                     u.row("advancedrow")
                         .width(c)
+                        .margin(0, gap, 0, 0)
                         .gap(12)
                         .content([&] {
                             field(u, "attempts", "候选数据集上限", state.draft.attempts, f);
                             field(u, "timeout", "搜索时限（秒）", state.draft.timeout, f);
                         })
                         .build();
-                })
-                .build();
-        }
+                }).build();
+            })
+            .build();
     });
 }
 void exportSettings(Ui &u, float w) {
@@ -3076,7 +3115,7 @@ void openChartOptions() {
     state.configOffset = 0;
     state.navigate(Page::Options);
 }
-void config(Ui &u, float w, float disclosureProgress = reveal(state.advancedChanged)) {
+void config(Ui &u, float w, float disclosureProgress = state.searchBudgetProgress()) {
     if (state.optionsTab == 0) {
         pairedCards(u, "options.study.definition", w, "design", designSettings, "generation.rules",
                     generationRules);
@@ -3108,7 +3147,7 @@ void config(Ui &u, float w, float disclosureProgress = reveal(state.advancedChan
 void optionsPage(Ui &u, float w, float h) {
     const float navigationWidth = w - tokens().metrics.control.scrollbar - scrollGutter;
     constexpr float titleWidth = 66;
-    const float disclosureProgress = reveal(state.advancedChanged);
+    const float disclosureProgress = state.searchBudgetProgress();
     u.column("options.page")
         .size(w, h)
         .gap(sectionGap)
@@ -3892,6 +3931,9 @@ void helpQuickStart(Ui &v, float cw) {
              "再到「分析详情」或「ANOVA 详情」查看计算结果。搜索期间可在底栏取消。");
         step("help.step4", "4", "导出数据",
              "在「选项 → 文件」选择格式、运行顺序和保存位置，然后回到「数据」页点击「导出数据」。");
+        helpItem(v, "help.motion", "界面动画",
+                 "如需让页签指示器、开关和搜索预算立即切换，可在 Windows 设置中关闭「动画效果」。"
+                 "程序运行时即可生效，重新开启后，下次操作恢复过渡。", c);
     });
 
     section(v, "help.rules", "部件取样与分布", cw, [&](float c) {
@@ -4717,8 +4759,23 @@ void appKeyEvent(const eui::KeyEvent &key) {
         menu.id.clear();
 }
 
+void applyMotionPreference(bool enabled) {
+    if (state.motion == enabled)
+        return;
+    state.motion = enabled;
+    if (!enabled)
+        state.advancedFrom = state.advanced ? 1.f : 0.f;
+    app::requestUpdate();
+}
+void refreshSystemMotionPreference() {
+    BOOL enabled = TRUE;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0))
+        applyMotionPreference(enabled != FALSE);
+}
 LRESULT CALLBACK guiWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
                                UINT_PTR subclassId, DWORD_PTR) {
+    if (message == WM_SETTINGCHANGE)
+        refreshSystemMotionPreference();
     if (message == WM_TIMER && wparam == footerHintTimer) {
         // A new hint can replace one whose timer message is already queued.
         const auto remaining = state.footerEntered + footerHintDuration - Clock::now();
@@ -4809,6 +4866,13 @@ void footer(Ui &u, float w) {
         footerStatus(u, w - 132, std::string("MSA 数据生成器 · v") + MSA_UI_VERSION);
         button(u, "returntask", "返回数据", 120, [] { state.navigate(Page::Data); });
     }
+}
+// EUI components can create their own transitions and hover blends on child nodes.
+void disableElementMotion(core::dsl::Element &element) {
+    element.transition.enabled = false;
+    element.smoothStateColors = false;
+    for (auto &child : element.children)
+        disableElementMotion(*child);
 }
 void compose(Ui &u, const eui::Screen &screen) {
     state.poll();
@@ -4979,6 +5043,9 @@ void compose(Ui &u, const eui::Screen &screen) {
         }
         menuOverlay(u, screen);
     }
+    if (!state.motion)
+        for (const auto &root : u.roots())
+            disableElementMotion(*root);
 }
 } // namespace gui
 namespace app {
@@ -5051,9 +5118,7 @@ const DslAppConfig &dslAppConfig() {
                 }
                 gui::initializeFont();
                 CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-                BOOL animations = TRUE;
-                if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
-                    gui::state.motion = animations != FALSE;
+                gui::refreshSystemMotionPreference();
                 gui::state.systemDpi = GetDpiForWindow(platform::owner());
                 gui::state.loadInitial();
             })

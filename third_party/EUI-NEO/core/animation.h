@@ -281,12 +281,14 @@ public:
             return true;
         }
 
-        if (closeEnough(target_, target)) {
+        const bool animate = transition.enabled && animateProperty && transition.durationSeconds > 0.0f;
+        // Disabling a transition also finishes an in-flight trip to the same target.
+        if (closeEnough(target_, target) && (!active_ || animate)) {
             return false;
         }
 
         target_ = target;
-        if (!transition.enabled || !animateProperty || transition.durationSeconds <= 0.0f) {
+        if (!animate) {
             start_ = target;
             current_ = target;
             active_ = false;

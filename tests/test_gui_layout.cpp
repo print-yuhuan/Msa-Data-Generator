@@ -413,6 +413,9 @@ void xbar_details(const msa::Result &generated) {
         const auto *grr = details.find("study.table.body.slot.2.cell.1");
         const auto expected =
             native_ui::review_number(generated.metrics["study"]["components"]["GRR"]["sd"], 6);
+        const auto *body = details.find("result.content");
+        if (!body || body->opacity != 1.f || body->onFrame)
+            throw std::runtime_error("切换结果标签触发整表淡入或逐帧重建");
         if (gui::state.resultTab != 2 || !grr || grr->accessibleRole != core::AccessibleRole::Cell ||
             grr->horizontalAlign != eui::HorizontalAlign::Right || !grr->wrap ||
             grr->text.find(expected) == std::string::npos ||
@@ -426,7 +429,6 @@ void xbar_details(const msa::Result &generated) {
         controls_fit(details, width, "Xbar-R details");
     }
     gui::state.resultTab = 0;
-    gui::state.resultEntered = gui::Clock::now() - std::chrono::seconds(1);
     std::cout << "Xbar-R analysis details retain the selected tab and real study statistics\n";
 }
 
@@ -2173,43 +2175,70 @@ void disclosure_and_reduced_motion(const msa::Result &generated) {
     gui::state.motion = true;
     gui::state.advanced = false;
     gui::state.advancedFrom = 0;
-    gui::state.advancedChanged = gui::Clock::now() - std::chrono::seconds(1);
     eui::Ui ui;
-    const auto compose = [&] {
+    const auto compose = [&](gui::Clock::time_point now = gui::Clock::now()) {
         ui.begin("search-budget-disclosure");
-        gui::searchSettings(ui, 588);
+        gui::searchSettings(ui, 588, gui::state.searchBudgetProgress(now));
         ui.end();
         ui.layout(588, 800);
         controls_fit(ui, 588, "搜索预算展开布局");
     };
     compose();
-    if (ui.find("advanced.reveal") || !ui.find("advancedtoggle.bg"))
+    if (ui.find("advanced.reveal") || !ui.find("advancedtoggle.bg") ||
+        ui.find("advancedtoggle.bg")->accessibleExpanded)
         throw std::runtime_error("搜索预算收起状态错误或缺少展开按钮");
+    const float collapsedHeight = ui.find("advanced.card")->frame.height;
     click(ui, "advancedtoggle.bg");
-    gui::state.advancedChanged = gui::Clock::now() + std::chrono::seconds(1);
-    compose();
+    const auto start = gui::state.advancedChanged;
+    compose(start);
     const auto *opening = ui.find("advanced.reveal");
-    if (!gui::state.advanced || !opening || !opening->disabled || opening->opacity != 1)
-        throw std::runtime_error("展开过渡中输入未禁用或正文发生淡入");
-    gui::state.advancedChanged = gui::Clock::now() - std::chrono::seconds(1);
-    compose();
+    if (!gui::state.advanced || !opening || !opening->disabled || !opening->onFrame ||
+        opening->opacity != 1 || ui.find("advanced.card")->frame.height != collapsedHeight ||
+        !ui.find("advancedtoggle.bg")->accessibleExpanded)
+        throw std::runtime_error("展开首帧出现高度跳变、正文淡入或输入状态错误");
+    const auto reverse = start + std::chrono::milliseconds(60);
+    gui::state.toggleSearchBudget(reverse); // No intermediate layout frame before the click.
+    compose(reverse);
+    const auto *reversed = ui.find("advanced.reveal");
+    if (gui::state.advanced || !reversed || !reversed->disabled || !reversed->onFrame ||
+        std::abs(gui::state.searchBudgetProgress(reverse) - 1.f / 3.f) > .001f)
+        throw std::runtime_error("反向收起未从输入事件时刻的可见进度继续");
+    const auto returnTrip = reverse + std::chrono::milliseconds(15);
+    const auto before = gui::state.searchBudgetProgress(returnTrip);
+    gui::state.toggleSearchBudget(returnTrip);
+    if (std::abs(before - .25f) > .001f || gui::state.searchBudgetProgress(returnTrip) != before)
+        throw std::runtime_error("反复切换搜索预算丢失位置或重新播放完整时长");
+    compose(returnTrip + std::chrono::milliseconds(136));
     const auto *expanded = ui.find("advanced.reveal");
-    if (!expanded || expanded->disabled || !ui.find("attempts.hit") || !ui.find("timeout.hit"))
+    if (!expanded || expanded->disabled || expanded->onFrame ||
+        !ui.find("attempts.hit") || !ui.find("timeout.hit"))
         throw std::runtime_error("展开结束后搜索参数不可操作");
+    gui::state.advancedChanged = gui::Clock::now() - std::chrono::seconds(1);
     click(ui, "advancedtoggle.bg");
-    gui::state.advancedChanged = gui::Clock::now() + std::chrono::seconds(1);
-    compose();
+    compose(gui::state.advancedChanged);
     const auto *closing = ui.find("advanced.reveal");
     if (gui::state.advanced || !closing || !closing->disabled || closing->opacity != 1)
         throw std::runtime_error("收起过渡中的隐藏输入仍可操作或整组淡出");
-    gui::state.motion = false;
+    gui::applyMotionPreference(false);
+    compose();
+    if (ui.find("advanced.reveal") || ui.find("advanced.card")->frame.height != collapsedHeight)
+        throw std::runtime_error("关闭动效后收起搜索预算仍保留过渡内容");
+    gui::applyMotionPreference(true);
     compose();
     if (ui.find("advanced.reveal"))
-        throw std::runtime_error("关闭动效后收起搜索预算仍保留过渡内容");
+        throw std::runtime_error("重新启用动效后重播了已完成的收起");
+    gui::applyMotionPreference(false);
     click(ui, "advancedtoggle.bg");
     compose();
-    if (!ui.find("advanced.reveal") || ui.find("advanced.reveal")->disabled)
+    if (!ui.find("advanced.reveal") || ui.find("advanced.reveal")->disabled ||
+        ui.find("advanced.reveal")->onFrame)
         throw std::runtime_error("关闭动效后展开搜索参数未立即可用");
+    gui::applyMotionPreference(true);
+    compose();
+    if (!ui.find("advanced.reveal") || ui.find("advanced.reveal")->disabled ||
+        ui.find("advanced.reveal")->onFrame)
+        throw std::runtime_error("重新启用动效后重播了已完成的展开");
+    gui::applyMotionPreference(false);
     if (!gui::state.validResult() || gui::state.revision != revision ||
         gui::state.result->matrix != generated.matrix)
         throw std::runtime_error("显示或隐藏搜索预算改变了已有研究结果");
@@ -3665,6 +3694,23 @@ void chart_interaction(const msa::Result &generated, const std::filesystem::path
     gui::state.page = savedPage;
     gui::state.message.clear();
 }
+#include "gui_motion_controls.hpp"
+
+void interrupt_active_transition() {
+    core::AnimatedValue<float> position;
+    auto transition = core::Transition::make(.16f);
+    position.setTarget(0.f, transition);
+    position.setTarget(24.f, transition);
+    position.tick(.04f);
+    if (!position.isActive() || position.value() <= 0.f || position.value() >= 24.f)
+        throw std::runtime_error("expected an in-flight indicator");
+    transition.enabled = false;
+    if (!position.setTarget(24.f, transition) || position.value() != 24.f || position.isActive())
+        throw std::runtime_error("disabling motion did not finish the current transition");
+    transition.enabled = true;
+    if (position.setTarget(24.f, transition) || position.tick(.04f))
+        throw std::runtime_error("re-enabling motion replayed the previous transition");
+}
 } // namespace
 
 int wmain(int argc, wchar_t **argv) {
@@ -3678,7 +3724,6 @@ int wmain(int argc, wchar_t **argv) {
         const auto generated = msa::generate(cfg);
         gui::state.draft = native_ui::from_config(cfg);
         gui::state.page = gui::Page::Data;
-        gui::state.resultEntered = gui::Clock::now() - std::chrono::seconds(1);
         gui::state.message.clear();
         initial_window_bounds();
         render_request_lifecycle();
@@ -3688,6 +3733,8 @@ int wmain(int argc, wchar_t **argv) {
         long_combo_menu();
         shared_choice_controls(generated);
         shared_choice_keyboard();
+        gui_motion_controls();
+        interrupt_active_transition();
         disclosure_and_reduced_motion(generated);
         runtime_keyboard_navigation();
         xbar_details(generated);
@@ -3919,7 +3966,6 @@ int wmain(int argc, wchar_t **argv) {
         gui::state.draft.csvFormat = 1;
         gui::state.draft.runMode = 1;
         gui::state.draft.runSeed = "未填写";
-        const auto entered = gui::state.resultEntered;
         eui::Ui startActions;
         startActions.begin("generation-start-test");
         gui::footer(startActions, 1232);
@@ -3941,10 +3987,9 @@ int wmain(int argc, wchar_t **argv) {
             gui::state.poll();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        if (!gui::state.validResult() || gui::state.resultTab != 1 ||
-            gui::state.resultEntered != entered)
+        if (!gui::state.validResult() || gui::state.resultTab != 1)
             throw std::runtime_error("task completion resets/fades the selected result view");
-        std::cout << "real regeneration preserves the preview and result animation state\n";
+        std::cout << "real regeneration preserves the selected preview\n";
         for (auto &target : gui::state.draft.targets)
             target = {};
         gui::state.draft.targets[4] = {4, "1000000", ""};
