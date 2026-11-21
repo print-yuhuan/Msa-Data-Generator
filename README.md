@@ -1,9 +1,9 @@
 <div align="center">
   <h1>MSA 数据生成器</h1>
   <p>生成交叉量具 R&amp;R 模拟数据，复核统计指标，导出测量记录。</p>
-  <p><strong>Windows x64</strong> · v1.1.1 · <a href="LICENSE">MIT 许可证</a></p>
+  <p><strong>Windows x64</strong> · v1.1.2 · <a href="LICENSE">MIT 许可证</a></p>
   <p>
-    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.1/MSA_Data_Generator_v1.1.1_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
+    <a href="https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.2/MSA_Data_Generator_v1.1.2_Windows_x64.zip"><strong>下载 Windows x64</strong></a>
     · <a href="#快速开始">快速开始</a>
     · <a href="docs/README.md">文档中心</a>
   </p>
@@ -35,67 +35,11 @@
 | 研究与生成 | 2～3 名操作员、2～3 次重复测量、5～10 个部件，共 24 种平衡交叉设计。提供十种部件取样方案，可在上下规格限之间随机取样，也可选择分层随机、正态分位或双批取样等方案。可按需设置最低跨度和近似正态筛选。[取样设置](docs/使用说明.md#部件取样与跨度) |
 | 统计复核 | 支持 **Xbar-R（均值极差法）** 与 **ANOVA（方差分析法）**。可设置 EV/TV、AV/TV、GRR/TV、P/T、ndc 的目标值、区间或上下限。 |
 | 分析选项 | 支持研究变异倍数、独立分析容差和历史过程参数。ANOVA 另支持交互项设置、误分类概率和方差分量置信限。 |
-| 图表 | 提供七类 MSA 图表，支持操作员分面、控制限、坐标与外观编辑，可导出 PNG、JPEG、PDF 或矢量 SVG。 |
+| 图表 | 提供七类 MSA 图表，可在默认和 Origin 两种风格下编辑坐标、图例和数据点，支持操作员分面、控制限与单图或组合图导出。可选格式为 PNG、JPEG、PDF 和矢量 SVG。 |
+| 方法对比报告 | 将同一组测量记录的 Xbar-R 和 ANOVA 指标、均值图和极差图导出为 PDF 或 HTML。[报告说明](docs/结果可视化.md#双方法对比报告) |
 | 数据文件 | 可导入和导出 CSV 或 Excel 工作簿（XLSX）。提供默认宽表及 Minitab、SPSS、JMP、Origin、MATLAB 五种长表预设。可设置运行顺序、独立排序种子、`StdOrder` 和文件名模板。 |
 
 数据生成、统计分析、图表绘制和文件导出均在本机完成。桌面程序和 CLI 共用统计内核与配置规则。统计口径及外部软件的参数差异见 [Minitab 导入与对标](docs/Minitab导入与对标.md)和 [ANOVA 对标记录](docs/ANOVA设计与五软件对标.md)。
-
-## v1.1.1 更新
-
-连续切换页签、分段选项或开关时，指示器跟随最后一次选择。数据页的结果表格切换后立即显示，搜索预算可以在展开途中平滑收起。运行中关闭 Windows 动画效果，控件会直接到位，重新开启后从下一次操作恢复过渡。[界面操作说明](docs/使用说明.md#界面操作)
-
-## v1.1.0 更新
-
-界面框架已升级至 EUI‑NEO v0.6.4。图表预览沿用原有线宽和抗锯齿，只绘制每段线实际覆盖的区域。150% 缩放实测中，滚动均值控制图的第 95 百分位帧提交间隔由 36.29 ms 降至 17.29 ms，接近测试显示器 59 Hz 的刷新周期。帮助和日志也减少了重复布局，底栏的成功提示到期时才请求刷新。[滚动性能对照与测试条件](docs/验证报告.md#图表滚动性能)
-
-## v1.0.9 更新
-
-多表 XLSX 的工作表选择和六行无姓名数据的研究设计选择，都在图表页的同一位置完成。选表后点击「继续」。仅当数据行需要分组时，才显示两张研究设计卡片，列出 A、B、C 对应的行号。可点「上一步」改选工作表，或取消并保留当前数据和图表编辑。[查看两个面板及分组示例](docs/结果可视化.md#入口与数据来源)
-
-## v1.0.8 更新
-
-- 打开「选项 → 图表」，可以选择默认风格或 Origin 风格。默认风格沿用程序的蓝色主色，Origin 风格保留 v1.0.7 的图表配色。两套风格都能编辑，切换后再切回，可以接着使用各自的修改。
-- 图表导出设置集中在同一标签，支持选择格式、单图宽度、单图或组合、排列列数和图表清单。设置后回到图表页，点击底栏的「导出图表」。[图表操作说明](docs/结果可视化.md)
-
-## v1.0.7 更新
-
-- 图表页参照同一份研究在 OriginPro 中生成的图形，重新设置了坐标轴、刻度、系列点形和直方柱。交互图用颜色和形状同时区分操作员。[查看同数据对照图](docs/图表专项验证.md#originpro-2026b-实测)
-- 打开「编辑图表」可实时预览草稿，调整纵轴刻度、数据点形状、图例位置或直方图分箱，确认后应用。单图和组合图均可导出保留文字与图元的 SVG。[图表编辑与导出](docs/结果可视化.md)
-- 下载同一份测量数据、可编辑的 Origin 工程以及两套程序的配套图，复核交互均值和方差分析。[Origin 对标样例](https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.0.7/MSA_Origin_Reference_v1.0.7.zip)
-
-## v1.0.6 更新
-
-- 导入没有操作员名称的六行纯数值宽表时，程序会询问本次研究是「2 人各测 3 次」还是「3 人各测 2 次」。取消后保留当前数据和图表。再次导入时可以重新选择。
-- 命令行导入这类 CSV 或 XLSX 时，使用 `--replicates 3` 或 `--replicates 2` 指定本次设计。省略参数会显示用法提示，已保存的默认设置继续用于生成数据。[导入说明](docs/结果可视化.md#入口与数据来源)
-
-## v1.0.5 更新
-
-- 在「图表 → 导入数据」直接打开 CSV 或 XLSX。程序从文件或所选工作表识别操作员姓名、人数、部件数和重复次数，图表、重新分析及方法对比报告沿用这份研究的人员信息。
-- 「选项 → 研究」里的默认操作员继续用于生成新数据。命令行使用 `--input` 即可分析文件，标准输出和 JSON 报告都会给出识别到的研究设计。[数据导入说明](docs/结果可视化.md#入口与数据来源)
-
-## v1.0.4 更新
-
-- 在「选项 → 研究 → 研究设计」底部可填写三位操作员的默认名称。每个位置可单独留空，依次使用 A、B、C。选择两人时第三个输入框变暗，切回三人即可继续使用原先填写的名称。
-- 数据预览、CSV/XLSX、图表和方法对比报告均使用本次研究的操作员名称。命令行也可通过 `--operator-a`、`--operator-b`、`--operator-c` 指定名称。
-
-## v1.0.3 更新
-
-- 新增随机取样、正态分位、低值加密、高值加密和双批取样。随机取样按部件独立抽取规格区间内的基础尺寸，同一部件的重复测量共用该尺寸。
-- 部件取样下拉框、帮助和命令行按相同顺序列出十种方案。旧配置按方案标识恢复，原有五种方案保持既有的固定种子结果。
-- 生成后可在分析详情查看本次方案与实际部件均值跨度。设置双侧规格时，同时显示跨度占规格宽度的百分比。
-
-## v1.0.2 更新
-
-- **数据导入与导出** · 支持 CSV 和 XLSX。桌面程序会直接导入单工作表，有多张数据工作表时可选择其中一张。命令行可用 `--sheet` 指定表名。
-- **文件设置** · 数据导入、数据导出、图表导出和报告导出可分别设置目录和名称，默认目录为当前用户的系统桌面。四项名称均支持变量。数据默认导出 CSV，报告默认导出 PDF，三类导出各有独立的静默开关，默认均关闭。[名称变量](docs/使用说明.md#名称变量)
-- **方法对比** · 图表页可按当前设置重新分析导入数据，并将同一组测量值的 Xbar-R 和 ANOVA 指标及控制图导出为 PDF 或 HTML。[图表与对比报告](docs/结果可视化.md)
-- **模拟与复现** · ANOVA 可生成子组间重复测量幅度不同的教学数据。CLI 可用生成时保存的 JSON 报告还原 CSV 或 XLSX，并核对文件的 SHA-256。[命令示例](docs/使用说明.md#比较研究与还原导出)
-
-## v1.0.1 更新
-
-- **生成设置** · 新增部件取样、最低部件跨度和近似正态筛选。沿用默认取样并关闭新增筛选时，原有固定种子可继续复现同一组测量值。
-- **选项与反馈** · 补充规格、指标与分析选项的联动检查，修复随机化模式切换后运行顺序种子提示不刷新的问题。
-- **帮助与对标** · 重整内置帮助，并补充 Minitab 22 单侧规格 P/T 的计算口径和复现步骤。
 
 ## 命令行
 
@@ -114,7 +58,7 @@
 | 场景 | 文档 |
 | --- | --- |
 | 操作与配置 | [使用说明](docs/使用说明.md) · [配置参考](docs/配置参考.md) · [示例配置](examples/README.md) |
-| 图表与导出 | [结果可视化](docs/结果可视化.md) · [Minitab 导入与对标](docs/Minitab导入与对标.md) |
+| 图表与导出 | [结果可视化](docs/结果可视化.md) · [Minitab 导入与对标](docs/Minitab导入与对标.md) · [Origin 图表对照及样例](docs/图表专项验证.md#originpro-2026b-实测) |
 | 统计与验证 | [ANOVA 设计与五软件对标](docs/ANOVA设计与五软件对标.md) · [GUI 参数对标](docs/GUI参数兼容与对标.md) · [验证说明](docs/验证报告.md) |
 | 开发与发布 | [界面设计规范](docs/界面设计规范.md) · [界面验收](docs/界面验收.md) · [源码打包规则](docs/源码打包规则.md) |
 
@@ -138,6 +82,6 @@ ctest --test-dir build -C Release --output-on-failure
 
 欢迎提交可复现的问题。反馈时可附上软件版本、研究设置、操作步骤和预期结果。[GitHub Issues](https://github.com/print-yuhuan/Msa-Data-Generator/issues)
 
-[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.1.1
-[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.1/MSA_Data_Generator_v1.1.1_Windows_x64.zip
-[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.1/MSA_Data_Generator_v1.1.1_Windows_x64.zip.sha256
+[release]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/tag/v1.1.2
+[windows-zip]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.2/MSA_Data_Generator_v1.1.2_Windows_x64.zip
+[checksum]: https://github.com/print-yuhuan/Msa-Data-Generator/releases/download/v1.1.2/MSA_Data_Generator_v1.1.2_Windows_x64.zip.sha256

@@ -99,8 +99,10 @@ void visualError(const std::string &kind, const std::string &message, const std:
     visual.errorText = message;
     visual.recovery = recovery;
     visual.errorChart = chart;
-    state.feedback(kind == "report" ? "方法对比报告导出失败" : "图表操作未完成，请查看页面提示",
-                   message + "。" + recovery, kind == "report" ? Level::Error : Level::Warning);
+    if (kind == "report")
+        state.feedback("方法对比报告导出失败", message, Level::Error);
+    else
+        state.feedback("图表操作未完成，请查看页面提示", message + "。" + recovery, Level::Warning);
 }
 void protectExportSources(const std::filesystem::path &path) {
     if ((!visual.importedPath.empty() && msa::same_file_path(path, visual.importedPath)) ||
@@ -721,7 +723,8 @@ void pollVisuals() {
             }
         } catch (const std::exception &e) {
             visualError(visual.exportingReport ? "report" : "export", e.what(),
-                        "请检查保存位置或修改导出设置后重试。");
+                        visual.exportingReport ? "可使用当前数据点击「重新导出报告」。"
+                                               : "请检查保存位置或修改导出设置后重试。");
         }
 }
 void stopVisuals() {

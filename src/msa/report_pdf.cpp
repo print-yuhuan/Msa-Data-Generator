@@ -1,9 +1,13 @@
 #include "core.hpp"
 #include "report_pdf.hpp"
+#include <algorithm>
+#include <cstdio>
 #include <random>
+#include <string_view>
 #include <thread>
 #ifdef _WIN32
 #define NOMINMAX
+#include <share.h>
 #include <windows.h>
 #else
 #include <cerrno>
@@ -21,6 +25,7 @@ namespace {
 namespace fs = std::filesystem;
 constexpr auto print_timeout = std::chrono::seconds(60);
 constexpr auto browser_error = "导出 PDF 需要本机的 Microsoft Edge 或 Google Chrome。";
+constexpr auto incomplete_pdf = "浏览器未生成完整的 PDF 报告。";
 
 class PrintDirectory {
     fs::path parent_ = fs::absolute(fs::temp_directory_path()).lexically_normal();
@@ -87,7 +92,44 @@ std::string file_url(const fs::path &file) {
     return url;
 }
 
+std::vector<std::string> print_arguments(const fs::path &input, const fs::path &output) {
+    return {"--headless", "--disable-gpu", "--disable-extensions", "--no-first-run",
+            "--disable-background-networking", "--no-pdf-header-footer",
+            "--user-data-dir=" + (input.parent_path() / "profile").u8string(),
+            "--print-to-pdf=" + output.u8string(), file_url(input)};
+}
+
+bool ends_with_pdf_eof(std::string_view bytes) {
+    const auto last = bytes.find_last_not_of(" \t\r\n\f");
+    return last != bytes.npos && last >= 4 && bytes.substr(last - 4, 5) == "%%EOF";
+}
+
 #ifdef _WIN32
+// Open only when the writer has released the file. Check the tail before
+// allocating: a partially written report may be probed more than once.
+std::string completed_pdf(const fs::path &output) {
+    std::unique_ptr<FILE, decltype(&std::fclose)> file(_wfsopen(output.c_str(), L"rb", _SH_DENYWR),
+                                                       &std::fclose);
+    if (!file || std::fseek(file.get(), 0, SEEK_END) != 0)
+        return {};
+    const auto size = std::ftell(file.get());
+    if (size < 0 || size > 64 * 1024 * 1024)
+        throw std::runtime_error("PDF 报告超出读取限制。");
+    if (size < 10)
+        return {};
+    char tail[1024];
+    const auto count = static_cast<std::size_t>(std::min(size, static_cast<long>(sizeof(tail))));
+    if (std::fseek(file.get(), -static_cast<long>(count), SEEK_END) != 0 ||
+        std::fread(tail, 1, count, file.get()) != count || !ends_with_pdf_eof({tail, count}))
+        return {};
+    std::rewind(file.get());
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    if (std::fread(bytes.data(), 1, bytes.size(), file.get()) != bytes.size() ||
+        bytes.compare(0, 5, "%PDF-") != 0)
+        return {};
+    return bytes;
+}
+
 fs::path browser_path() {
     for (const auto *binary : {L"msedge.exe", L"chrome.exe"}) {
         const auto key =
@@ -135,12 +177,12 @@ void stop_job(HANDLE job) {
            info.ActiveProcesses)
         Sleep(10);
 }
-void print(const std::vector<std::string> &args) {
-    const auto browser = browser_path();
+std::string print(const fs::path &browser, const fs::path &input, const fs::path &output,
+                  std::chrono::steady_clock::time_point deadline) {
     std::wstring command = L"\"" + browser.wstring() + L"\"";
     // All arguments are generated here. Windows file names cannot contain a quote,
     // and every path argument ends with a fixed file or directory name.
-    for (const auto &arg : args)
+    for (const auto &arg : print_arguments(input, output))
         command += L" \"" + fs::u8path(arg).wstring() + L"\"";
     Handle job{CreateJobObjectW(nullptr, nullptr)};
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -163,18 +205,30 @@ void print(const std::vector<std::string> &args) {
         WaitForSingleObject(browser_process.value, 2000);
         throw std::runtime_error("无法启动隔离的 PDF 后台任务。");
     }
-    const auto wait = WaitForSingleObject(
-        browser_process.value,
-        static_cast<DWORD>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(print_timeout).count()));
-    DWORD code = 1;
-    const bool success =
-        wait == WAIT_OBJECT_0 && GetExitCodeProcess(browser_process.value, &code) && code == 0;
-    stop_job(job.value);
-    if (wait == WAIT_TIMEOUT)
-        throw std::runtime_error("PDF 导出超时，请重试。");
-    if (!success)
-        throw std::runtime_error("浏览器生成 PDF 失败，请检查本机浏览器是否可用。");
+    struct StopJobOnReturn {
+        HANDLE job;
+        ~StopJobOnReturn() { stop_job(job); }
+    } cleanup{job.value};
+    // On cold startup the launcher may exit before its printing child.
+    // Sample job activity first so a child's last write is visible on the final check.
+    for (;;) {
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
+        if (!QueryInformationJobObject(job.value, JobObjectBasicAccountingInformation, &info,
+                                       sizeof(info), nullptr))
+            throw std::runtime_error("无法读取 PDF 后台任务状态。");
+        auto bytes = completed_pdf(output);
+        if (!bytes.empty())
+            return bytes;
+        if (!info.ActiveProcesses) {
+            DWORD code;
+            if (!GetExitCodeProcess(browser_process.value, &code) || code != 0)
+                throw std::runtime_error("浏览器生成 PDF 失败，请检查本机浏览器是否可用。");
+            return {};
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw std::runtime_error("PDF 导出超时，请重试。");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 }
 #else
 void print(const std::vector<std::string> &args) {
@@ -241,17 +295,37 @@ void print(const std::vector<std::string> &args) {
 #endif
 } // namespace
 
+#ifdef _WIN32
+std::string detail::print_report_pdf_with_browser(const std::string &html, const fs::path &browser) {
+    PrintDirectory temp;
+    const auto input = temp.path() / "study.html";
+    atomic_text(input, html, ExistingFile::Preserve);
+    const auto deadline = std::chrono::steady_clock::now() + print_timeout;
+    // Some first-run launchers initialize the isolated profile and then exit
+    // successfully without printing. Reuse that profile but never a partial file.
+    for (const auto *filename : {"study.pdf", "study-retry.pdf"}) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw std::runtime_error("PDF 导出超时，请重试。");
+        auto bytes = print(browser, input, temp.path() / filename, deadline);
+        if (!bytes.empty())
+            return bytes;
+    }
+    throw std::runtime_error(incomplete_pdf);
+}
+
+std::string print_report_pdf(const std::string &html) {
+    return detail::print_report_pdf_with_browser(html, browser_path());
+}
+#else
 std::string print_report_pdf(const std::string &html) {
     PrintDirectory temp;
     const auto input = temp.path() / "study.html", output = temp.path() / "study.pdf";
     atomic_text(input, html, ExistingFile::Preserve);
-    print({"--headless", "--disable-gpu", "--disable-extensions", "--no-first-run",
-           "--disable-background-networking", "--no-pdf-header-footer",
-           "--user-data-dir=" + (temp.path() / "profile").u8string(),
-           "--print-to-pdf=" + output.u8string(), file_url(input)});
+    print(print_arguments(input, output));
     auto bytes = read_text(output, 64 * 1024 * 1024);
-    if (bytes.compare(0, 5, "%PDF-") != 0 || bytes.rfind("%%EOF") == std::string::npos)
-        throw std::runtime_error("浏览器未生成完整的 PDF 报告。");
+    if (bytes.compare(0, 5, "%PDF-") != 0 || !ends_with_pdf_eof(bytes))
+        throw std::runtime_error(incomplete_pdf);
     return bytes;
 }
+#endif
 } // namespace msa

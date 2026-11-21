@@ -80,11 +80,16 @@ if ($browser) {
     $savedTemp, $savedTmp = $env:TEMP, $env:TMP
     try {
         $env:TEMP = $env:TMP = $tempDirectory.FullName
-        $null = Invoke-Study (@('--input',$csv,'--comparison-report',$pdf) + $parameters)
-        $contents = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pdf))
-        Check ($contents.StartsWith('%PDF-') -and $contents.TrimEnd().EndsWith('%%EOF')) '输出须为完整 PDF'
-        Check ([regex]::Matches($contents,'/Type\s*/Page\b').Count -eq 2) '示例 PDF 应包含统计与控制图共两页'
-        Check (@(Get-ChildItem -LiteralPath $tempDirectory.FullName -Filter 'msa-print-*' -Force).Count -eq 0) '打印结束后应清理研究和临时配置'
+        foreach ($study in @(
+            @{Source = @('--seed','123','--output',(Join-Path $run 'first-export.csv')); Path = $pdf}
+            @{Source = @('--input',$csv); Path = (Join-Path $run 'imported.pdf')}
+        )) {
+            $null = Invoke-Study ($study.Source + @('--comparison-report',$study.Path) + $parameters)
+            $contents = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($study.Path))
+            Check ($contents.StartsWith('%PDF-') -and $contents.TrimEnd().EndsWith('%%EOF')) '输出须为完整 PDF'
+            Check ([regex]::Matches($contents,'/Type\s*/Page\b').Count -eq 2) '示例 PDF 应包含统计与控制图共两页'
+            Check (@(Get-ChildItem -LiteralPath $tempDirectory.FullName -Filter 'msa-print-*' -Force).Count -eq 0) '打印结束后应清理研究和临时配置'
+        }
     } finally {
         $env:TEMP, $env:TMP = $savedTemp, $savedTmp
     }
